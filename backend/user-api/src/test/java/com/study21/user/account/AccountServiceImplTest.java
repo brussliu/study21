@@ -1,0 +1,134 @@
+package com.study21.user.account;
+
+import com.study21.common.security.exception.UnauthenticatedException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.security.crypto.password.PasswordEncoder;
+
+import java.sql.Date;
+import java.time.LocalDate;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+class AccountServiceImplTest {
+
+    private AccountMapper accountMapper;
+    private PasswordEncoder passwordEncoder;
+    private AccountServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        accountMapper = mock(AccountMapper.class);
+        passwordEncoder = mock(PasswordEncoder.class);
+        service = new AccountServiceImpl(accountMapper, passwordEncoder);
+    }
+
+    @Test
+    void studentCanLoginWithNormalizedEmail() {
+        AccountEntity account = activeAccount("student@example.com", "STUDENT");
+        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        LoginResponse response = service.login(loginRequest(" Student@Example.com ", "secret123"));
+
+        assertThat(response.getAccountId()).isEqualTo(10L);
+        assertThat(response.getLoginId()).isEqualTo("student@example.com");
+        assertThat(response.getDisplayName()).isEqualTo("山田 太郎");
+        assertThat(response.getAccountType()).isEqualTo(AccountType.STUDENT);
+        assertThat(response.getExpiryDate()).isEqualTo(LocalDate.now().plusDays(1));
+        verify(accountMapper).findByLoginId("student@example.com");
+    }
+
+    @Test
+    void guardianCanLogin() {
+        AccountEntity account = activeAccount("guardian@example.com", "GUARDIAN");
+        when(accountMapper.findByLoginId("guardian@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        LoginResponse response = service.login(loginRequest("guardian@example.com", "secret123"));
+
+        assertThat(response.getAccountType()).isEqualTo(AccountType.GUARDIAN);
+    }
+
+    @Test
+    void invalidPasswordDoesNotRevealWhetherAccountExists() {
+        AccountEntity account = activeAccount("student@example.com", "STUDENT");
+        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("wrong-password", "hash")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "wrong-password")))
+                .isInstanceOf(UnauthenticatedException.class)
+                .hasMessage("メールアドレスまたはパスワードが正しくありません。");
+    }
+
+    @Test
+    void inactiveAccountCannotLogin() {
+        AccountEntity account = activeAccount("student@example.com", "STUDENT");
+        account.setStatus("0");
+        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
+                .isInstanceOf(UnauthenticatedException.class)
+                .hasMessageContaining("利用停止中");
+    }
+
+    @Test
+    void expiredAccountCannotLogin() {
+        AccountEntity account = activeAccount("student@example.com", "STUDENT");
+        account.setExpiryDate(Date.valueOf(LocalDate.now().minusDays(1)));
+        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
+                .isInstanceOf(UnauthenticatedException.class)
+                .hasMessageContaining("利用期限が切れています");
+    }
+
+    @Test
+    void accountWithoutExpiryCannotBecomeUnlimitedUser() {
+        AccountEntity account = activeAccount("student@example.com", "STUDENT");
+        account.setExpiryDate(null);
+        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
+                .isInstanceOf(UnauthenticatedException.class)
+                .hasMessageContaining("利用できません");
+    }
+
+    @Test
+    void unsupportedAccountTypeIsNotTreatedAsStudent() {
+        AccountEntity account = activeAccount("admin@example.com", "ADMIN");
+        when(accountMapper.findByLoginId("admin@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(loginRequest("admin@example.com", "secret123")))
+                .isInstanceOf(UnauthenticatedException.class)
+                .hasMessage("メールアドレスまたはパスワードが正しくありません。");
+    }
+
+    private AccountEntity activeAccount(String loginId, String type) {
+        AccountEntity account = new AccountEntity();
+        account.setAccountId(10L);
+        account.setLoginId(loginId);
+        account.setPasswordHash("hash");
+        account.setAccountType(type);
+        account.setStatus("1");
+        account.setSei("山田");
+        account.setMei("太郎");
+        account.setExpiryDate(Date.valueOf(LocalDate.now().plusDays(1)));
+        return account;
+    }
+
+    private LoginRequest loginRequest(String loginId, String password) {
+        LoginRequest request = new LoginRequest();
+        request.setLoginId(loginId);
+        request.setPassword(password);
+        return request;
+    }
+}

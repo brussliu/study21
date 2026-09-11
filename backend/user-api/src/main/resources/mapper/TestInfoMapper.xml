@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.testinfo.TestInfoMapper">
+    <resultMap id="TestInfoMap" type="com.study21.user.testinfo.TestInfoEntity">
+        <id property="testId" column="テストID"/>
+        <result property="familyStudentId" column="家族学生ID"/>
+        <result property="testNo" column="テスト番号"/>
+        <result property="testName" column="テスト名称"/>
+        <result property="subject" column="教科"/>
+        <result property="kind" column="区分"/>
+        <result property="examDate" column="試験日"/>
+        <result property="score" column="得点数"/>
+        <result property="fullScore" column="満点数"/>
+        <result property="memo" column="詳細メモ"/>
+        <result property="version" column="バージョン"/>
+        <result property="createdAt" column="登録日時"/>
+        <result property="updatedAt" column="更新日時"/>
+    </resultMap>
+    <resultMap id="TestFileMap" type="com.study21.user.testinfo.TestFileEntity">
+        <id property="fileId" column="テストファイルID"/>
+        <result property="testId" column="テストID"/>
+        <result property="displayOrder" column="表示順"/>
+        <result property="originalFileName" column="元ファイル名称"/>
+        <result property="storedFileName" column="ファイル名称"/>
+        <result property="extension" column="拡張子"/>
+        <result property="mimeType" column="MIME_TYPE"/>
+        <result property="fileSize" column="ファイルサイズ"/>
+        <result property="sha256" column="SHA256"/>
+        <result property="path" column="パス"/>
+        <result property="thumbnail500" column="縮略ファイル500"/>
+        <result property="thumbnail200" column="縮略ファイル200"/>
+        <result property="thumbnail50" column="縮略ファイル50"/>
+        <result property="comment" column="コメント"/>
+        <result property="createdAt" column="登録日時"/>
+        <result property="updatedAt" column="更新日時"/>
+    </resultMap>
+
+    <select id="findFamilyStudentIds" resultType="long">
+        SELECT CASE WHEN A."アカウント種別" = 'STUDENT' THEN A."アカウントID" ELSE S."アカウントID" END
+          FROM public."ACC_アカウント" A
+          LEFT JOIN public."ACC_アカウント" S
+            ON A."アカウント種別" = 'GUARDIAN' AND S."保護者ID" = A."アカウントID"
+           AND S."アカウント種別" = 'STUDENT' AND S."状態" = '1'
+         WHERE A."アカウントID" = #{accountId} AND A."アカウント種別" = #{accountType}
+           AND A."状態" = '1'
+           AND (A."アカウント種別" = 'STUDENT' OR S."アカウントID" IS NOT NULL)
+    </select>
+
+    <!-- 一覧・検索。並びは 2.0 と同じ「試験日の新しい順 → テスト番号の降順」。 -->
+    <select id="searchTestInfos" resultMap="TestInfoMap">
+        SELECT * FROM public."TST_テスト情報" WHERE "家族学生ID" = #{familyStudentId}
+        <if test="subject != null and subject != ''">AND "教科" = #{subject}</if>
+        <if test="kind != null and kind != ''">AND "区分" = #{kind}</if>
+        <if test="keyword != null and keyword != ''">
+            AND ("テスト番号" ILIKE CONCAT('%',#{keyword},'%')
+                 OR "テスト名称" ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE("詳細メモ",'') ILIKE CONCAT('%',#{keyword},'%'))
+        </if>
+        ORDER BY "試験日" DESC NULLS LAST, "テスト番号" DESC
+    </select>
+
+    <select id="findTestInfo" resultMap="TestInfoMap">
+        SELECT * FROM public."TST_テスト情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "テスト番号" = #{testNo}
+    </select>
+
+    <select id="lockTestInfo" resultType="int">
+        SELECT 1 FROM public."TST_テスト情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "テスト番号" = #{testNo} FOR UPDATE
+    </select>
+
+    <select id="countTestNo" resultType="int">
+        SELECT COUNT(*) FROM public."TST_テスト情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "テスト番号" = #{testNo}
+    </select>
+
+    <insert id="insertTestInfo" useGeneratedKeys="true" keyProperty="testId" keyColumn="テストID">
+        INSERT INTO public."TST_テスト情報"
+          ("家族学生ID","テスト番号","テスト名称","教科","区分","試験日","得点数","満点数","詳細メモ",
+           "バージョン","登録ID","更新ID","登録日時","更新日時")
+        VALUES (#{familyStudentId},#{testNo},#{testName},#{subject},#{kind},#{examDate},#{score},#{fullScore},
+                #{memo},1,CAST(#{familyStudentId} AS VARCHAR),CAST(#{familyStudentId} AS VARCHAR),
+                CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+
+    <!-- 楽観的ロック: バージョンが一致した時だけ更新し、成功時に 1 加算する。 -->
+    <update id="updateTestInfo">
+        UPDATE public."TST_テスト情報"
+           SET "テスト名称" = #{testName}, "教科" = #{subject}, "区分" = #{kind}, "試験日" = #{examDate},
+               "得点数" = #{score}, "満点数" = #{fullScore}, "詳細メモ" = #{memo},
+               "バージョン" = "バージョン" + 1, "更新ID" = #{operator}, "更新日時" = CURRENT_TIMESTAMP
+         WHERE "家族学生ID" = #{familyStudentId} AND "テスト番号" = #{testNo}
+           AND "バージョン" = #{beforeVersion}
+    </update>
+
+    <delete id="deleteTestInfo">
+        DELETE FROM public."TST_テスト情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "テスト番号" = #{testNo}
+    </delete>
+
+    <!-- ファイルは親テストの所有キーで絞り込む（テストファイル情報側に家族学生IDは無い）。 -->
+    <select id="findTestFilesByTestIds" resultMap="TestFileMap">
+        SELECT F.* FROM public."TST_テストファイル情報" F
+          JOIN public."TST_テスト情報" M ON M."テストID" = F."テストID"
+         WHERE M."家族学生ID" = #{familyStudentId} AND F."テストID" IN
+        <foreach collection="testIds" item="testId" open="(" separator="," close=")">#{testId}</foreach>
+         ORDER BY F."テストID", F."表示順", F."テストファイルID"
+    </select>
+
+    <select id="findTestFiles" resultMap="TestFileMap">
+        SELECT F.* FROM public."TST_テストファイル情報" F
+          JOIN public."TST_テスト情報" M ON M."テストID" = F."テストID"
+         WHERE M."家族学生ID" = #{familyStudentId} AND M."テスト番号" = #{testNo}
+         ORDER BY F."表示順", F."テストファイルID"
+    </select>
+
+    <select id="findTestFile" resultMap="TestFileMap">
+        SELECT F.* FROM public."TST_テストファイル情報" F
+          JOIN public."TST_テスト情報" M ON M."テストID" = F."テストID"
+         WHERE M."家族学生ID" = #{familyStudentId} AND M."テスト番号" = #{testNo}
+           AND F."テストファイルID" = #{fileId}
+    </select>
+
+    <select id="countTestFiles" resultType="int">
+        SELECT COUNT(*) FROM public."TST_テストファイル情報" F
+          JOIN public."TST_テスト情報" M ON M."テストID" = F."テストID"
+         WHERE M."家族学生ID" = #{familyStudentId} AND M."テスト番号" = #{testNo}
+    </select>
+
+    <select id="findMaxDisplayOrder" resultType="int">
+        SELECT COALESCE(MAX(F."表示順"), -1) FROM public."TST_テストファイル情報" F
+          JOIN public."TST_テスト情報" M ON M."テストID" = F."テストID"
+         WHERE M."家族学生ID" = #{familyStudentId} AND M."テスト番号" = #{testNo}
+    </select>
+
+    <insert id="insertTestFile" useGeneratedKeys="true" keyProperty="file.fileId" keyColumn="テストファイルID">
+        INSERT INTO public."TST_テストファイル情報"
+          ("テストID","表示順","元ファイル名称","ファイル名称","拡張子","MIME_TYPE","ファイルサイズ","SHA256",
+           "パス","縮略ファイル500","縮略ファイル200","縮略ファイル50","コメント",
+           "登録ID","更新ID","登録日時","更新日時")
+        VALUES (#{file.testId},#{file.displayOrder},#{file.originalFileName},#{file.storedFileName},
+                #{file.extension},#{file.mimeType},#{file.fileSize},#{file.sha256},#{file.path},
+                #{file.thumbnail500},#{file.thumbnail200},#{file.thumbnail50},#{file.comment},
+                #{operator},#{operator},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+
+    <update id="updateTestFileMeta">
+        UPDATE public."TST_テストファイル情報" F
+           SET "表示順" = #{displayOrder}, "コメント" = #{comment},
+               "更新ID" = #{operator}, "更新日時" = CURRENT_TIMESTAMP
+          FROM public."TST_テスト情報" M
+         WHERE M."テストID" = F."テストID" AND M."家族学生ID" = #{familyStudentId}
+           AND M."テスト番号" = #{testNo} AND F."テストファイルID" = #{fileId}
+    </update>
+
+    <update id="updateTestFileImage">
+        UPDATE public."TST_テストファイル情報" F
+           SET "ファイル名称" = #{storedFileName}, "拡張子" = #{extension}, "MIME_TYPE" = #{mimeType},
+               "ファイルサイズ" = #{fileSize}, "SHA256" = #{sha256}, "パス" = #{path},
+               "縮略ファイル500" = #{thumbnail500}, "縮略ファイル200" = #{thumbnail200},
+               "縮略ファイル50" = #{thumbnail50},
+               "更新ID" = #{operator}, "更新日時" = CURRENT_TIMESTAMP
+          FROM public."TST_テスト情報" M
+         WHERE M."テストID" = F."テストID" AND M."家族学生ID" = #{familyStudentId}
+           AND M."テスト番号" = #{testNo} AND F."テストファイルID" = #{fileId}
+    </update>
+
+    <delete id="deleteTestFile">
+        DELETE FROM public."TST_テストファイル情報" F
+         USING public."TST_テスト情報" M
+         WHERE M."テストID" = F."テストID" AND M."家族学生ID" = #{familyStudentId}
+           AND M."テスト番号" = #{testNo} AND F."テストファイルID" = #{fileId}
+    </delete>
+
+    <delete id="deleteTestFilesByTestId">
+        DELETE FROM public."TST_テストファイル情報" WHERE "テストID" = #{testId}
+    </delete>
+</mapper>

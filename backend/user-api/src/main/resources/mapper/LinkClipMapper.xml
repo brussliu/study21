@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.linkclip.LinkClipMapper">
+    <resultMap id="ClipMap" type="com.study21.user.linkclip.LinkClipEntity">
+        <id property="linkClipId" column="リンククリップID"/>
+        <result property="ownerAccountId" column="所有者アカウントID"/>
+        <result property="folderCode" column="保存先コード"/>
+        <result property="sourceCode" column="ソースコード"/>
+        <result property="clipType" column="クリップ種別"/>
+        <result property="siteName" column="サイト名称"/>
+        <result property="pageTitle" column="ページタイトル"/>
+        <result property="url" column="URL"/>
+        <result property="normalizedUrl" column="URL正規化"/>
+        <result property="summary" column="概要"/>
+        <result property="aiSummary" column="AI概要"/>
+        <result property="memo" column="メモ"/>
+        <result property="publisherName" column="公開者名称"/>
+        <result property="publishedAt" column="公開日時"/>
+        <result property="videoSeconds" column="動画時間秒"/>
+        <result property="thumbnailUrl" column="縮略画像URL"/>
+        <result property="favorite" column="お気に入り"/>
+        <result property="read" column="既読"/>
+        <result property="archived" column="アーカイブ"/>
+        <result property="viewCount" column="閲覧回数"/>
+        <result property="lastViewedAt" column="最終閲覧日時"/>
+        <result property="metaFetchedAt" column="メタ情報取得日時"/>
+        <result property="aiSummarizedAt" column="AI要約生成日時"/>
+        <result property="version" column="バージョン"/>
+        <result property="createdAt" column="登録日時"/>
+        <result property="updatedAt" column="更新日時"/>
+    </resultMap>
+
+    <!-- 個人所有のため、必ず所有者アカウントIDで絞る。 -->
+    <sql id="ownerFilter">
+        C."所有者アカウントID" = #{ownerAccountId}
+    </sql>
+
+    <select id="search" resultMap="ClipMap">
+        SELECT C.* FROM public."LNK_リンククリップ情報" C
+        WHERE <include refid="ownerFilter"/>
+        <if test="folderCode != null and folderCode != ''">AND C."保存先コード" = #{folderCode}</if>
+        <if test="sourceCode != null and sourceCode != ''">AND C."ソースコード" = #{sourceCode}</if>
+        <if test="clipType != null and clipType != ''">AND C."クリップ種別" = #{clipType}</if>
+        <if test="favoriteOnly">AND C."お気に入り" = TRUE</if>
+        <if test="archiveState == 'active'">AND C."アーカイブ" = FALSE</if>
+        <if test="archiveState == 'archived'">AND C."アーカイブ" = TRUE</if>
+        <if test="tag != null and tag != ''">
+            AND EXISTS (SELECT 1 FROM public."LNK_リンククリップタグ情報" T
+                         WHERE T."リンククリップID" = C."リンククリップID"
+                           AND LOWER(T."タグ名称") = LOWER(#{tag}))
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (C."ページタイトル" ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."サイト名称",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."概要",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."AI概要",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."メモ",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR C."URL" ILIKE CONCAT('%',#{keyword},'%')
+                 OR EXISTS (SELECT 1 FROM public."LNK_リンククリップタグ情報" T2
+                             WHERE T2."リンククリップID" = C."リンククリップID"
+                               AND T2."タグ名称" ILIKE CONCAT('%',#{keyword},'%')))
+        </if>
+        ORDER BY C."更新日時" DESC, C."リンククリップID" DESC
+    </select>
+
+    <select id="findById" resultMap="ClipMap">
+        SELECT C.* FROM public."LNK_リンククリップ情報" C
+        WHERE <include refid="ownerFilter"/> AND C."リンククリップID" = #{linkClipId}
+    </select>
+
+    <!-- 2.0 と同じく重複は許容し、候補の提示だけに使う。 -->
+    <select id="findByNormalizedUrl" resultMap="ClipMap">
+        SELECT C.* FROM public."LNK_リンククリップ情報" C
+        WHERE <include refid="ownerFilter"/> AND C."URL正規化" = #{normalizedUrl}
+        ORDER BY C."リンククリップID" DESC
+    </select>
+
+    <select id="findByIds" resultMap="ClipMap">
+        SELECT C.* FROM public."LNK_リンククリップ情報" C
+        WHERE <include refid="ownerFilter"/> AND C."リンククリップID" IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+        ORDER BY C."更新日時" DESC, C."リンククリップID" DESC
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="linkClipId" keyColumn="リンククリップID">
+        INSERT INTO public."LNK_リンククリップ情報"
+          ("所有者アカウントID","保存先コード","ソースコード","クリップ種別","サイト名称","ページタイトル",
+           "URL","URL正規化","概要","AI概要","メモ","公開者名称","公開日時","動画時間秒","縮略画像URL",
+           "お気に入り","既読","アーカイブ","閲覧回数","最終閲覧日時","メタ情報取得日時","AI要約生成日時",
+           "バージョン","登録者アカウントID","更新者アカウントID","登録日時","更新日時")
+        VALUES (#{ownerAccountId},#{folderCode},#{sourceCode},#{clipType},#{siteName},#{pageTitle},
+                #{url},#{normalizedUrl},#{summary},#{aiSummary},#{memo},#{publisherName},#{publishedAt},
+                #{videoSeconds},#{thumbnailUrl},#{favorite},#{read},#{archived},
+                COALESCE(#{viewCount}, 0),#{lastViewedAt},#{metaFetchedAt},#{aiSummarizedAt},
+                1,#{ownerAccountId},#{ownerAccountId},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+
+    <!-- 楽観的ロック: 所有者と変更前バージョンを同時に照合し、成功時に 1 加算する。 -->
+    <update id="update">
+        UPDATE public."LNK_リンククリップ情報"
+           SET "保存先コード" = #{clip.folderCode}, "ソースコード" = #{clip.sourceCode},
+               "クリップ種別" = #{clip.clipType}, "サイト名称" = #{clip.siteName},
+               "ページタイトル" = #{clip.pageTitle}, "URL" = #{clip.url}, "URL正規化" = #{clip.normalizedUrl},
+               "概要" = #{clip.summary}, "AI概要" = #{clip.aiSummary}, "メモ" = #{clip.memo},
+               "公開者名称" = #{clip.publisherName}, "公開日時" = #{clip.publishedAt},
+               "動画時間秒" = #{clip.videoSeconds}, "縮略画像URL" = #{clip.thumbnailUrl},
+               "お気に入り" = #{clip.favorite}, "アーカイブ" = #{clip.archived},
+               "メタ情報取得日時" = #{clip.metaFetchedAt}, "AI要約生成日時" = #{clip.aiSummarizedAt},
+               "バージョン" = "バージョン" + 1, "更新者アカウントID" = #{ownerAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "所有者アカウントID" = #{ownerAccountId} AND "リンククリップID" = #{linkClipId}
+           AND "バージョン" = #{beforeVersion}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."LNK_リンククリップ情報"
+         WHERE "所有者アカウントID" = #{ownerAccountId} AND "リンククリップID" = #{linkClipId}
+    </delete>
+
+    <update id="updateFlags">
+        UPDATE public."LNK_リンククリップ情報"
+           SET "お気に入り" = COALESCE(#{favorite}, "お気に入り"),
+               "既読" = COALESCE(#{read}, "既読"),
+               "アーカイブ" = COALESCE(#{archived}, "アーカイブ"),
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{ownerAccountId}
+         WHERE "所有者アカウントID" = #{ownerAccountId} AND "リンククリップID" = #{linkClipId}
+    </update>
+
+    <!-- 閲覧回数・最終閲覧日時・既読を更新する（更新日時は動かさない＝一覧の並びを崩さない）。 -->
+    <update id="touchView">
+        UPDATE public."LNK_リンククリップ情報"
+           SET "閲覧回数" = "閲覧回数" + 1, "最終閲覧日時" = CURRENT_TIMESTAMP, "既読" = TRUE,
+               "更新者アカウントID" = #{ownerAccountId}
+         WHERE "所有者アカウントID" = #{ownerAccountId} AND "リンククリップID" = #{linkClipId}
+    </update>
+
+    <select id="findTagsByClipIds" resultType="com.study21.user.linkclip.LinkClipEntity$TagRow">
+        SELECT T."タグ名称" AS tagName, T."表示順" AS displayOrder, T."リンククリップID" AS linkClipId
+          FROM public."LNK_リンククリップタグ情報" T
+          JOIN public."LNK_リンククリップ情報" C ON C."リンククリップID" = T."リンククリップID"
+         WHERE C."所有者アカウントID" = #{ownerAccountId} AND T."リンククリップID" IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+         ORDER BY T."リンククリップID", T."表示順", T."タグ名称"
+    </select>
+
+    <!-- タグ候補: 大文字小文字を区別せずまとめ、代表表記と使用件数を返す。 -->
+    <select id="findTagOptions" resultType="com.study21.user.linkclip.LinkClipModels$TagOption">
+        SELECT MIN(T."タグ名称") AS name, COUNT(*)::int AS count
+          FROM public."LNK_リンククリップタグ情報" T
+          JOIN public."LNK_リンククリップ情報" C ON C."リンククリップID" = T."リンククリップID"
+         WHERE C."所有者アカウントID" = #{ownerAccountId}
+         GROUP BY LOWER(T."タグ名称")
+         ORDER BY COUNT(*) DESC, MIN(T."タグ名称")
+    </select>
+
+    <!-- 保存先ごとの件数（フォルダ以外の絞り込みを反映。アーカイブは状態に従う）。 -->
+    <select id="countByFolder" resultType="com.study21.user.linkclip.LinkClipModels$LaneCount">
+        SELECT C."保存先コード" AS folderCode, COUNT(*)::int AS count
+          FROM public."LNK_リンククリップ情報" C
+         WHERE <include refid="ownerFilter"/>
+        <if test="sourceCode != null and sourceCode != ''">AND C."ソースコード" = #{sourceCode}</if>
+        <if test="clipType != null and clipType != ''">AND C."クリップ種別" = #{clipType}</if>
+        <if test="favoriteOnly">AND C."お気に入り" = TRUE</if>
+        <if test="archiveState == 'active'">AND C."アーカイブ" = FALSE</if>
+        <if test="archiveState == 'archived'">AND C."アーカイブ" = TRUE</if>
+        <if test="tag != null and tag != ''">
+            AND EXISTS (SELECT 1 FROM public."LNK_リンククリップタグ情報" T
+                         WHERE T."リンククリップID" = C."リンククリップID"
+                           AND LOWER(T."タグ名称") = LOWER(#{tag}))
+        </if>
+        <if test="keyword != null and keyword != ''">
+            AND (C."ページタイトル" ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."サイト名称",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."概要",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."AI概要",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR COALESCE(C."メモ",'') ILIKE CONCAT('%',#{keyword},'%')
+                 OR C."URL" ILIKE CONCAT('%',#{keyword},'%')
+                 OR EXISTS (SELECT 1 FROM public."LNK_リンククリップタグ情報" T2
+                             WHERE T2."リンククリップID" = C."リンククリップID"
+                               AND T2."タグ名称" ILIKE CONCAT('%',#{keyword},'%')))
+        </if>
+         GROUP BY C."保存先コード"
+    </select>
+
+    <delete id="deleteTags">
+        DELETE FROM public."LNK_リンククリップタグ情報" WHERE "リンククリップID" = #{linkClipId}
+    </delete>
+
+    <insert id="insertTag">
+        INSERT INTO public."LNK_リンククリップタグ情報"
+          ("リンククリップID","タグ名称","表示順","登録者アカウントID","更新者アカウントID","登録日時","更新日時")
+        VALUES (#{linkClipId},#{tagName},#{displayOrder},#{ownerAccountId},#{ownerAccountId},
+                CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+</mapper>

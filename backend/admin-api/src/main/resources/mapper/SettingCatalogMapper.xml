@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.setting.SettingCatalogMapper">
+
+    <resultMap id="CatalogMap" type="com.study21.admin.setting.SettingCatalogEntity">
+        <id     property="pageCode"      column="ページ区分"/>
+        <id     property="settingKey"    column="設定キー"/>
+        <result property="valueType"     column="値タイプ"/>
+        <result property="requiredFlag"  column="必須フラグ"/>
+        <result property="allowedValues" column="有効値"/>
+        <result property="description"   column="説明"/>
+        <result property="createdBy"     column="登録ID"/>
+        <result property="updatedBy"     column="更新ID"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+    </resultMap>
+
+    <select id="findByPage" resultMap="CatalogMap">
+        SELECT "ページ区分", "設定キー", "値タイプ", "必須フラグ",
+               "有効値", "説明", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定項目"
+         WHERE "ページ区分" = #{pageCode}
+         ORDER BY "設定キー"
+    </select>
+
+    <select id="findByPageAndKeys" resultMap="CatalogMap">
+        SELECT "ページ区分", "設定キー", "値タイプ", "必須フラグ",
+               "有効値", "説明", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定項目"
+         WHERE "ページ区分" = #{pageCode}
+           AND "設定キー" IN
+        <foreach collection="keys" item="k" open="(" separator="," close=")">
+            #{k}
+        </foreach>
+         ORDER BY "設定キー"
+    </select>
+</mapper>

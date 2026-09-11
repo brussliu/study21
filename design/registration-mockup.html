@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>新規登録フロー デザインモックアップ — STUDY 2.1</title>
+<style>
+/* =============================================================
+   STUDY 2.1 UI — Design Tokens（tokens.css より転記、検証用）
+   ============================================================= */
+:root {
+  --accent-900:#0e1c2c; --accent-800:#15263c; --accent-700:#1d3452;
+  --accent-600:#28466d; --accent-500:#355c8c; --accent-100:#d9e5f3; --accent-50:#ecf2fa;
+  --primary-700:#1c6c58; --primary-600:#25876f; --primary-500:#35a084;
+  --primary-400:#55b89f; --primary-100:#d5efe7; --primary-50:#eef7f3;
+  --neutral-0:#ffffff; --neutral-50:#f5f7fa; --neutral-100:#edeff3; --neutral-200:#dde2e9;
+  --neutral-300:#c7cfd9; --neutral-400:#98a5b3; --neutral-500:#6d7c8c; --neutral-600:#4b5968;
+  --neutral-700:#33414f; --neutral-800:#1f2a35; --neutral-900:#131a22;
+  --success-600:#1f8a4c; --success-100:#dcf2e3; --success-50:#edf8f1;
+  --warning-600:#a86900; --warning-100:#fbeecb; --warning-50:#fdf6e3;
+  --danger-600:#c13a2e; --danger-100:#f9deda; --danger-50:#fdefec;
+  --info-600:#2c6fb8; --info-100:#dfeafa; --info-50:#eff6fc;
+  --color-bg:var(--neutral-50); --color-surface:var(--neutral-0);
+  --color-surface-alt:var(--neutral-50); --color-surface-hover:var(--neutral-100);
+  --color-border:var(--neutral-200); --color-border-strong:var(--neutral-300);
+  --color-text:var(--neutral-800); --color-text-strong:var(--neutral-900);
+  --color-text-muted:var(--neutral-600); --color-text-subtle:var(--neutral-500);
+  --color-primary:var(--primary-600); --color-primary-hover:var(--primary-700);
+  --color-primary-soft:var(--primary-50); --color-primary-strong:var(--primary-500);
+  --color-on-primary:#ffffff; --color-link:var(--accent-600); --color-link-hover:var(--primary-600);
+  --color-danger:var(--danger-600); --color-danger-soft:var(--danger-50);
+  --color-success:var(--success-600); --color-success-soft:var(--success-50);
+  --color-warning:var(--warning-600); --color-warning-soft:var(--warning-50);
+  --color-info:var(--info-600); --color-info-soft:var(--info-50);
+  --fs-2xs:11px; --fs-xs:12px; --fs-sm:13px; --fs-md:14px; --fs-lg:16px;
+  --fs-xl:18px; --fs-2xl:20px; --fs-3xl:24px;
+  --fw-regular:400; --fw-medium:500; --fw-semibold:600; --fw-bold:700;
+  --lh-tight:1.3; --lh-normal:1.5; --lh-relaxed:1.7;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px;
+  --sp-6:24px; --sp-7:32px; --sp-8:40px; --sp-9:48px;
+  --radius-sm:4px; --radius-md:6px; --radius-lg:10px; --radius-xl:14px; --radius-pill:999px;
+  --shadow-sm:0 1px 2px rgba(16,26,36,.06),0 1px 3px rgba(16,26,36,.06);
+  --shadow-md:0 2px 6px rgba(16,26,36,.08),0 6px 18px rgba(16,26,36,.07);
+  --shadow-lg:0 8px 24px rgba(16,26,36,.14),0 2px 8px rgba(16,26,36,.10);
+  --control-sm:30px; --control-md:36px; --control-lg:42px;
+  --duration-fast:120ms; --duration-base:200ms; --duration-slow:300ms;
+  --ease-standard:cubic-bezier(.2,0,0,1);
+}
+html[data-theme="dark"] {
+  --color-bg:#12161d; --color-surface:#1a2028; --color-surface-alt:#202732;
+  --color-surface-hover:#263039; --color-border:#2c3743; --color-border-strong:#3a4654;
+  --color-text:#d5dde6; --color-text-strong:#eef3f8; --color-text-muted:#9fb0c0;
+  --color-text-subtle:#74889a;
+  --color-primary:var(--primary-400); --color-primary-hover:var(--primary-500);
+  --color-primary-soft:#15332c; --color-primary-strong:var(--primary-400); --color-on-primary:#0e1d18;
+  --color-link:#7fb3e8; --color-link-hover:#a5ccf2;
+  --color-danger:#e57163; --color-danger-soft:#3a201e;
+  --color-success:#55c184; --color-success-soft:#163224;
+  --color-warning:#e3a63d; --color-warning-soft:#372a14;
+  --color-info:#6fa8e8; --color-info-soft:#18283a;
+  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+  --shadow-md:0 2px 8px rgba(0,0,0,.45),0 6px 20px rgba(0,0,0,.4);
+  --shadow-lg:0 8px 28px rgba(0,0,0,.5);
+}
+* { box-sizing: border-box; }
+html, body { margin:0; padding:0; }
+body {
+  font-family: "Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic","Meiryo",sans-serif;
+  font-size: var(--fs-md); line-height: var(--lh-normal);
+  color: var(--color-text); background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--color-link); text-decoration: none; }
+a:hover { color: var(--color-link-hover); text-decoration: underline; }
+
+/* =============================================================
+   モックアップ共通（ツールバー・画面切替）— デザインには含めない
+   ============================================================= */
+.mock-toolbar {
+  position: fixed; top:0; left:0; right:0; z-index: 900;
+  display:flex; align-items:center; gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-xs); color: var(--color-text-muted);
+  box-shadow: var(--shadow-sm);
+}
+.mock-toolbar__brand { font-weight: var(--fw-semibold); color: var(--color-text-strong); display:flex; align-items:center; gap: var(--sp-2); }
+.mock-toolbar__brand::before {
+  content:""; width:10px; height:10px; border-radius:3px; background: var(--color-primary);
+}
+.mock-toolbar__sep { width:1px; height:16px; background: var(--color-border); }
+.mock-nav { display:flex; gap:2px; flex-wrap:wrap; }
+.mock-nav button {
+  height:26px; padding:0 var(--sp-2); border:1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); font-size: var(--fs-xs);
+  cursor:pointer; font-family: inherit;
+}
+.mock-nav button:hover { background: var(--color-surface-hover); color: var(--color-text); }
+.mock-nav button.is-active { background: var(--color-primary-soft); color: var(--color-primary); font-weight: var(--fw-medium); }
+.mock-toolbar__spacer { flex:1; }
+.mock-theme-toggle {
+  height:26px; padding:0 var(--sp-3); border:1px solid var(--color-border-strong); border-radius: var(--radius-pill);
+  background: var(--color-surface); color: var(--color-text-muted); font-size: var(--fs-xs); cursor:pointer; font-family: inherit;
+}
+.mock-theme-toggle:hover { color: var(--color-text); border-color: var(--color-primary); }
+.mock-label {
+  height:26px; padding:0 var(--sp-2); border-radius: var(--radius-sm);
+  background: var(--color-info-soft); color: var(--color-info);
+  font-size: var(--fs-2xs); font-weight: var(--fw-semibold);
+  display:inline-flex; align-items:center; gap:5px;
+}
+.mock-label::before { content:""; width:6px; height:6px; border-radius:50%; background: currentColor; }
+
+/* 画面エリア */
+.screen { display:none; min-height:100vh; padding: 64px var(--sp-4) var(--sp-8); }
+.screen.is-active { display:flex; align-items:center; justify-content:center; animation: fade-in var(--duration-slow) var(--ease-standard); }
+@keyframes fade-in { from { opacity:0; transform: translateY(6px); } to { opacity:1; transform:none; } }
+
+/* プレビュー外枠（保護者ホーム等のページ全体プレビュー用） */
+.preview-page { width:100%; max-width: 960px; margin:0 auto; }
+
+/* =============================================================
+   コンポーネント（components.css / forms.css より）
+   ============================================================= */
+.btn {
+  display:inline-flex; align-items:center; justify-content:center; gap: var(--sp-2);
+  height: var(--control-md); padding: 0 var(--sp-4);
+  font-size: var(--fs-sm); font-weight: var(--fw-medium); line-height:1;
+  border:1px solid transparent; border-radius: var(--radius-md); white-space:nowrap;
+  cursor:pointer; font-family:inherit;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+.btn:disabled { opacity:.5; cursor:not-allowed; pointer-events:none; }
+.btn--primary { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); }
+.btn--primary:hover:not(:disabled) { background: var(--color-primary-hover); border-color: var(--color-primary-hover); }
+.btn--secondary { background: var(--color-surface); border-color: var(--color-border-strong); color: var(--color-text); }
+.btn--secondary:hover:not(:disabled) { background: var(--color-surface-hover); border-color: var(--color-primary); color: var(--color-primary); }
+.btn--ghost { background:transparent; border-color:transparent; color: var(--color-text-muted); }
+.btn--ghost:hover:not(:disabled) { background: var(--color-surface-hover); color: var(--color-text); }
+.btn--block { width:100%; }
+.btn--lg { height: var(--control-lg); font-size: var(--fs-md); }
+
+.field { display:flex; flex-direction:column; gap: var(--sp-1); min-width:0; }
+.field__label { font-size: var(--fs-sm); font-weight: var(--fw-semibold); color: var(--color-text); line-height: var(--lh-tight); }
+.field__label .req { color: var(--color-danger); margin-left: 4px; font-size: var(--fs-2xs); }
+.field__hint { font-size: var(--fs-xs); color: var(--color-text-subtle); }
+.field__error { font-size: var(--fs-xs); color: var(--color-danger); min-height: 0; }
+.input, .select {
+  width:100%; min-width:0; height: var(--control-md); padding: 0 var(--sp-3);
+  font-size: var(--fs-sm); color: var(--color-text); background: var(--color-surface);
+  border:1px solid var(--color-border-strong); border-radius: var(--radius-md); font-family:inherit;
+  transition: border-color var(--duration-fast) var(--ease-standard), box-shadow var(--duration-fast) var(--ease-standard);
+}
+.input::placeholder { color: var(--color-text-subtle); }
+.input:hover:not(:disabled), .select:hover:not(:disabled) { border-color: var(--neutral-400); }
+.input:focus, .select:focus { outline:none; border-color: var(--color-primary); box-shadow: 0 0 0 3px var(--color-primary-soft); }
+.input.is-invalid, .select.is-invalid { border-color: var(--color-danger); }
+.input.is-invalid:focus { box-shadow: 0 0 0 3px var(--color-danger-soft); }
+.select {
+  appearance:none; padding-right: var(--sp-7);
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%236d7c8c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat; background-position: right 10px center;
+}
+.check { display:inline-flex; align-items:center; gap: var(--sp-2); font-size: var(--fs-sm); color: var(--color-text); cursor:pointer; user-select:none; }
+.check input { width:16px; height:16px; margin:0; accent-color: var(--color-primary); cursor:pointer; flex:0 0 auto; }
+.check.is-invalid { color: var(--color-danger); }
+
+.form-grid { display:grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-4); }
+.form-actions { display:flex; justify-content:space-between; gap: var(--sp-2); padding-top: var(--sp-4); border-top:1px solid var(--color-border); margin-top: var(--sp-4); flex-wrap:wrap; }
+.form-actions--end { justify-content:flex-end; }
+
+/* アラート */
+.alert {
+  display:flex; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4);
+  border:1px solid transparent; border-radius: var(--radius-md);
+  font-size: var(--fs-sm); line-height: var(--lh-relaxed);
+}
+.alert--info { background: var(--color-info-soft); border-color: var(--color-info-100); color: var(--color-info); }
+.alert--warning { background: var(--color-warning-soft); border-color: var(--color-warning-100); color: var(--color-warning); }
+.alert--success { background: var(--color-success-soft); border-color: var(--color-success-100); color: var(--color-success); }
+.alert strong { font-weight: var(--fw-semibold); }
+.alert a { color: inherit; text-decoration: underline; }
+
+/* バッジ */
+.badge {
+  display:inline-flex; align-items:center; gap:5px; height:22px; padding: 0 var(--sp-2);
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height:1;
+  border-radius: var(--radius-pill); border:1px solid transparent; white-space:nowrap;
+}
+.badge::before { content:""; width:6px; height:6px; border-radius:50%; background: currentColor; flex:0 0 auto; }
+.badge--success { color: var(--success-600); background: var(--success-50); border-color: var(--success-100); }
+.badge--warning { color: var(--warning-600); background: var(--warning-50); border-color: var(--warning-100); }
+.badge--info    { color: var(--info-600);    background: var(--info-50);    border-color: var(--info-100); }
+.badge--neutral { color: var(--neutral-600); background: var(--neutral-100); border-color: var(--neutral-200); }
+
+/* セパレータ */
+.divider { display:flex; align-items:center; gap: var(--sp-3); color: var(--color-text-subtle); font-size: var(--fs-xs); margin: var(--sp-2) 0; }
+.divider::before, .divider::after { content:""; flex:1; height:1px; background: var(--color-border); }
+
+/* =============================================================
+   ログインカード（UserLoginView.vue と同一スタイル）
+   ============================================================= */
+.login { width:100%; display:flex; align-items:center; justify-content:center; }
+.login__card {
+  width:100%; max-width:400px; background: var(--color-surface);
+  border:1px solid var(--color-border); border-radius: var(--radius-lg);
+  padding: var(--sp-6); display:flex; flex-direction:column; gap: var(--sp-3);
+  box-shadow: var(--shadow-md);
+}
+.login__title { margin:0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+.login__hint { margin:0; color: var(--color-text-muted); font-size: var(--fs-sm); }
+.login__link { text-align:center; font-size: var(--fs-sm); }
+.login__notice { margin:0; text-align:center; color: var(--color-warning); font-size: var(--fs-sm); }
+
+/* =============================================================
+   ステッパー（新規登録ウィザード）
+   ============================================================= */
+.stepper { display:flex; align-items:flex-start; justify-content:center; gap: 0; margin-bottom: var(--sp-5); }
+.stepper__step { display:flex; align-items:center; gap: var(--sp-2); position:relative; }
+.stepper__dot {
+  width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center;
+  font-size: var(--fs-xs); font-weight: var(--fw-semibold);
+  background: var(--color-surface); border:1.5px solid var(--color-border-strong); color: var(--color-text-subtle);
+  flex:0 0 auto; transition: all var(--duration-base) var(--ease-standard);
+}
+.stepper__label { font-size: var(--fs-xs); color: var(--color-text-subtle); white-space:nowrap; }
+.stepper__step.is-active .stepper__dot { background: var(--color-primary); border-color: var(--color-primary); color: var(--color-on-primary); }
+.stepper__step.is-active .stepper__label { color: var(--color-text); font-weight: var(--fw-medium); }
+.stepper__step.is-done .stepper__dot { background: var(--color-success); border-color: var(--color-success); color:#fff; }
+.stepper__step.is-done .stepper__label { color: var(--color-text-muted); }
+.stepper__line { width:56px; height:1.5px; background: var(--color-border-strong); margin: 0 var(--sp-3); align-self:center; }
+.stepper__line.is-done { background: var(--color-success); }
+
+/* 登録フォームカード（通常のカードより少し広め） */
+.register-card {
+  width:100%; max-width:440px; background: var(--color-surface);
+  border:1px solid var(--color-border); border-radius: var(--radius-lg);
+  padding: var(--sp-6); display:flex; flex-direction:column; gap: var(--sp-4);
+  box-shadow: var(--shadow-md);
+}
+.register-card__title { margin:0; font-size: var(--fs-xl); font-weight: var(--fw-semibold); }
+.register-card__hint { margin:0; color: var(--color-text-muted); font-size: var(--fs-sm); line-height: var(--lh-relaxed); }
+
+/* =============================================================
+   登録完了
+   ============================================================= */
+.done-card {
+  width:100%; max-width:460px; background: var(--color-surface);
+  border:1px solid var(--color-border); border-radius: var(--radius-lg);
+  padding: var(--sp-7); display:flex; flex-direction:column; align-items:center; gap: var(--sp-4);
+  box-shadow: var(--shadow-md); text-align:center;
+}
+.done-icon {
+  width:56px; height:56px; border-radius:50%;
+  background: var(--color-success-soft); color: var(--color-success);
+  display:flex; align-items:center; justify-content:center;
+}
+.done-icon svg { width:28px; height:28px; }
+.done-card__title { margin:0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+.done-card__hint { margin:0; color: var(--color-text-muted); font-size: var(--fs-sm); }
+.summary { width:100%; border:1px solid var(--color-border); border-radius: var(--radius-md); overflow:hidden; }
+.summary__row { display:flex; align-items:center; justify-content:space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-sm); }
+.summary__row + .summary__row { border-top:1px solid var(--color-border); }
+.summary__label { color: var(--color-text-muted); }
+.summary__value { color: var(--color-text); font-weight: var(--fw-medium); text-align:right; display:flex; align-items:center; gap: var(--sp-2); flex-wrap:wrap; justify-content:flex-end; }
+.done-card .alert { text-align:left; }
+
+/* =============================================================
+   保護者ホーム（将来画面）プレビュー
+   ============================================================= */
+.page-head { display:flex; align-items:center; justify-content:space-between; gap: var(--sp-3); margin-bottom: var(--sp-4); flex-wrap:wrap; }
+.page-head__title { margin:0; font-size: var(--fs-2xl); font-weight: var(--fw-semibold); }
+.panel {
+  background: var(--color-surface); border:1px solid var(--color-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  padding: var(--sp-5); margin-bottom: var(--sp-4);
+}
+.panel__title { margin:0 0 var(--sp-3); font-size: var(--fs-lg); font-weight: var(--fw-semibold); display:flex; align-items:center; gap: var(--sp-2); }
+.def-list { display:flex; flex-direction:column; }
+.def-list__row { display:flex; align-items:center; justify-content:space-between; gap: var(--sp-3); padding: var(--sp-2) 0; font-size: var(--fs-sm); }
+.def-list__row + .def-list__row { border-top:1px dashed var(--color-border); }
+.def-list__label { color: var(--color-text-muted); }
+.def-list__value { color: var(--color-text); font-weight: var(--fw-medium); display:flex; align-items:center; gap: var(--sp-2); }
+.student-list { display:flex; flex-direction:column; gap: var(--sp-3); }
+.student-row {
+  display:flex; align-items:center; gap: var(--sp-3); padding: var(--sp-3);
+  border:1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-surface);
+}
+.student-avatar {
+  width:38px; height:38px; border-radius:50%; flex:0 0 auto;
+  background: var(--color-primary-soft); color: var(--color-primary);
+  display:flex; align-items:center; justify-content:center;
+  font-size: var(--fs-md); font-weight: var(--fw-semibold);
+}
+.student-info { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.student-info__name { font-size: var(--fs-md); font-weight: var(--fw-semibold); color: var(--color-text); display:flex; align-items:center; gap: var(--sp-2); }
+.student-info__meta { font-size: var(--fs-xs); color: var(--color-text-muted); }
+.student-actions { display:flex; gap: var(--sp-1); }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: var(--sp-6); left:50%; transform: translateX(-50%) translateY(20px);
+  background: var(--color-text-strong); color: var(--color-bg);
+  padding: var(--sp-2) var(--sp-4); border-radius: var(--radius-pill);
+  font-size: var(--fs-sm); box-shadow: var(--shadow-lg); opacity:0; pointer-events:none;
+  transition: opacity var(--duration-base) var(--ease-standard), transform var(--duration-base) var(--ease-standard);
+  z-index: 1000; white-space:nowrap;
+}
+.toast.is-show { opacity:1; transform: translateX(-50%) translateY(0); }
+
+/* レスポンシブ調整 */
+@media (max-width: 640px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .mock-nav { display:none; }
+  .stepper__line { width:32px; margin:0 var(--sp-2); }
+}
+</style>
+</head>
+<body>
+
+<!-- ================= モックアップツールバー（デザイン外） ================= -->
+<div class="mock-toolbar">
+  <span class="mock-toolbar__brand">新規登録フロー デザインモックアップ</span>
+  <span class="mock-label">デザイン検証用</span>
+  <span class="mock-toolbar__sep"></span>
+  <nav class="mock-nav">
+    <button data-nav="screen-login">1. ログイン</button>
+    <button data-nav="screen-step1">2. アカウント情報</button>
+    <button data-nav="screen-step2">3. 生徒情報</button>
+    <button data-nav="screen-done">4. 登録完了</button>
+    <button data-nav="screen-parent">5. 保護者ホーム(将来)</button>
+  </nav>
+  <span class="mock-toolbar__spacer"></span>
+  <button class="mock-theme-toggle" id="themeToggle" type="button">ダーク表示</button>
+</div>
+
+<main>
+
+<!-- ================= 1. ログイン（変更案） ================= -->
+<section class="screen" id="screen-login" data-title="ログイン（変更案）">
+  <div class="login">
+    <form class="login__card" onsubmit="return false;">
+      <h1 class="login__title">ログイン</h1>
+      <p class="login__hint">学生・保護者の方はこちらからログインしてください。</p>
+      <label class="field">
+        <span class="field__label">メールアドレス<span class="req">必須</span></span>
+        <input class="input" id="loginEmail" type="email" autocomplete="email" placeholder="example@example.com">
+      </label>
+      <label class="field">
+        <span class="field__label">パスワード<span class="req">必須</span></span>
+        <input class="input" type="password" autocomplete="current-password" placeholder="パスワード">
+      </label>
+      <button type="submit" class="btn btn--primary btn--block">ログイン</button>
+      <div class="divider">または</div>
+      <button type="button" class="btn btn--secondary btn--block" onclick="go('screen-step1')">新規登録（保護者）</button>
+      <p class="login__notice">メールアドレスで30日間無料体験できます。</p>
+      <a href="#" class="login__link" onclick="toast('（設計案）管理者ログインへ遷移します'); return false;">管理者ログイン</a>
+    </form>
+  </div>
+</section>
+
+<!-- ================= 2. 新規登録 ステップ1：アカウント情報 ================= -->
+<section class="screen" id="screen-step1" data-title="新規登録（1/2）">
+  <div class="register-card">
+    <div class="stepper" aria-label="登録ステップ">
+      <div class="stepper__step is-active">
+        <span class="stepper__dot">1</span><span class="stepper__label">アカウント情報</span>
+      </div>
+      <div class="stepper__line"></div>
+      <div class="stepper__step">
+        <span class="stepper__dot">2</span><span class="stepper__label">生徒情報</span>
+      </div>
+      <div class="stepper__line"></div>
+      <div class="stepper__step">
+        <span class="stepper__dot">3</span><span class="stepper__label">完了</span>
+      </div>
+    </div>
+    <h1 class="register-card__title">新規登録</h1>
+    <p class="register-card__hint">保護者アカウントをメールアドレスで作成します。登録時にお子さま（生徒）1名もあわせて登録します。</p>
+
+    <div class="field">
+      <span class="field__label">メールアドレス<span class="req">必須</span></span>
+      <input class="input" id="regEmail" type="email" autocomplete="email" placeholder="example@example.com">
+      <span class="field__hint">ログインIDとして使用します。</span>
+      <span class="field__error" id="errEmail"></span>
+    </div>
+    <div class="form-grid">
+      <div class="field">
+        <span class="field__label">パスワード<span class="req">必須</span></span>
+        <input class="input" id="regPass" type="password" autocomplete="new-password" placeholder="8文字以上・英数字">
+        <span class="field__hint">8文字以上、半角英数字をそれぞれ1文字以上含めてください。</span>
+        <span class="field__error" id="errPass"></span>
+      </div>
+      <div class="field">
+        <span class="field__label">パスワード（確認）<span class="req">必須</span></span>
+        <input class="input" id="regPass2" type="password" autocomplete="new-password" placeholder="もう一度入力">
+        <span class="field__error" id="errPass2"></span>
+      </div>
+    </div>
+
+    <div class="alert alert--info">
+      <div>
+        <strong>無料期間について</strong><br>
+        新規アカウントは<b>登録日から1ヶ月間</b>無料でご利用いただけます。
+        期間終了後は更新手続き（有料）が必要です。お支払い方法は登録後、保護者画面から確認できます。
+      </div>
+    </div>
+
+    <label class="check" id="termsCheck">
+      <input type="checkbox" id="regTerms">
+      <span><a href="#" onclick="toast('（設計案）利用規約ページを開きます'); return false;">利用規約</a>と<a href="#" onclick="toast('（設計案）プライバシーポリシーページを開きます'); return false;">プライバシーポリシー</a>に同意する</span>
+    </label>
+    <span class="field__error" id="errTerms" style="margin-top:-8px"></span>
+
+    <div class="form-actions">
+      <button type="button" class="btn btn--ghost" onclick="go('screen-login')">戻る</button>
+      <button type="button" class="btn btn--primary" onclick="validateStep1()">次へ</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 3. 新規登録 ステップ2：生徒情報 ================= -->
+<section class="screen" id="screen-step2" data-title="新規登録（2/2）">
+  <div class="register-card">
+    <div class="stepper" aria-label="登録ステップ">
+      <div class="stepper__step is-done">
+        <span class="stepper__dot">✓</span><span class="stepper__label">アカウント情報</span>
+      </div>
+      <div class="stepper__line is-done"></div>
+      <div class="stepper__step is-active">
+        <span class="stepper__dot">2</span><span class="stepper__label">生徒情報</span>
+      </div>
+      <div class="stepper__line"></div>
+      <div class="stepper__step">
+        <span class="stepper__dot">3</span><span class="stepper__label">完了</span>
+      </div>
+    </div>
+    <h1 class="register-card__title">お子さま（生徒）の情報</h1>
+    <p class="register-card__hint">登録と同時にお子さま1名を登録します。登録後、保護者画面から<b>追加の生徒を登録</b>できます。</p>
+
+    <div class="form-grid">
+      <div class="field">
+        <span class="field__label">お子さまの姓<span class="req">必須</span></span>
+        <input class="input" id="stuSei" type="text" placeholder="山田">
+        <span class="field__error" id="errSei"></span>
+      </div>
+      <div class="field">
+        <span class="field__label">お子さまの名<span class="req">必須</span></span>
+        <input class="input" id="stuMei" type="text" placeholder="太郎">
+        <span class="field__error" id="errMei"></span>
+      </div>
+      <div class="field">
+        <span class="field__label">ふりがな（せい）<span class="req">必須</span></span>
+        <input class="input" id="stuSeiKana" type="text" placeholder="やまだ">
+        <span class="field__error" id="errSeiKana"></span>
+      </div>
+      <div class="field">
+        <span class="field__label">ふりがな（めい）<span class="req">必須</span></span>
+        <input class="input" id="stuMeiKana" type="text" placeholder="たろう">
+        <span class="field__error" id="errMeiKana"></span>
+      </div>
+    </div>
+    <div class="field">
+      <span class="field__label">学年<span class="req">必須</span></span>
+      <select class="select" id="stuGrade">
+        <option value="">選択してください</option>
+        <optgroup label="小学校">
+          <option value="小学1年生">小学1年生</option>
+          <option value="小学2年生">小学2年生</option>
+          <option value="小学3年生">小学3年生</option>
+          <option value="小学4年生">小学4年生</option>
+          <option value="小学5年生">小学5年生</option>
+          <option value="小学6年生">小学6年生</option>
+        </optgroup>
+        <optgroup label="中学校">
+          <option value="中学1年生">中学1年生</option>
+          <option value="中学2年生">中学2年生</option>
+          <option value="中学3年生">中学3年生</option>
+        </optgroup>
+        <optgroup label="高校">
+          <option value="高校1年生">高校1年生</option>
+          <option value="高校2年生">高校2年生</option>
+          <option value="高校3年生">高校3年生</option>
+        </optgroup>
+      </select>
+      <span class="field__error" id="errGrade"></span>
+    </div>
+
+    <div class="alert alert--warning">
+      <div><strong>ご注意</strong> 生徒情報は登録後、保護者画面からいつでも変更できます。</div>
+    </div>
+
+    <div class="form-actions">
+      <button type="button" class="btn btn--secondary" onclick="go('screen-step1')">戻る</button>
+      <button type="button" class="btn btn--primary" onclick="validateStep2()">登録する</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 4. 登録完了 ================= -->
+<section class="screen" id="screen-done" data-title="登録完了">
+  <div class="done-card">
+    <div class="done-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </div>
+    <h1 class="done-card__title">登録が完了しました</h1>
+    <p class="done-card__hint">ご登録ありがとうございます。以下の内容でアカウントを作成しました。</p>
+
+    <div class="summary">
+      <div class="summary__row">
+        <span class="summary__label">メールアドレス</span>
+        <span class="summary__value" id="sumEmail">—</span>
+      </div>
+      <div class="summary__row">
+        <span class="summary__label">初期生徒</span>
+        <span class="summary__value" id="sumStudent">—</span>
+      </div>
+      <div class="summary__row">
+        <span class="summary__label">ご利用期間（無料）</span>
+        <span class="summary__value">
+          <span id="sumTerm">—</span>
+          <span class="badge badge--info">体験期間</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="alert alert--info">
+      <div>
+        <strong>ご利用期限のお知らせ</strong><br>
+        無料期間は <b id="sumTerm2">—</b> までです。期間終了の1週間前にメールでお知らせします。
+        期間終了後も学習データは保持され、更新手続きによりそのまま継続利用できます。
+      </div>
+    </div>
+
+    <div class="form-actions form-actions--end" style="width:100%; border-top:none; margin-top:0; padding-top:0;">
+      <button type="button" class="btn btn--primary btn--lg" style="width:100%;" onclick="finishRegister()">ログイン画面へ</button>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 5. 保護者ホーム（将来画面・設計案） ================= -->
+<section class="screen" id="screen-parent" data-title="保護者ホーム（将来）">
+  <div class="preview-page">
+    <div class="page-head">
+      <h1 class="page-head__title">ホーム</h1>
+      <span class="mock-label">将来画面（設計案）</span>
+    </div>
+
+    <div class="panel">
+      <h2 class="panel__title">アカウント情報</h2>
+      <div class="def-list">
+        <div class="def-list__row">
+          <span class="def-list__label">メールアドレス</span>
+          <span class="def-list__value" id="parentEmail">—</span>
+        </div>
+        <div class="def-list__row">
+          <span class="def-list__label">登録日</span>
+          <span class="def-list__value" id="parentStart">—</span>
+        </div>
+        <div class="def-list__row">
+          <span class="def-list__label">ご利用期限</span>
+          <span class="def-list__value">
+            <span id="parentEnd">—</span>
+            <span class="badge badge--success">有効（残り30日）</span>
+          </span>
+        </div>
+        <div class="def-list__row">
+          <span class="def-list__label">プラン</span>
+          <span class="def-list__value">
+            <span>無料体験</span>
+            <button type="button" class="btn btn--ghost" onclick="toast('（設計案）更新手続き画面を開きます')">更新手続き</button>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:var(--sp-3); flex-wrap:wrap;">
+        <h2 class="panel__title" style="margin:0;">生徒一覧 <span class="badge badge--neutral">2名</span></h2>
+        <button type="button" class="btn btn--secondary" onclick="toast('（設計案）生徒追加画面へ遷移します')">＋ 生徒を追加</button>
+      </div>
+      <div class="student-list" style="margin-top:var(--sp-4);">
+        <div class="student-row">
+          <div class="student-avatar">山</div>
+          <div class="student-info">
+            <span class="student-info__name">山田 太郎 <span class="badge badge--primary">初期登録</span></span>
+            <span class="student-info__meta">小学3年生 ・ ふりがな：やまだ たろう</span>
+          </div>
+          <div class="student-actions">
+            <button type="button" class="btn btn--ghost" onclick="toast('（設計案）生徒情報編集画面を開きます')">編集</button>
+          </div>
+        </div>
+        <div class="student-row">
+          <div class="student-avatar" style="background:var(--color-info-soft); color:var(--color-info);">花</div>
+          <div class="student-info">
+            <span class="student-info__name">山田 花子 <span class="badge badge--neutral">追加</span></span>
+            <span class="student-info__meta">小学1年生 ・ ふりがな：やまだ はなこ</span>
+          </div>
+          <div class="student-actions">
+            <button type="button" class="btn btn--ghost" onclick="toast('（設計案）生徒情報編集画面を開きます')">編集</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ================= 画面遷移 ================= */
+const screens = ['screen-login','screen-step1','screen-step2','screen-done','screen-parent'];
+const navBtns = document.querySelectorAll('.mock-nav button');
+
+function go(id) {
+  screens.forEach(s => {
+    const el = document.getElementById(s);
+    el.classList.toggle('is-active', s === id);
+  });
+  navBtns.forEach(b => b.classList.toggle('is-active', b.dataset.nav === id));
+  window.scrollTo({ top: 0 });
+}
+
+/* 初期表示：ログイン */
+go('screen-login');
+
+/* ================= テーマ切替 ================= */
+const themeToggle = document.getElementById('themeToggle');
+themeToggle.addEventListener('click', () => {
+  const html = document.documentElement;
+  const dark = html.dataset.theme === 'dark';
+  html.dataset.theme = dark ? 'light' : 'dark';
+  themeToggle.textContent = dark ? 'ダーク表示' : 'ライト表示';
+});
+
+/* ================= バリデーション ================= */
+function setError(id, msg) {
+  const el = document.getElementById(id);
+  const input = el.closest('.field')?.querySelector('.input, .select');
+  el.textContent = msg || '';
+  if (input) input.classList.toggle('is-invalid', !!msg);
+}
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const PASS_RE = /^(?=.*[A-Za-z])(?=.*\d).{8,}$/;
+
+function validateStep1() {
+  const email = document.getElementById('regEmail');
+  const pass = document.getElementById('regPass');
+  const pass2 = document.getElementById('regPass2');
+  const terms = document.getElementById('regTerms');
+  let ok = true;
+
+  if (!EMAIL_RE.test(email.value.trim())) { setError('errEmail', 'メールアドレスの形式が正しくありません。'); ok = false; }
+  else setError('errEmail', '');
+  if (!PASS_RE.test(pass.value)) { setError('errPass', '8文字以上・英数字をそれぞれ1文字以上含めてください。'); ok = false; }
+  else setError('errPass', '');
+  if (pass2.value !== pass.value || pass2.value === '') { setError('errPass2', 'パスワードが一致しません。'); ok = false; }
+  else setError('errPass2', '');
+  if (!terms.checked) { document.getElementById('errTerms').textContent = '利用規約への同意が必要です。'; document.getElementById('termsCheck').classList.add('is-invalid'); ok = false; }
+  else { document.getElementById('errTerms').textContent = ''; document.getElementById('termsCheck').classList.remove('is-invalid'); }
+
+  if (ok) {
+    toast('アカウント情報を確認しました');
+    go('screen-step2');
+  }
+}
+
+function validateStep2() {
+  const sei = document.getElementById('stuSei');
+  const mei = document.getElementById('stuMei');
+  const seiK = document.getElementById('stuSeiKana');
+  const meiK = document.getElementById('stuMeiKana');
+  const grade = document.getElementById('stuGrade');
+  let ok = true;
+
+  const checks = [
+    ['errSei', sei.value.trim(), '姓を入力してください。'],
+    ['errMei', mei.value.trim(), '名を入力してください。'],
+    ['errSeiKana', seiK.value.trim(), 'ふりがな（せい）を入力してください。'],
+    ['errMeiKana', meiK.value.trim(), 'ふりがな（めい）を入力してください。'],
+  ];
+  checks.forEach(([id, val, msg]) => {
+    if (!val) { setError(id, msg); ok = false; }
+    else setError(id, '');
+  });
+  if (!grade.value) { setError('errGrade', '学年を選択してください。'); ok = false; }
+  else setError('errGrade', '');
+
+  if (ok) {
+    const email = document.getElementById('regEmail').value.trim();
+    const student = `${sei.value.trim()} ${mei.value.trim()}（${grade.value}）`;
+    document.getElementById('sumEmail').textContent = email;
+    document.getElementById('sumStudent').textContent = student;
+    document.getElementById('parentEmail').textContent = email;
+
+    const start = new Date(2026, 7, 31); // 2026-08-31
+    const end = new Date(2026, 8, 30);   // +1ヶ月 = 2026-09-30
+    const fmt = (d) => `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+    const term = `${fmt(start)} 〜 ${fmt(end)}`;
+    document.getElementById('sumTerm').textContent = term;
+    document.getElementById('sumTerm2').textContent = fmt(end);
+    document.getElementById('parentStart').textContent = fmt(start);
+    document.getElementById('parentEnd').textContent = fmt(end);
+
+    toast('登録処理を完了しました');
+    go('screen-done');
+  }
+}
+
+/* 登録完了 → ログイン（メール事前入力） */
+function finishRegister() {
+  const email = document.getElementById('regEmail').value.trim();
+  document.getElementById('loginEmail').value = email;
+  go('screen-login');
+  toast('登録が完了しました。メールアドレスでログインできます');
+}
+
+/* ================= トースト ================= */
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('is-show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('is-show'), 2600);
+}
+</script>
+</body>
+</html>

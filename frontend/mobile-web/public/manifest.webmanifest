@@ -1,0 +1,21 @@
+{
+  "name": "Study 2.1 Mobile",
+  "short_name": "Study 2.1",
+  "description": "Study 2.1 モバイルWeb（学生・保護者・管理者向けシステムフレームワーク）",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#25876f",
+  "background_color": "#f5f7fa",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

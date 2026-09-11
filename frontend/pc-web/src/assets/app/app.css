@@ -1,0 +1,99 @@
+/* ============================================================================
+   アプリ固有の追加スタイル
+   assets/prototype/*.css は ui-demo の忠実コピー（共通デザインシステム）なので変更しない。
+   ここには Study 2.1 のアプリ全体で共有したい小さな追加ルールだけを置く。
+   ============================================================================ */
+
+/* 操作アイコンの色（全ページ共通）
+   削除＝赤 / 編集＝青 / 参照（目）＝緑。ダウンロードなどは従来の色のまま。
+
+   ・アイコンボタン（.btn--icon）の削除は .is-danger を使う。
+     ホバー時の背景と無効時の淡い色もここで揃う。
+   ・それ以外の場所（テキスト付きボタン・独自の操作ボタン・プロトタイプ画面）は
+     アイコン自身に .icon--danger / .icon--edit / .icon--view を付ける。
+   デザインシステムの `.btn .icon { color: inherit }` より優先させる必要があるため、
+   ボタン内では特異性を上げたセレクタで上書きする。 */
+.btn--icon.is-danger {
+  color: var(--color-danger);
+}
+
+/* ホバー時はアイコンの色を保ったまま、背景だけを淡い同系色にする
+   （色が変わると「押すと消える」サインが薄れるため）。
+   デザインシステムの `.btn--icon:hover` は文字色を --color-text に変えるので、
+   削除ボタンはここで赤を明示し直す（赤のまま）。 */
+.btn--icon.is-danger:hover:not(:disabled) {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.btn--icon.is-danger:disabled {
+  color: var(--color-text-subtle);
+}
+
+.icon--danger,
+.btn .icon.icon--danger {
+  color: var(--color-danger);
+}
+
+.icon--edit,
+.btn .icon.icon--edit {
+  color: var(--color-info);
+}
+
+.icon--view,
+.btn .icon.icon--view {
+  color: var(--color-success);
+}
+
+/* アイコンボタンのホバー背景（全ページ共通）
+   アイコンの色に合わせて淡い同系色を敷く（削除＝淡い赤 / 編集＝淡い青 / 参照＝淡い緑）。
+   狙いは 2 つ:
+     ・色付きアイコンだけ赤・青・緑の淡い背景になり、操作の意味がホバーでも分かる
+     ・一覧の行ホバー・カードホバーも同じグレー（--color-surface-hover）なので、
+       既定のグレーのままだとアイコンボタンのホバーが背景に埋もれて見えない
+   色を持たないアイコン（ダウンロード・コピー・お気に入り等）は
+   デザインシステム既定の色のまま（お気に入りは linkclip.css が黄色系を定義）。
+   対象は「アイコンだけのボタン」。文字付きボタン（btn--secondary 等）は
+   デザインシステムのホバーをそのまま使う。 */
+:is(.btn--icon, .doc-card__action):has(> .icon--danger):hover:not(:disabled) {
+  background: var(--color-danger-soft);
+}
+
+:is(.btn--icon, .doc-card__action):has(> .icon--edit):hover:not(:disabled) {
+  background: var(--color-info-soft);
+}
+
+:is(.btn--icon, .doc-card__action):has(> .icon--view):hover:not(:disabled) {
+  background: var(--color-success-soft);
+}
+
+/* 塗りつぶしボタン（文字が白）の中では、アイコンは文字色を継承させる。
+   例: btn--primary の中に目（参照）アイコンを置いても白のまま。 */
+.btn--primary .icon.icon--danger,
+.btn--primary .icon.icon--edit,
+.btn--primary .icon.icon--view,
+.btn--danger .icon.icon--danger,
+.btn--danger .icon.icon--edit,
+.btn--danger .icon.icon--view {
+  color: inherit;
+}
+
+/* 検索条件エリアと結果（一覧）エリアの間隔。
+   一覧ページの外枠（.page-body / .doc-list-page / .ti-page / .tf-page）は既に flex gap を
+   持っているため、デザインシステム既定の margin-bottom を打ち消して二重取りをなくす
+   （実測: 32px → 16px）。 */
+.search-panel:not(:last-child) {
+  margin-bottom: 0;
+}
+
+/* ページングの省略記号（例: 1 2 3 4 5 … 20）。数字ボタンと同じ幅を確保して行を揃える。 */
+.page-gap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: var(--control-sm);
+  height: var(--control-sm);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  user-select: none;
+}

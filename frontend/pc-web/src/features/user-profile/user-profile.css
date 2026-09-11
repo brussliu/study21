@@ -1,0 +1,201 @@
+/* =============================================================
+   ユーザー情報（右上のユーザー名メニューと変更ダイアログ）
+   ※ 現状はデモ表示のみ。更新 API・DB 保存は未実装（保存しても何も変わらない）。
+   色は assets/prototype/tokens.css の変数のみを使う。
+   ============================================================= */
+
+/* ---------- 右上のユーザー名メニュー ---------- */
+.up-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+/* .topbar__user（デザインシステム）をボタンとして使うための調整 */
+.up-user {
+  height: var(--control-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.up-user:hover,
+.up-user.is-open {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.up-user__caret {
+  color: var(--color-text-subtle);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.up-user.is-open .up-user__caret {
+  transform: rotate(180deg);
+}
+
+.up-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 224px;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  animation: up-menu-in var(--duration-fast) var(--ease-standard);
+}
+
+@keyframes up-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.up-menu__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.up-menu__item:hover {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.up-menu__note {
+  margin: var(--sp-1) 0 0;
+  padding: var(--sp-2) var(--sp-3) 0;
+  border-top: 1px solid var(--color-border);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 変更ダイアログ ---------- */
+.up-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-5);
+}
+
+.up-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.up-section__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.up-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3) var(--sp-4);
+}
+
+.up-grid .field--wide {
+  grid-column: 1 / -1;
+}
+
+.up-required {
+  margin-left: var(--sp-1);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-regular);
+  color: var(--color-danger);
+}
+
+.up-avatar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.up-avatar__circle {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  user-select: none;
+}
+
+.up-avatar__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+}
+
+.up-password-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.up-password-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.up-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.up-readonly {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: var(--control-md);
+}
+
+.up-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+}
+
+.up-foot__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+@media (max-width: 640px) {
+  .up-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,898 @@
+/* =============================================================
+   ゲーム機能 — ページ専用スタイル
+   6 種類のゲーム（マインスイーパー / 数独 / 2048 / 五目並べ / リバーシ / ノノグラム）で
+   共通に使う「ページの枠」と、ゲームごとの盤面スタイルをまとめて定義する。
+   色は必ず assets/prototype/tokens.css の変数（var(--color-*)）を使い、
+   明暗テーマの切り替えに自動追従させる。
+   ============================================================= */
+
+/* ---------- タブ表示（GameView） ---------- */
+/* タブの下に出す、選択中のゲームの説明文。 */
+.gm-tabs__desc {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+/* 遊び方カードの言語切り替え（日本語 / 中文）。カード見出しの右に置く。 */
+.gm-lang {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+}
+
+.gm-lang__btn {
+  height: 22px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.gm-lang__btn:hover {
+  color: var(--color-text);
+}
+
+.gm-lang__btn.is-active {
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--shadow-sm);
+}
+
+/* ---------- ページの枠 ---------- */
+.gm-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.gm-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+/* 「ゲーム一覧」へ戻るボタン。列方向の flex では横幅いっぱいに伸びて
+   ラベルが中央寄せに見えてしまうため、左寄せに固定する。 */
+.gm-head > .btn {
+  align-self: flex-start;
+}
+
+.gm-head__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.gm-head__desc {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+/* 盤面（左）と操作パネル（右）。狭い画面では 1 列に落とす。 */
+.gm-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.gm-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+/* 盤面は横に広いゲーム（上級マインスイーパーなど）があるので横スクロール可 */
+.gm-board-body {
+  display: flex;
+  justify-content: center;
+  padding: var(--sp-4);
+  overflow-x: auto;
+}
+
+.gm-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* サイドパネルは幅が狭いので、ラベルが折り返さないようにして
+   選択欄（select）が残りの幅を使うようにする。 */
+.gm-toolbar .field--inline {
+  width: 100%;
+}
+
+.gm-toolbar .field__label {
+  flex: none;
+  white-space: nowrap;
+}
+
+.gm-toolbar .select {
+  flex: 1;
+  min-width: 0;
+}
+
+.gm-toolbar__spacer {
+  flex: 1;
+}
+
+.gm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* ---------- ステータスカードの中身 ---------- */
+/* 状態 → 数値 → 操作 の順に、ほどよい間隔で縦に並べる。
+   ゲームごとに「難易度」「モード」などの選択欄や盤面の補助ボタンが増えても
+   並びが崩れないよう、操作系は .gm-controls で囲む。 */
+.gm-status-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.gm-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+
+/* 状態表示（プレイ中 / クリア / 失敗 …） */
+.gm-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-sm);
+}
+
+.gm-status__title {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text);
+}
+
+.gm-status__text {
+  color: var(--color-text-muted);
+}
+
+.gm-status.is-play,
+.gm-status.is-info {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+}
+
+.gm-status.is-play .gm-status__title,
+.gm-status.is-info .gm-status__title {
+  color: var(--color-info);
+}
+
+.gm-status.is-win {
+  background: var(--color-success-soft);
+  border-color: var(--color-success);
+}
+
+.gm-status.is-win .gm-status__title {
+  color: var(--color-success);
+}
+
+.gm-status.is-lose {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+.gm-status.is-lose .gm-status__title {
+  color: var(--color-danger);
+}
+
+/* 数値の一覧（時間・手数・スコアなど） */
+.gm-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  margin: 0;
+}
+
+.gm-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.gm-metric__label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.gm-metric__value {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-help {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.gm-help ul {
+  margin: 0;
+  padding-left: 1.2em;
+}
+
+.gm-help li + li {
+  margin-top: var(--sp-1);
+}
+
+.gm-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+/* 凡例（石・マークなどの意味） */
+.gm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.gm-legend__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.gm-legend__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.gm-legend__swatch.is-filled {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.gm-legend__swatch.is-crossed::after {
+  content: '×';
+  display: block;
+  text-align: center;
+  font-size: 12px;
+  line-height: 12px;
+  color: var(--color-text-subtle);
+}
+
+/* ---------- ゲーム一覧 ---------- */
+.gm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-3);
+}
+
+.gm-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.gm-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.gm-card__top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.gm-card__icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.gm-card__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.gm-card__desc {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.gm-card__meta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.gm-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: var(--sp-2);
+}
+
+/* ゲームごとの識別色（一覧カードのアイコン背景に使う） */
+.gm-accent--primary .gm-card__icon {
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.gm-accent--info .gm-card__icon {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+.gm-accent--success .gm-card__icon {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.gm-accent--warning .gm-card__icon {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+.gm-accent--danger .gm-card__icon {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+/* 識別色が 5 色で足りないゲーム用（科目色の紫を流用） */
+.gm-accent--subject .gm-card__icon {
+  background: var(--accent-50);
+  color: var(--subject-math);
+}
+
+/* =============================================================
+   マインスイーパー
+   ============================================================= */
+.gm-mine-board {
+  /* 既定値。実際の大きさは画面（MinesweeperView）が --gm-cell で指定する。 */
+  --gm-cell: 40px;
+  display: grid;
+  gap: 2px;
+  width: max-content;
+}
+
+.gm-mine-cell {
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text);
+  /* 数字や旗の大きさはマスの大きさに合わせる（--gm-cell は画面から指定される） */
+  font-size: calc(var(--gm-cell) * 0.4);
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+
+.gm-mine-cell:hover:not(.is-open):not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-surface-hover);
+}
+
+.gm-mine-cell.is-open {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+  cursor: default;
+}
+
+.gm-mine-cell.is-flag {
+  background: var(--color-warning-soft);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+
+.gm-mine-cell.is-mine {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.gm-mine-cell.is-exploded {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-on-primary);
+}
+
+/* 失敗時：地雷のないマスに立てていた旗（付け間違い） */
+.gm-mine-cell.is-wrong {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+  text-decoration: line-through;
+}
+
+/* 数字の色（1〜8）。隣接地雷数ごとに色を変えて読み取りやすくする。 */
+.gm-mine-cell[data-count='1'] { color: var(--color-info); }
+.gm-mine-cell[data-count='2'] { color: var(--color-success); }
+.gm-mine-cell[data-count='3'] { color: var(--color-danger); }
+.gm-mine-cell[data-count='4'] { color: var(--subject-math); }
+.gm-mine-cell[data-count='5'] { color: var(--color-warning); }
+.gm-mine-cell[data-count='6'] { color: var(--primary-700); }
+.gm-mine-cell[data-count='7'] { color: var(--subject-japanese); }
+.gm-mine-cell[data-count='8'] { color: var(--color-text-muted); }
+
+/* =============================================================
+   数独
+   ============================================================= */
+.gm-sudoku {
+  /* 既定値。実際の大きさは画面（SudokuView）が --gm-cell で指定する。 */
+  --gm-cell: 56px;
+  display: grid;
+  grid-template-columns: repeat(9, var(--gm-cell));
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--color-surface);
+  width: max-content;
+}
+
+.gm-sudoku-cell {
+  position: relative;
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  /* 数字の大きさはマスの大きさに合わせる（--gm-cell は画面から指定される） */
+  font-size: calc(var(--gm-cell) * 0.36);
+  font-weight: var(--fw-semibold);
+  cursor: pointer;
+}
+
+/* 3×3 のブロック境界は太線にする */
+.gm-sudoku-cell.is-box-right { border-right: 2px solid var(--color-border-strong); }
+.gm-sudoku-cell.is-box-bottom { border-bottom: 2px solid var(--color-border-strong); }
+.gm-sudoku-cell.is-last-col { border-right: 0; }
+.gm-sudoku-cell.is-last-row { border-bottom: 0; }
+
+.gm-sudoku-cell.is-given {
+  background: var(--color-surface-alt);
+  color: var(--color-text-strong);
+  cursor: default;
+}
+
+.gm-sudoku-cell.is-selected {
+  background: var(--color-primary-soft);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+.gm-sudoku-cell.is-same {
+  background: var(--color-info-soft);
+}
+
+.gm-sudoku-cell.is-conflict {
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.gm-sudoku-cell.is-wrong {
+  color: var(--color-danger);
+}
+
+/* 候補数字（メモ）の 3×3 表示 */
+.gm-sudoku-notes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 1fr);
+  width: 100%;
+  height: 100%;
+  padding: 2px;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-regular);
+  color: var(--color-text-subtle);
+}
+
+.gm-sudoku-notes span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 数字パッド（九宮格 3×3）。1〜9 を 3 列に並べ、「消す」は下の行いっぱいに置く。 */
+.gm-numpad {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.gm-numpad .btn {
+  padding: 0;
+}
+
+.gm-numpad__clear {
+  grid-column: 1 / -1;
+}
+
+/* ステータス内のボタンを 2 列に整列する（自動折り返しで行がばらつくのを防ぐ）。
+   主操作は .gm-actions__wide で 1 行を占有する。 */
+.gm-actions--grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.gm-actions--grid .gm-actions__wide {
+  grid-column: 1 / -1;
+}
+
+/* =============================================================
+   2048
+   ============================================================= */
+.gm-g2048 {
+  display: grid;
+  grid-template-columns: repeat(4, var(--gm-cell));
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-alt);
+  width: max-content;
+  --gm-cell: 72px;
+}
+
+.gm-g2048-cell {
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.gm-g2048-cell[data-value='2'] { background: var(--color-surface); }
+.gm-g2048-cell[data-value='4'] { background: var(--primary-50); }
+.gm-g2048-cell[data-value='8'] { background: var(--color-primary-soft); color: var(--color-primary); }
+.gm-g2048-cell[data-value='16'] { background: var(--color-primary); color: var(--color-on-primary); }
+.gm-g2048-cell[data-value='32'] { background: var(--color-info-soft); color: var(--color-info); }
+.gm-g2048-cell[data-value='64'] { background: var(--color-info); color: var(--color-on-primary); }
+.gm-g2048-cell[data-value='128'] { background: var(--color-success-soft); color: var(--color-success); }
+.gm-g2048-cell[data-value='256'] { background: var(--color-success); color: var(--color-on-primary); }
+.gm-g2048-cell[data-value='512'] { background: var(--color-warning-soft); color: var(--color-warning); }
+.gm-g2048-cell[data-value='1024'] { background: var(--color-warning); color: var(--color-on-primary); }
+.gm-g2048-cell[data-value='2048'] { background: var(--color-danger); color: var(--color-on-primary); }
+
+.gm-g2048-cell[data-value='1024'],
+.gm-g2048-cell[data-value='2048'] {
+  font-size: var(--fs-xl);
+}
+
+/* 出現・合成時の小さなアニメーション */
+@keyframes gm-pop {
+  from { transform: scale(0.82); opacity: 0.6; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.gm-g2048-cell.is-new,
+.gm-g2048-cell.is-merged {
+  animation: gm-pop var(--duration-base) var(--ease-standard);
+}
+
+/* =============================================================
+   五目並べ
+   ============================================================= */
+.gm-gomoku {
+  --gm-cell: 28px;
+  display: grid;
+  gap: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  width: max-content;
+}
+
+.gm-gomoku-cell {
+  position: relative;
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background-color: transparent;
+  /* 碁盤の線（十字）を 1 本ずつ描く */
+  background-image: linear-gradient(var(--color-border-strong), var(--color-border-strong)),
+    linear-gradient(var(--color-border-strong), var(--color-border-strong));
+  background-size: 100% 1px, 1px 100%;
+  background-position: center center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.gm-gomoku-cell:hover:not(.is-taken) {
+  background-color: var(--color-surface-hover);
+}
+
+.gm-gomoku-cell.is-taken {
+  cursor: default;
+}
+
+.gm-gomoku-cell.is-last::after {
+  content: '';
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-danger);
+}
+
+.gm-gomoku-cell.is-win {
+  box-shadow: inset 0 0 0 2px var(--color-success);
+}
+
+.gm-stone {
+  width: 78%;
+  height: 78%;
+  border-radius: 50%;
+  display: block;
+}
+
+.gm-stone--black {
+  background: #16202b;
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-stone--white {
+  background: #ffffff;
+  border: 1px solid var(--color-border-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+/* =============================================================
+   リバーシ
+   ============================================================= */
+.gm-rev {
+  --gm-cell: 46px;
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-2);
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  width: max-content;
+}
+
+.gm-rev-cell {
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--primary-700);
+  cursor: default;
+}
+
+.gm-rev-cell.is-legal {
+  cursor: pointer;
+}
+
+.gm-rev-cell.is-legal:hover .gm-rev-hint {
+  transform: scale(1.15);
+}
+
+.gm-rev-disc {
+  width: 76%;
+  height: 76%;
+  border-radius: 50%;
+  display: block;
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-rev-disc--black { background: #16202b; }
+.gm-rev-disc--white { background: #ffffff; }
+
+.gm-rev-disc.is-flipping {
+  animation: gm-pop var(--duration-base) var(--ease-standard);
+}
+
+.gm-rev-hint {
+  width: 28%;
+  height: 28%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+/* =============================================================
+   ノノグラム
+   ============================================================= */
+.gm-nono {
+  --gm-cell: 28px;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: var(--sp-2);
+  align-items: end;
+  justify-content: center;
+  width: max-content;
+}
+
+.gm-nono__colclues {
+  display: grid;
+  gap: 1px;
+  align-items: end;
+}
+
+.gm-nono__rowclues {
+  display: grid;
+  gap: 1px;
+  justify-items: end;
+}
+
+.gm-nono-clue {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  min-height: 18px;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.gm-nono-clue--col {
+  flex-direction: column;
+  gap: 1px;
+  width: var(--gm-cell);
+}
+
+.gm-nono-clue--row {
+  flex-direction: row;
+  gap: var(--sp-2);
+  width: 100%;
+  justify-content: flex-end;
+}
+
+/* 手が確定した手がかり（緑）／行き過ぎた手がかり（赤） */
+.gm-nono-clue.is-satisfied {
+  color: var(--color-success);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-nono-clue.is-over {
+  color: var(--color-danger);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-nono__board {
+  display: grid;
+  gap: 1px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-border-strong);
+}
+
+.gm-nono__cell {
+  width: var(--gm-cell);
+  height: var(--gm-cell);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  user-select: none;
+}
+
+.gm-nono__cell:hover {
+  background: var(--color-surface-hover);
+}
+
+.gm-nono__cell.is-filled {
+  background: var(--color-primary);
+}
+
+.gm-nono__cell.is-filled:hover {
+  background: var(--color-primary-hover);
+}
+
+.gm-nono__cell.is-crossed::after {
+  content: '×';
+}
+
+.gm-nono__cell.is-hint {
+  box-shadow: inset 0 0 0 2px var(--color-warning);
+}
+
+.gm-nono__cell.is-wrong {
+  background: var(--color-danger-soft);
+}
+
+/* 5×5 の敷居を下げた問題ではセルを大きめにする */
+.gm-nono.is-small {
+  --gm-cell: 40px;
+}
+
+/* ---------- レスポンシブ ---------- */
+@media (max-width: 1024px) {
+  .gm-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .gm-numpad {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .gm-board-body {
+    justify-content: flex-start;
+  }
+}

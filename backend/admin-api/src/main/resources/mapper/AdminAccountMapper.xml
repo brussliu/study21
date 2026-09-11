@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.account.AdminAccountMapper">
+
+    <resultMap id="AdminAccountMap" type="com.study21.admin.account.AdminAccountEntity">
+        <id     property="accountId"     column="アカウントID"/>
+        <result property="loginId"       column="ログインID"/>
+        <result property="passwordHash"  column="パスワードハッシュ"/>
+        <result property="accountType"   column="アカウント種別"/>
+        <result property="status"        column="状態"/>
+        <result property="sei"           column="姓"/>
+        <result property="mei"           column="名"/>
+        <result property="expiryDate"    column="有効期限"/>
+    </resultMap>
+
+    <select id="findByLoginId" resultMap="AdminAccountMap">
+        SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+               "姓", "名", "有効期限"
+          FROM public."ACC_アカウント"
+         WHERE LOWER("ログインID") = LOWER(#{loginId})
+           AND "アカウント種別" = 'ADMIN'
+    </select>
+</mapper>

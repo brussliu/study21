@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.setting.SettingValueMapper">
+
+    <resultMap id="ValueMap" type="com.study21.admin.setting.SettingValueEntity">
+        <id     property="settingId"    column="設定ID"/>
+        <result property="pageCode"     column="ページ区分"/>
+        <result property="settingKey"   column="設定キー"/>
+        <result property="scope"        column="スコープ"/>
+        <result property="studentId"    column="学生ID"/>
+        <result property="parentId"     column="保護者ID"/>
+        <result property="settingValue" column="設定値"/>
+        <result property="note"         column="備考"/>
+        <result property="createdBy"    column="登録ID"/>
+        <result property="updatedBy"    column="更新ID"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <select id="findGlobal" resultMap="ValueMap">
+        SELECT "設定ID", "ページ区分", "設定キー", "スコープ",
+               "学生ID", "保護者ID", "設定値", "備考",
+               "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定情報"
+         WHERE "スコープ" = 'GLOBAL'
+           AND "ページ区分" = #{pageCode}
+           AND "設定キー" = #{settingKey}
+    </select>
+
+    <select id="findGlobalByKeys" resultMap="ValueMap">
+        SELECT "設定ID", "ページ区分", "設定キー", "スコープ",
+               "学生ID", "保護者ID", "設定値", "備考",
+               "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定情報"
+         WHERE "スコープ" = 'GLOBAL'
+           AND "ページ区分" = #{pageCode}
+           AND "設定キー" IN
+        <foreach collection="keys" item="k" open="(" separator="," close=")">
+            #{k}
+        </foreach>
+    </select>
+
+    <select id="findAllGlobal" resultMap="ValueMap">
+        SELECT "設定ID", "ページ区分", "設定キー", "スコープ",
+               "学生ID", "保護者ID", "設定値", "備考",
+               "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定情報"
+         WHERE "スコープ" = 'GLOBAL'
+         ORDER BY "ページ区分", "設定キー"
+    </select>
+
+    <select id="findByScope" resultMap="ValueMap">
+        SELECT "設定ID", "ページ区分", "設定キー", "スコープ",
+               "学生ID", "保護者ID", "設定値", "備考",
+               "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."COM_設定情報"
+         WHERE "スコープ" = #{scope}
+           AND ("学生ID" = #{studentId} OR (#{studentId} IS NULL AND "学生ID" IS NULL))
+           AND ("保護者ID" = #{parentId} OR (#{parentId} IS NULL AND "保護者ID" IS NULL))
+         ORDER BY "ページ区分", "設定キー"
+    </select>
+
+    <update id="upsertGlobal">
+        INSERT INTO public."COM_設定情報"
+            ("ページ区分", "設定キー", "スコープ", "学生ID", "保護者ID",
+             "設定値", "備考", "登録ID", "更新ID", "登録日時", "更新日時")
+        VALUES
+            (#{pageCode}, #{settingKey}, 'GLOBAL', NULL, NULL,
+             #{settingValue}, #{note}, #{createdBy}, #{updatedBy}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ("ページ区分", "設定キー") WHERE "スコープ" = 'GLOBAL'
+        DO UPDATE SET
+            "設定値"   = EXCLUDED."設定値",
+            "備考"     = EXCLUDED."備考",
+            "更新ID"   = EXCLUDED."更新ID",
+            "更新日時" = CURRENT_TIMESTAMP
+    </update>
+
+    <update id="upsertScoped">
+        INSERT INTO public."COM_設定情報"
+            ("ページ区分", "設定キー", "スコープ", "学生ID", "保護者ID",
+             "設定値", "備考", "登録ID", "更新ID", "登録日時", "更新日時")
+        VALUES
+            (#{pageCode}, #{settingKey}, #{scope}, #{studentId}, #{parentId},
+             #{settingValue}, #{note}, #{createdBy}, #{updatedBy}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ON CONSTRAINT "PK_COM_設定情報"
+        DO NOTHING
+    </update>
+</mapper>

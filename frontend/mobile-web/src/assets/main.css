@@ -1,0 +1,42 @@
+/* Study 2.1 — Mobile 基本スタイル（Mobile First） */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Yu Gothic UI',
+    Meiryo, sans-serif;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-tap-highlight-color: transparent;
+}
+
+#app {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+a {
+  color: var(--color-link);
+}
+
+button {
+  font-family: inherit;
+  font-size: var(--fs-md);
+  min-height: 44px;
+  touch-action: manipulation;
+}
+
+input {
+  font-family: inherit;
+}

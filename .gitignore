@@ -1,0 +1,53 @@
+# ==== Dependencies ====
+node_modules/
+frontend/node_modules/
+.pnpm-store/
+
+# ==== Build output ====
+dist/
+frontend/*/dist/
+frontend/packages/*/dist/
+target/
+backend/*/target/
+*.tsbuildinfo
+*.class
+.vite/
+
+# ==== Logs ====
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==== Environment (secrets) ====
+.env
+.env.local
+.env.*.local
+
+# ==== IDE / editor ====
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# ==== Test / coverage output ====
+coverage/
+.nyc_output/
+frontend/coverage/
+frontend/*/coverage/
+.eslintcache
+
+# ==== Runtime PID / temp (Study 2.1 scripts only) ====
+tmp/
+*.pid
+.run/
+.cache/
+.workbuddy/
+data/
+*.tmp
+tmp-oldsystem-*.txt
+
+# ==== OS noise ====
+Thumbs.db
+Desktop.ini

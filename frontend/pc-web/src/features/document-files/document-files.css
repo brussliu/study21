@@ -1,0 +1,49 @@
+/* ファイル種別チップ（2.0 document.jsp の内容列と同じ配色・形）。
+   ファイル一覧ダイアログと資料カード行で共有する。 */
+.doc-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.doc-file-chip--pdf { background: rgba(255, 0, 0, 0.1); color: #d32f2f; }
+.doc-file-chip--zip { background: rgba(255, 165, 0, 0.1); color: #f57c00; }
+.doc-file-chip--image { background: rgba(76, 175, 80, 0.1); color: #388e3c; }
+.doc-file-chip--word { background: rgba(33, 150, 243, 0.1); color: #1976d2; }
+.doc-file-chip--excel { background: rgba(76, 175, 80, 0.1); color: #388e3c; }
+.doc-file-chip--other { background: rgba(69, 90, 100, 0.1); color: #455a64; }
+
+.doc-file-chip--pdf:hover { background: rgba(255, 0, 0, 0.18); }
+.doc-file-chip--zip:hover { background: rgba(255, 165, 0, 0.18); }
+.doc-file-chip--image:hover { background: rgba(76, 175, 80, 0.18); }
+.doc-file-chip--word:hover { background: rgba(33, 150, 243, 0.18); }
+.doc-file-chip--excel:hover { background: rgba(76, 175, 80, 0.18); }
+.doc-file-chip--other:hover { background: rgba(69, 90, 100, 0.18); }
+
+/* 表示しきれない件数（2.0 と同じ "+ N"） */
+.doc-file-chip--more {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+/* アイコン単体（ファイル一覧ダイアログの行）で使う配色 */
+.doc-files-icon {
+  flex: none;
+}
+
+.doc-files-icon--image { color: #388e3c; }
+.doc-files-icon--pdf { color: #d32f2f; }
+.doc-files-icon--word { color: #1976d2; }
+.doc-files-icon--excel { color: #388e3c; }
+.doc-files-icon--zip { color: #f57c00; }
+.doc-files-icon--other { color: #455a64; }

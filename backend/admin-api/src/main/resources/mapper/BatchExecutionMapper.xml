@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.batch.BatchExecutionMapper">
+
+    <resultMap id="ExecutionMap" type="com.study21.admin.batch.BatchExecutionEntity">
+        <id     property="executionId"  column="実行ID"/>
+        <result property="taskCode"     column="タスクコード"/>
+        <result property="status"       column="状態"/>
+        <result property="scheduleTime" column="予定時刻"/>
+        <result property="startTime"    column="開始時刻"/>
+        <result property="endTime"      column="終了時刻"/>
+        <result property="message"      column="メッセージ"/>
+        <result property="requestedBy"  column="依頼者"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="executionId">
+        INSERT INTO public."BAT_タスク実行情報"
+            ("タスクコード","タスク種別","起動種別","状態","要求内容","依頼者",
+             "予定時刻","開始時刻","終了時刻","メッセージ","登録日時","更新日時")
+        VALUES
+            (#{taskCode}, 'C', 'C', #{status}, NULL::jsonb, #{requestedBy},
+             CURRENT_TIMESTAMP, #{startTime}, NULL, #{message}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    </insert>
+
+    <update id="markRunning">
+        UPDATE public."BAT_タスク実行情報"
+           SET "状態" = 'RUNNING', "開始時刻" = CURRENT_TIMESTAMP, "更新日時" = CURRENT_TIMESTAMP
+         WHERE "実行ID" = #{executionId}
+    </update>
+
+    <update id="markFinished">
+        UPDATE public."BAT_タスク実行情報"
+           SET "状態" = #{status},
+               "終了時刻" = CURRENT_TIMESTAMP,
+               "メッセージ" = #{message},
+               "エラー詳細" = #{errorDetail},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "実行ID" = #{executionId}
+    </update>
+
+    <select id="findById" resultMap="ExecutionMap">
+        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
+          FROM public."BAT_タスク実行情報"
+         WHERE "実行ID" = #{executionId}
+    </select>
+
+    <select id="findRunningByTaskCode" resultMap="ExecutionMap">
+        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
+          FROM public."BAT_タスク実行情報"
+         WHERE "タスクコード" = #{taskCode}
+           AND "状態" IN ('QUEUED','RUNNING')
+         ORDER BY "実行ID" DESC
+         LIMIT 1
+    </select>
+
+    <select id="findRecent" resultMap="ExecutionMap">
+        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
+          FROM public."BAT_タスク実行情報"
+        <where>
+            <if test="taskCode != null and taskCode != ''">
+                "タスクコード" = #{taskCode}
+            </if>
+        </where>
+         ORDER BY "実行ID" DESC
+         LIMIT #{limit}
+    </select>
+
+    <select id="countByTaskCodeAndStatus" resultType="int">
+        SELECT count(*)
+          FROM public."BAT_タスク実行情報"
+         WHERE "タスクコード" = #{taskCode}
+           AND "状態" = #{status}
+    </select>
+</mapper>

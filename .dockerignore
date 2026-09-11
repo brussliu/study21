@@ -1,0 +1,43 @@
+# Build context 排除项：只保留构建镜像所需文件，减小上传到 NAS 的体积
+.git
+.gitignore
+.workbuddy
+node_modules
+frontend/node_modules
+frontend/pc-web/node_modules
+frontend/mobile-web/node_modules
+frontend/packages/web-shared/node_modules
+
+# 本地构建产物（镜像内会重新构建）
+frontend/pc-web/dist
+frontend/mobile-web/dist
+frontend/packages/web-shared/dist
+backend/target
+backend/*/target
+target
+dist
+
+# 运行时临时文件与日志
+tmp
+data
+.cache
+.vite
+.run
+coverage
+.nyc_output
+*.log
+*.pid
+*.tmp
+*.tsbuildinfo
+.eslintcache
+
+# 本地环境与敏感信息
+.env
+.env.*
+!.env.example
+
+# 文档与脚本（不参与镜像构建）
+docs
+scripts
+e2e
+README.md

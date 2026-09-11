@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.tempfile.TempFileMapper">
+    <resultMap id="TempFileMap" type="com.study21.user.tempfile.TempFileEntity">
+        <id property="tempFileId" column="一時ファイルID"/>
+        <result property="familyStudentId" column="家族学生ID"/>
+        <result property="originalFileName" column="元ファイル名称"/>
+        <result property="storedFileName" column="ファイル名称"/>
+        <result property="extension" column="拡張子"/>
+        <result property="mimeType" column="MIME_TYPE"/>
+        <result property="fileSize" column="ファイルサイズ"/>
+        <result property="path" column="パス"/>
+        <result property="thumbnail500" column="縮略ファイル500"/>
+        <result property="thumbnail200" column="縮略ファイル200"/>
+        <result property="thumbnail50" column="縮略ファイル50"/>
+        <result property="comment" column="コメント"/>
+        <result property="createdAt" column="登録日時"/>
+        <result property="updatedAt" column="更新日時"/>
+    </resultMap>
+
+    <select id="findFamilyStudentIds" resultType="long">
+        SELECT CASE WHEN A."アカウント種別" = 'STUDENT' THEN A."アカウントID" ELSE S."アカウントID" END
+          FROM public."ACC_アカウント" A
+          LEFT JOIN public."ACC_アカウント" S
+            ON A."アカウント種別" = 'GUARDIAN' AND S."保護者ID" = A."アカウントID"
+           AND S."アカウント種別" = 'STUDENT' AND S."状態" = '1'
+         WHERE A."アカウントID" = #{accountId} AND A."アカウント種別" = #{accountType}
+           AND A."状態" = '1'
+           AND (A."アカウント種別" = 'STUDENT' OR S."アカウントID" IS NOT NULL)
+    </select>
+
+    <select id="search" resultMap="TempFileMap">
+        SELECT * FROM public."COM_臨時ファイル情報" WHERE "家族学生ID" = #{familyStudentId}
+        <if test="keyword != null and keyword != ''">
+            AND ("元ファイル名称" ILIKE CONCAT('%',#{keyword},'%') OR COALESCE("コメント",'') ILIKE CONCAT('%',#{keyword},'%'))
+        </if>
+        <if test="imageOnly != null and imageOnly == true">
+            AND "MIME_TYPE" LIKE 'image/%'
+        </if>
+        <if test="imageOnly != null and imageOnly == false">
+            AND ("MIME_TYPE" IS NULL OR "MIME_TYPE" NOT LIKE 'image/%')
+        </if>
+        <if test="registeredSince != null">
+            AND "登録日時" &gt;= #{registeredSince}
+        </if>
+        <if test="registeredBefore != null">
+            AND "登録日時" &lt; #{registeredBefore}
+        </if>
+        ORDER BY "登録日時" DESC, "一時ファイルID" DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="findById" resultMap="TempFileMap">
+        SELECT * FROM public."COM_臨時ファイル情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "一時ファイルID" = #{tempFileId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="tempFileId" keyColumn="一時ファイルID">
+        INSERT INTO public."COM_臨時ファイル情報"
+          ("家族学生ID","元ファイル名称","ファイル名称","拡張子","MIME_TYPE","ファイルサイズ","パス",
+           "縮略ファイル500","縮略ファイル200","縮略ファイル50","コメント","登録ID","更新ID","登録日時","更新日時")
+        VALUES (#{familyStudentId},#{originalFileName},#{storedFileName},#{extension},#{mimeType},#{fileSize},#{path},
+                #{thumbnail500},#{thumbnail200},#{thumbnail50},#{comment},CAST(#{familyStudentId} AS VARCHAR),
+                CAST(#{familyStudentId} AS VARCHAR),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+
+    <update id="updateMeta">
+        UPDATE public."COM_臨時ファイル情報"
+           SET "元ファイル名称" = #{originalFileName}, "コメント" = #{comment},
+               "更新ID" = #{operator}, "更新日時" = CURRENT_TIMESTAMP
+         WHERE "家族学生ID" = #{familyStudentId} AND "一時ファイルID" = #{tempFileId}
+    </update>
+
+    <update id="updateImage">
+        UPDATE public."COM_臨時ファイル情報"
+           SET "元ファイル名称" = #{originalFileName}, "ファイル名称" = #{storedFileName},
+               "拡張子" = #{extension}, "MIME_TYPE" = #{mimeType}, "ファイルサイズ" = #{fileSize},
+               "パス" = #{path}, "縮略ファイル500" = #{thumbnail500}, "縮略ファイル200" = #{thumbnail200},
+               "縮略ファイル50" = #{thumbnail50}, "コメント" = #{comment},
+               "更新ID" = #{operator}, "更新日時" = CURRENT_TIMESTAMP
+         WHERE "家族学生ID" = #{familyStudentId} AND "一時ファイルID" = #{tempFileId}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM public."COM_臨時ファイル情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "一時ファイルID" = #{tempFileId}
+    </delete>
+
+    <delete id="deleteByIds">
+        DELETE FROM public."COM_臨時ファイル情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "一時ファイルID" IN
+        <foreach collection="ids" item="id" open="(" separator="," close=")">#{id}</foreach>
+    </delete>
+</mapper>

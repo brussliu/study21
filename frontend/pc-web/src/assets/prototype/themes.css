@@ -1,0 +1,68 @@
+/* =============================================================
+   STUDY 2.0 UI — Themes（暗色主题）
+   通过 <html data-theme="dark"> 切换。仅覆盖语义化别名，
+   布局/尺寸/圆角不变，保证明暗主题结构完全一致。
+   ============================================================= */
+
+html[data-theme="dark"] {
+  --color-bg:            #12161d;
+  --color-surface:       #1a2028;
+  --color-surface-alt:   #202732;
+  --color-surface-hover: #263039;
+  --color-border:        #2c3743;
+  --color-border-strong: #3a4654;
+
+  --color-text:          #d5dde6;
+  --color-text-strong:   #eef3f8;
+  --color-text-muted:    #9fb0c0;
+  --color-text-subtle:   #74889a;
+  --color-text-on-inverse: #0e1620;
+
+  --color-primary:        var(--primary-400);
+  --color-primary-hover:  var(--primary-500);
+  --color-primary-soft:   #15332c;
+  --color-primary-strong: var(--primary-400);
+  --color-on-primary:     #0e1d18;
+
+  --color-link:           #7fb3e8;
+  --color-link-hover:     #a5ccf2;
+
+  --color-danger:         #e57163;
+  --color-danger-hover:   #ef8577;
+  --color-danger-soft:    #3a201e;
+  --color-success:        #55c184;
+  --color-success-soft:   #163224;
+  --color-warning:        #e3a63d;
+  --color-warning-soft:   #372a14;
+  --color-info:           #6fa8e8;
+  --color-info-soft:      #18283a;
+
+  /* 阴影在暗色下更重 */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.45), 0 6px 20px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --shadow-dialog: 0 20px 60px rgba(0, 0, 0, 0.6);
+
+  /* 侧栏在暗色下更深 */
+  --sidebar-bg:        #131a23;
+  --sidebar-bg-deep:   #0d131b;
+  --sidebar-text:      #cdd7e2;
+  --sidebar-text-muted:#7f93a7;
+  --sidebar-hover-bg:  rgba(255, 255, 255, 0.06);
+}
+
+/* 暗色下的日期控件配色 */
+html[data-theme="dark"] .input[type="date"],
+html[data-theme="dark"] .input[type="time"],
+html[data-theme="dark"] .input[type="datetime-local"] {
+  color-scheme: dark;
+}
+
+/* 暗色下表格表头更沉 */
+html[data-theme="dark"] .data-table thead th { background: var(--color-surface-alt); }
+
+/* 暗色下遮罩更深 */
+html[data-theme="dark"] .overlay { background: rgba(0, 0, 0, 0.62); }
+
+/* 图片查看器/测试壳在明暗主题下保持一致（本身为深色容器） */
+.viewer-shell { background: #10161d; }

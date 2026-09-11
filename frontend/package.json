@@ -1,0 +1,49 @@
+{
+  "name": "study21-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Study 2.1 frontend monorepo (npm workspaces): pc-web, mobile-web, web-shared",
+  "workspaces": [
+    "pc-web",
+    "mobile-web",
+    "packages/*"
+  ],
+  "scripts": {
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "lint:pc": "npm run lint -w pc-web",
+    "lint:mobile": "npm run lint -w mobile-web",
+    "lint:shared": "npm run lint -w @study21/web-shared",
+    "typecheck:pc": "npm run typecheck -w pc-web",
+    "typecheck:mobile": "npm run typecheck -w mobile-web",
+    "test:pc": "npm run test -w pc-web",
+    "test:mobile": "npm run test -w mobile-web",
+    "test:shared": "npm run test -w @study21/web-shared",
+    "build:pc": "npm run build -w pc-web",
+    "build:mobile": "npm run build -w mobile-web",
+    "generate:prototype": "node ../scripts/generate-ui-pages.mjs",
+    "dev:pc": "npm run dev -w pc-web",
+    "dev:mobile": "npm run dev -w mobile-web"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@types/node": "^22.10.2",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.6",
+    "eslint": "^9.17.0",
+    "eslint-plugin-vue": "^9.32.0",
+    "jsdom": "^25.0.1",
+    "puppeteer-core": "^25.9.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.18.2",
+    "vite": "^6.0.7",
+    "vitest": "^3.0.5",
+    "vue-tsc": "^2.2.0"
+  }
+}

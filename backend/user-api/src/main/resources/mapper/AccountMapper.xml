@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.account.AccountMapper">
+
+    <resultMap id="AccountMap" type="com.study21.user.account.AccountEntity">
+        <id     property="accountId"    column="アカウントID"/>
+        <result property="loginId"      column="ログインID"/>
+        <result property="passwordHash" column="パスワードハッシュ"/>
+        <result property="accountType"  column="アカウント種別"/>
+        <result property="status"       column="状態"/>
+        <result property="sei"          column="姓"/>
+        <result property="mei"          column="名"/>
+        <result property="seiKana"      column="姓かな"/>
+        <result property="meiKana"      column="名かな"/>
+        <result property="grade"        column="学年"/>
+        <result property="guardianId"   column="保護者ID"/>
+        <result property="expiryDate"   column="有効期限"/>
+        <result property="termsAgreedAt" column="利用規約同意日時"/>
+        <result property="createdBy"    column="登録ID"/>
+        <result property="updatedBy"    column="更新ID"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="accountId" keyColumn="アカウントID">
+        INSERT INTO public."ACC_アカウント"
+            ("ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+             "姓", "名", "姓かな", "名かな", "学年", "保護者ID", "有効期限",
+             "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時")
+        VALUES
+            (#{loginId}, #{passwordHash}, #{accountType}, #{status},
+             #{sei}, #{mei}, #{seiKana}, #{meiKana}, #{grade}, #{guardianId}, #{expiryDate},
+             #{termsAgreedAt}, #{createdBy}, #{updatedBy}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    </insert>
+
+    <select id="findByLoginId" resultMap="AccountMap">
+        SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+               "姓", "名", "姓かな", "名かな", "学年", "保護者ID", "有効期限",
+               "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."ACC_アカウント"
+         WHERE LOWER("ログインID") = LOWER(#{loginId})
+           AND "アカウント種別" IN ('GUARDIAN', 'STUDENT')
+    </select>
+
+    <select id="existsByLoginId" resultType="int">
+        SELECT COUNT(*)
+          FROM public."ACC_アカウント"
+         WHERE LOWER("ログインID") = LOWER(#{loginId})
+    </select>
+
+    <update id="updatePasswordHash">
+        UPDATE public."ACC_アカウント"
+           SET "パスワードハッシュ" = #{passwordHash},
+               "更新ID" = 'PASSWORD_RESET',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+    </update>
+</mapper>

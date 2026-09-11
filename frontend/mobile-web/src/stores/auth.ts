@@ -1,0 +1,64 @@
+import { defineStore } from 'pinia'
+import { computed, ref } from 'vue'
+import type { Role } from '@study21/web-shared'
+
+// v2 は旧モック認証セッションを引き継がない。実API認証成功後だけ保存する。
+const STORAGE_KEY = 'study21.auth.v2'
+
+interface AuthSession {
+  username: string
+  role: Role
+}
+
+function readSession(): AuthSession | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = window.sessionStorage.getItem(STORAGE_KEY)
+    return value ? (JSON.parse(value) as AuthSession) : null
+  } catch {
+    return null
+  }
+}
+
+const DEFAULT_NAMES: Record<Role, string> = {
+  ADMIN: 'テスト管理者',
+  STUDENT: '山田 太郎',
+  GUARDIAN: '山田 花子'
+}
+
+export const useAuthStore = defineStore('auth', () => {
+  const initial = readSession()
+  const currentUser = ref<string | null>(initial?.username ?? null)
+  const role = ref<Role | null>(initial?.role ?? null)
+  const isAuthenticated = computed(() => currentUser.value !== null && role.value !== null)
+
+  /** 認証済みユーザーの画面セッションを保存する。パスワードは保存しない。 */
+  function login(nextRole: Role, username: string): void {
+    const normalizedUsername = username.trim()
+    if (normalizedUsername === '') {
+      throw new Error('認証済みユーザー名が空です。')
+    }
+    currentUser.value = normalizedUsername
+    role.value = nextRole
+    window.sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ username: normalizedUsername, role: nextRole } satisfies AuthSession)
+    )
+  }
+
+  /** 管理者画面の既存モック認証用。一般ユーザーログインでは使用しない。 */
+  function fakeLogin(nextRole: Role, username?: string): void {
+    login(nextRole, username?.trim() || DEFAULT_NAMES[nextRole])
+  }
+
+  function logout(): void {
+    if (role.value === 'STUDENT' || role.value === 'GUARDIAN') {
+      void fetch('/api/user/logout', { method: 'POST' }).catch(() => undefined)
+    }
+    currentUser.value = null
+    role.value = null
+    window.sessionStorage.removeItem(STORAGE_KEY)
+  }
+
+  return { isAuthenticated, currentUser, role, login, fakeLogin, logout }
+})

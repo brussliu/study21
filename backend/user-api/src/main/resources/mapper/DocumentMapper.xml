@@ -1,0 +1,245 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.document.DocumentMapper">
+    <resultMap id="DocumentMap" type="com.study21.user.document.DocumentEntity">
+        <id property="documentNo" column="資料番号"/>
+        <result property="familyStudentId" column="家族学生ID"/>
+        <result property="folderId" column="フォルダID"/>
+        <result property="status" column="ステータス"/>
+        <result property="expiryDate" column="有効期限"/>
+        <result property="largeCategory" column="大分類"/>
+        <result property="mediumCategory" column="中分類"/>
+        <result property="smallCategory" column="小分類"/>
+        <result property="detailCategory" column="細分類"/>
+        <result property="comment" column="コメント"/>
+        <result property="createdAt" column="登録日時"/>
+        <result property="updatedAt" column="更新日時"/>
+    </resultMap>
+    <resultMap id="FolderMap" type="com.study21.user.document.DocumentFolderEntity">
+        <id property="folderId" column="フォルダID"/>
+        <result property="familyStudentId" column="家族学生ID"/>
+        <result property="parentFolderId" column="親フォルダID"/>
+        <result property="folderName" column="フォルダ名称"/>
+        <result property="displayOrder" column="表示順"/>
+        <result property="note" column="備考"/>
+    </resultMap>
+    <resultMap id="FileMap" type="com.study21.user.document.DocumentFileEntity">
+        <id property="documentNo" column="資料番号"/>
+        <id property="branchNo" column="枝番号"/>
+        <result property="extension" column="拡張子"/>
+        <result property="originalFileName" column="元ファイル名称"/>
+        <result property="thumbnail500" column="縮略ファイル500"/>
+        <result property="thumbnail200" column="縮略ファイル200"/>
+        <result property="thumbnail50" column="縮略ファイル50"/>
+        <result property="comment" column="コメント"/>
+        <result property="path" column="パス"/>
+        <result property="storedFileName" column="ファイル名称"/>
+    </resultMap>
+
+    <select id="findFamilyStudentIds" resultType="long">
+        SELECT CASE WHEN A."アカウント種別" = 'STUDENT' THEN A."アカウントID" ELSE S."アカウントID" END
+          FROM public."ACC_アカウント" A
+          LEFT JOIN public."ACC_アカウント" S
+            ON A."アカウント種別" = 'GUARDIAN' AND S."保護者ID" = A."アカウントID"
+           AND S."アカウント種別" = 'STUDENT' AND S."状態" = '1'
+         WHERE A."アカウントID" = #{accountId} AND A."アカウント種別" = #{accountType}
+           AND A."状態" = '1'
+           AND (A."アカウント種別" = 'STUDENT' OR S."アカウントID" IS NOT NULL)
+    </select>
+
+    <select id="findFolders" resultMap="FolderMap">
+        SELECT * FROM public."DOC_フォルダ情報" WHERE "家族学生ID" = #{familyStudentId}
+         ORDER BY "表示順", "フォルダ名称", "フォルダID"
+    </select>
+    <select id="findFolder" resultMap="FolderMap">
+        SELECT * FROM public."DOC_フォルダ情報"
+         WHERE "家族学生ID" = #{familyStudentId} AND "フォルダID" = #{folderId}
+    </select>
+    <!--
+      フォルダ階層を根から順に並べた名称リスト（深さ 1=大分類 … 4=細分類 の導出元）。
+      unnest は配列の順序どおりに行を返すため、そのまま分類列へ割り当てられる。
+    -->
+    <select id="findFolderPathNames" resultType="string">
+        WITH RECURSIVE folder_tree AS (
+            SELECT "フォルダID", ARRAY["フォルダ名称"]::text[] AS path
+              FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID" = #{familyStudentId} AND "親フォルダID" IS NULL
+            UNION ALL
+            SELECT child."フォルダID", parent.path || child."フォルダ名称"
+              FROM public."DOC_フォルダ情報" child
+              JOIN folder_tree parent ON child."親フォルダID" = parent."フォルダID"
+             WHERE child."家族学生ID" = #{familyStudentId}
+        )
+        SELECT unnest(path) AS folder_name FROM folder_tree WHERE "フォルダID" = #{folderId}
+    </select>
+    <!-- ルート直下を 1 とした階層の深さ（1=大分類 … 4=細分類） -->
+    <select id="findFolderDepth" resultType="int">
+        WITH RECURSIVE ancestors AS (
+            SELECT "フォルダID", "親フォルダID", 1 AS depth
+              FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID" = #{familyStudentId} AND "フォルダID" = #{folderId}
+            UNION ALL
+            SELECT parent."フォルダID", parent."親フォルダID", child.depth + 1
+              FROM public."DOC_フォルダ情報" parent
+              JOIN ancestors child ON parent."フォルダID" = child."親フォルダID"
+             WHERE parent."家族学生ID" = #{familyStudentId}
+        )
+        SELECT COALESCE(MAX(depth), 0) FROM ancestors
+    </select>
+    <!-- 自身を 0 とした配下の最大階層差（親変更時の4階層チェック用） -->
+    <select id="findFolderSubtreeHeight" resultType="int">
+        WITH RECURSIVE subtree AS (
+            SELECT "フォルダID", 0 AS height FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID" = #{familyStudentId} AND "フォルダID" = #{folderId}
+            UNION ALL
+            SELECT child."フォルダID", parent.height + 1
+              FROM public."DOC_フォルダ情報" child
+              JOIN subtree parent ON child."親フォルダID" = parent."フォルダID"
+             WHERE child."家族学生ID" = #{familyStudentId}
+        )
+        SELECT COALESCE(MAX(height), 0) FROM subtree
+    </select>
+    <insert id="insertFolder" useGeneratedKeys="true" keyProperty="folderId" keyColumn="フォルダID">
+        INSERT INTO public."DOC_フォルダ情報"
+            ("家族学生ID", "親フォルダID", "フォルダ名称", "表示順", "備考", "登録ID", "更新ID")
+        VALUES (#{familyStudentId}, #{parentFolderId}, #{folderName}, #{displayOrder}, #{note},
+                CAST(#{familyStudentId} AS VARCHAR), CAST(#{familyStudentId} AS VARCHAR))
+    </insert>
+    <update id="updateFolder">
+        UPDATE public."DOC_フォルダ情報" SET "親フォルダID"=#{parentFolderId},
+               "フォルダ名称"=#{folderName}, "表示順"=#{displayOrder},
+               "備考"=#{note}, "更新ID"=#{operator}, "更新日時"=CURRENT_TIMESTAMP
+         WHERE "家族学生ID"=#{familyStudentId} AND "フォルダID"=#{folderId}
+    </update>
+    <select id="countFolderInSubtree" resultType="int">
+        WITH RECURSIVE subtree AS (
+            SELECT "フォルダID" FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID"=#{familyStudentId} AND "フォルダID"=#{rootFolderId}
+            UNION ALL
+            SELECT child."フォルダID" FROM public."DOC_フォルダ情報" child
+              JOIN subtree parent ON child."親フォルダID"=parent."フォルダID"
+             WHERE child."家族学生ID"=#{familyStudentId}
+        )
+        SELECT COUNT(*) FROM subtree WHERE "フォルダID"=#{candidateFolderId}
+    </select>
+    <!--
+      フォルダの名称・階層の変更を、配下資料の互換分類列（大分類〜細分類）へ反映する。
+      分類列はフォルダ階層から導出する（深さ 1=大分類 / 2=中分類 / 3=小分類 / 4=細分類）。
+      深さ 5 以上の階層は対応する列が無いため NULL になる。
+      値が変わる資料だけを更新し、更新ID/更新日時は変更しない（資料自体の編集ではないため、
+      一覧の更新日時順ソートを動かさない）。
+    -->
+    <update id="syncDocumentCategories">
+        WITH RECURSIVE folder_tree AS (
+            SELECT "フォルダID", ARRAY["フォルダ名称"]::text[] AS path
+              FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID"=#{familyStudentId} AND "親フォルダID" IS NULL
+            UNION ALL
+            SELECT child."フォルダID", parent.path || child."フォルダ名称"
+              FROM public."DOC_フォルダ情報" child
+              JOIN folder_tree parent ON child."親フォルダID"=parent."フォルダID"
+             WHERE child."家族学生ID"=#{familyStudentId}
+        ), subtree AS (
+            SELECT "フォルダID" FROM public."DOC_フォルダ情報"
+             WHERE "家族学生ID"=#{familyStudentId} AND "フォルダID"=#{folderId}
+            UNION ALL
+            SELECT child."フォルダID" FROM public."DOC_フォルダ情報" child
+              JOIN subtree parent ON child."親フォルダID"=parent."フォルダID"
+             WHERE child."家族学生ID"=#{familyStudentId}
+        )
+        UPDATE public."DOC_資料情報" d
+           SET "大分類"=tree.path[1], "中分類"=tree.path[2],
+               "小分類"=tree.path[3], "細分類"=tree.path[4]
+          FROM folder_tree tree
+         WHERE tree."フォルダID"=d."フォルダID"
+           AND d."家族学生ID"=#{familyStudentId}
+           AND d."フォルダID" IN (SELECT "フォルダID" FROM subtree)
+           AND (d."大分類" IS DISTINCT FROM tree.path[1] OR d."中分類" IS DISTINCT FROM tree.path[2]
+             OR d."小分類" IS DISTINCT FROM tree.path[3] OR d."細分類" IS DISTINCT FROM tree.path[4])
+    </update>
+    <select id="countFolderChildren" resultType="int">
+        SELECT COUNT(*) FROM public."DOC_フォルダ情報"
+         WHERE "家族学生ID"=#{familyStudentId} AND "親フォルダID"=#{folderId}
+    </select>
+    <select id="countFolderDocuments" resultType="int">
+        SELECT COUNT(*) FROM public."DOC_資料情報"
+         WHERE "家族学生ID"=#{familyStudentId} AND "フォルダID"=#{folderId}
+    </select>
+    <delete id="deleteFolder">
+        DELETE FROM public."DOC_フォルダ情報" WHERE "家族学生ID"=#{familyStudentId} AND "フォルダID"=#{folderId}
+    </delete>
+
+    <select id="findDocuments" resultMap="DocumentMap">
+        SELECT * FROM public."DOC_資料情報" WHERE "家族学生ID"=#{familyStudentId}
+        <if test="folderId != null">AND "フォルダID"=#{folderId}</if>
+        <if test="keyword != null and keyword != ''">
+            AND ("資料番号" ILIKE CONCAT('%',#{keyword},'%') OR COALESCE("コメント",'') ILIKE CONCAT('%',#{keyword},'%'))
+        </if>
+        ORDER BY "更新日時" DESC NULLS LAST, "資料番号" DESC
+    </select>
+    <select id="findDocument" resultMap="DocumentMap">
+        SELECT * FROM public."DOC_資料情報"
+         WHERE "家族学生ID"=#{familyStudentId} AND "資料番号"=#{documentNo}
+    </select>
+    <select id="countDocumentNo" resultType="int">
+        SELECT COUNT(*) FROM public."DOC_資料情報" WHERE "資料番号"=#{documentNo}
+    </select>
+    <select id="lockDocument" resultType="int">
+        SELECT 1 FROM public."DOC_資料情報"
+         WHERE "家族学生ID"=#{familyStudentId} AND "資料番号"=#{documentNo} FOR UPDATE
+    </select>
+    <insert id="insertDocument">
+        INSERT INTO public."DOC_資料情報"
+          ("資料番号","家族学生ID","フォルダID","ステータス","有効期限","大分類","中分類","小分類","細分類",
+           "コメント","登録ID","更新ID","登録日時","更新日時")
+        VALUES (#{documentNo},#{familyStudentId},#{folderId},#{status},#{expiryDate},#{largeCategory},#{mediumCategory},
+                #{smallCategory},#{detailCategory},#{comment},CAST(#{familyStudentId} AS VARCHAR),
+                CAST(#{familyStudentId} AS VARCHAR),CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+    <update id="updateDocument">
+        UPDATE public."DOC_資料情報" SET "フォルダID"=#{document.folderId},
+          "ステータス"=#{document.status}, "有効期限"=#{document.expiryDate},
+          "大分類"=#{document.largeCategory}, "中分類"=#{document.mediumCategory}, "小分類"=#{document.smallCategory},
+          "細分類"=#{document.detailCategory}, "コメント"=#{document.comment}, "更新ID"=#{operator},
+          "更新日時"=CURRENT_TIMESTAMP
+        WHERE "家族学生ID"=#{familyStudentId} AND "資料番号"=#{document.documentNo}
+    </update>
+    <delete id="deleteDocument">
+        DELETE FROM public."DOC_資料情報" WHERE "家族学生ID"=#{familyStudentId} AND "資料番号"=#{documentNo}
+    </delete>
+
+    <select id="findFiles" resultMap="FileMap">
+        SELECT D.* FROM public."DOC_資料詳細情報" D JOIN public."DOC_資料情報" M ON M."資料番号"=D."資料番号"
+         WHERE M."家族学生ID"=#{familyStudentId} AND D."資料番号"=#{documentNo} ORDER BY D."枝番号"
+    </select>
+    <!-- 家族内の全ファイル（資料ごとにまとめて返し、一覧のアイコン表示に使う） -->
+    <select id="findAllFiles" resultMap="FileMap">
+        SELECT D.* FROM public."DOC_資料詳細情報" D JOIN public."DOC_資料情報" M ON M."資料番号"=D."資料番号"
+         WHERE M."家族学生ID"=#{familyStudentId} ORDER BY D."資料番号", D."枝番号"
+    </select>
+    <select id="findFile" resultMap="FileMap">
+        SELECT D.* FROM public."DOC_資料詳細情報" D JOIN public."DOC_資料情報" M ON M."資料番号"=D."資料番号"
+         WHERE M."家族学生ID"=#{familyStudentId} AND D."資料番号"=#{documentNo} AND D."枝番号"=#{branchNo}
+    </select>
+    <select id="findMaxBranchNo" resultType="int">
+        SELECT COALESCE(MAX("枝番号"),0) FROM public."DOC_資料詳細情報" WHERE "資料番号"=#{documentNo}
+    </select>
+    <insert id="insertFile">
+        INSERT INTO public."DOC_資料詳細情報"
+          ("資料番号","枝番号","拡張子","元ファイル名称","縮略ファイル500","縮略ファイル200","縮略ファイル50",
+           "コメント","パス","ファイル名称","登録ID","更新ID","登録日時","更新日時")
+        VALUES (#{file.documentNo},#{file.branchNo},#{file.extension},#{file.originalFileName},#{file.thumbnail500},
+                #{file.thumbnail200},#{file.thumbnail50},#{file.comment},#{file.path},#{file.storedFileName},#{operator},
+                #{operator},CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+    </insert>
+    <delete id="deleteFile">
+        DELETE FROM public."DOC_資料詳細情報" D USING public."DOC_資料情報" M
+         WHERE M."資料番号"=D."資料番号" AND M."家族学生ID"=#{familyStudentId}
+           AND D."資料番号"=#{documentNo} AND D."枝番号"=#{branchNo}
+    </delete>
+    <delete id="deleteFilesByDocument">
+        DELETE FROM public."DOC_資料詳細情報" D USING public."DOC_資料情報" M
+         WHERE M."資料番号"=D."資料番号" AND M."家族学生ID"=#{familyStudentId}
+           AND D."資料番号"=#{documentNo}
+    </delete>
+</mapper>

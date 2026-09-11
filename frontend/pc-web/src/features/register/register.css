@@ -1,0 +1,193 @@
+/* =============================================================
+   STUDY 2.1 — 新規登録（保護者）画面スタイル
+   既存トークン（--color-* / --sp-* / --fs-* / --radius-*）のみ使用。
+   components.css / forms.css の上に薄く重ねる専用クラス群。
+   ============================================================= */
+
+/* ---------- ページ外枠（ログインと同様の全画面センタリング） ---------- */
+.register-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+}
+
+/* ---------- 登録フォームカード ---------- */
+.register-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  box-shadow: var(--shadow-md);
+}
+.register-card__title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+.register-card__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+}
+.register-card__hint b { color: var(--color-text); font-weight: var(--fw-medium); }
+
+/* ---------- セクション見出し（ステップ2 のログイン情報など） ---------- */
+.register-card__section {
+  margin: 0;
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+.register-card__section + .register-card__hint {
+  margin-top: calc(-1 * var(--sp-1));
+}
+
+/* ---------- ステッパー ---------- */
+.stepper {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  margin-bottom: var(--sp-2);
+}
+.stepper__step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.stepper__dot {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  background: var(--color-surface);
+  border: 1.5px solid var(--color-border-strong);
+  color: var(--color-text-subtle);
+  flex: 0 0 auto;
+  transition: all var(--duration-base) var(--ease-standard);
+}
+.stepper__label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+.stepper__line {
+  width: 48px;
+  height: 1.5px;
+  background: var(--color-border-strong);
+  margin: 0 var(--sp-3);
+  align-self: center;
+  transition: background-color var(--duration-base) var(--ease-standard);
+}
+.stepper__step.is-active .stepper__dot {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-on-primary);
+}
+.stepper__step.is-active .stepper__label {
+  color: var(--color-text);
+  font-weight: var(--fw-medium);
+}
+.stepper__step.is-done .stepper__dot {
+  background: var(--color-success);
+  border-color: var(--color-success);
+  color: #ffffff;
+}
+.stepper__step.is-done .stepper__label { color: var(--color-text-muted); }
+.stepper__line.is-done { background: var(--color-success); }
+
+/* 同意チェックとエラー間の余白調整 */
+.register-card .field__error--standalone { margin-top: calc(-1 * var(--sp-2)); }
+
+/* 必須マーク（設計システム未定義のため本機能で定義） */
+.field__label .req {
+  color: var(--color-danger);
+  margin-left: 4px;
+  font-size: var(--fs-2xs);
+}
+
+/* 全幅ボタン（設計システム未定義のため本機能で定義） */
+.btn--block { width: 100%; }
+
+/* ---------- 登録完了 ---------- */
+.done-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--sp-7);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+.done-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.done-icon svg { width: 28px; height: 28px; }
+.done-card__title {
+  margin: 0;
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-semibold);
+}
+.done-card__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+.summary {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.summary__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  font-size: var(--fs-sm);
+}
+.summary__row + .summary__row { border-top: 1px solid var(--color-border); }
+.summary__label { color: var(--color-text-muted); flex: 0 0 auto; }
+.summary__value {
+  color: var(--color-text);
+  font-weight: var(--fw-medium);
+  text-align: right;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.done-card .alert { width: 100%; text-align: left; }
+.done-card .form-actions { width: 100%; }
+
+/* レスポンシブ：ステッパーが狭い画面で潰れないように */
+@media (max-width: 640px) {
+  .stepper__line { width: 28px; margin: 0 var(--sp-2); }
+  .register-card, .done-card { padding: var(--sp-5); }
+}

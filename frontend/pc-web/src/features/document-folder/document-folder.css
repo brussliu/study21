@@ -1,0 +1,396 @@
+/* =============================================================
+   資料管理（フォルダ表示）— ページ専用スタイル
+   左：フォルダツリー／中：資料リスト／右：詳細ドロワー
+   ============================================================= */
+
+.doc-folder-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+/* ---------- ワークスペース（3 領域） ---------- */
+.doc-folder-workspace {
+  position: relative;
+  display: flex;
+  min-height: 560px;
+  max-height: calc(100vh - 200px);
+  overflow: hidden;
+}
+
+/* ---------- 左：フォルダツリー ---------- */
+.doc-folder-tree {
+  width: 232px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.doc-folder-tree__head {
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium, 600);
+  color: var(--color-text-subtle);
+  letter-spacing: 0.04em;
+}
+
+.doc-folder-tree__body {
+  flex: 1;
+  overflow: auto;
+  padding: 0 var(--sp-2) var(--sp-3);
+}
+
+/* ツリー下部の操作アイコン（フォルダ追加 / 名称変更 / 削除）。
+   削除は共通の .btn--icon.is-danger（assets/app/actions.css）で赤くする。 */
+.doc-folder-tree__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.doc-tree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.doc-tree__row:hover {
+  background: var(--color-surface-hover);
+}
+
+.doc-tree__row.is-selected {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+}
+
+.doc-tree__chev {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  color: var(--color-text-subtle);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.doc-tree__chev:hover {
+  color: var(--color-text);
+  background: var(--color-surface-hover);
+}
+
+.doc-tree__chev--blank {
+  visibility: hidden;
+}
+
+.doc-tree__icon {
+  color: #d9a038;
+  flex: none;
+}
+
+.doc-tree__row.is-selected .doc-tree__icon {
+  color: var(--color-primary-strong);
+}
+
+.doc-tree__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-tree__count {
+  flex: none;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 中：資料リスト ---------- */
+.doc-folder-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.doc-folder-main__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.doc-folder-main__crumb {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium, 600);
+  color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-folder-main__meta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+  flex: none;
+}
+
+.doc-folder-main__search {
+  margin-left: auto;
+  width: 220px;
+  flex: none;
+}
+
+.doc-folder-list {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-3) var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.doc-folder-list__empty {
+  padding: var(--sp-6);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 資料カード行 ---------- */
+.doc-card {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.doc-card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.doc-card.is-active {
+  border-color: var(--color-primary-strong);
+  background: var(--color-primary-soft);
+}
+
+/* 資料番号の行（番号の右にファイルごとのアイコンを並べる） */
+.doc-card__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.doc-card__info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.doc-card__no {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium, 600);
+  color: var(--color-text-strong);
+}
+
+.doc-card__sub {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-card__expiry {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.doc-card__action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.doc-card__action:hover {
+  background: var(--color-surface-hover);
+  color: var(--color-primary-strong);
+}
+
+.doc-card__action:disabled {
+  color: var(--color-text-subtle);
+  cursor: default;
+}
+
+/* ---------- 右：詳細ドロワー ---------- */
+.doc-folder-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border-strong);
+  transform: translateX(105%);
+  transition: transform 0.28s var(--ease-standard);
+  box-shadow: -4px 0 12px rgba(19, 26, 34, 0.08);
+}
+
+.doc-folder-drawer.is-open {
+  transform: translateX(0);
+}
+
+.doc-folder-drawer__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.doc-folder-drawer__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium, 600);
+  color: var(--color-text-strong);
+}
+
+.doc-folder-drawer__close {
+  margin-left: auto;
+}
+
+.doc-folder-drawer__body {
+  flex: 1;
+  overflow: auto;
+  padding: var(--sp-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.doc-folder-drawer__path {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.doc-folder-drawer__preview {
+  height: 160px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  background: var(--color-surface-alt);
+}
+
+.doc-folder-drawer__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-3);
+}
+
+.doc-folder-drawer__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.doc-folder-drawer__field--wide {
+  grid-column: 1 / -1;
+}
+
+/* ---------- 分類（フォルダ階層から導出。編集不可のため読み取り専用表示） ---------- */
+.doc-folder-drawer__categories {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-2) var(--sp-3);
+}
+
+.doc-folder-drawer__category {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.doc-folder-drawer__category-label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.doc-folder-drawer__category-value {
+  min-height: var(--control-sm);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.doc-folder-drawer__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ---------- 狭い画面ではツリーを折りたたみ ---------- */
+@media (max-width: 960px) {
+  .doc-folder-tree {
+    width: 180px;
+  }
+
+  .doc-folder-drawer {
+    width: 300px;
+  }
+
+  .doc-folder-main__search {
+    width: 140px;
+  }
+}

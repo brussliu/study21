@@ -1,0 +1,447 @@
+/* ============================================================================
+   リンククリップ（2 ペイン: 仕分け / 保存リンク一覧。
+   新規・編集はダイアログ、詳細は右からスライドするドロワー）
+   ============================================================================ */
+
+.lc-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* ---------- 新規 / 編集ダイアログ ---------- */
+.lc-composer__status {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-3);
+}
+
+.lc-form-grid .field--wide {
+  grid-column: 1 / -1;
+}
+
+/* ダイアログのフッターで右寄せ／左寄せを分けるためのスペーサー。 */
+.lc-spacer {
+  flex: 1;
+}
+
+/* プレビュー（保存前の取得結果） */
+.lc-preview {
+  display: flex;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.lc-preview__thumb {
+  flex: none;
+  width: 96px;
+  height: 72px;
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--color-surface);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-subtle);
+  border: 1px solid var(--color-border);
+}
+
+.lc-preview__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lc-preview__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lc-preview__title {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.lc-preview__meta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 2 ペイン（仕分け / 一覧） ---------- */
+.lc-body {
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .lc-body { grid-template-columns: 1fr; }
+}
+
+/* ---------- 左: 仕分けレーン ---------- */
+.lc-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  position: sticky;
+  top: var(--sp-4);
+}
+
+.lc-lane {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.lc-lane:hover {
+  background: var(--color-surface-hover);
+}
+
+.lc-lane.is-active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-100, var(--color-primary-soft));
+}
+
+.lc-lane__icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
+
+.lc-lane.is-active .lc-lane__icon {
+  color: var(--color-primary);
+}
+
+.lc-lane__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.lc-lane__label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-strong);
+}
+
+.lc-lane__desc {
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+  overflow-wrap: anywhere;
+}
+
+.lc-lane__count {
+  flex: none;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 中: 一覧 ---------- */
+.lc-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.lc-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.lc-card {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard);
+}
+
+.lc-card:hover {
+  border-color: var(--color-border-strong);
+}
+
+.lc-card.is-selected {
+  border-color: var(--color-primary-strong);
+  box-shadow: 0 0 0 3px var(--color-primary-soft);
+}
+
+.lc-card__thumb {
+  flex: none;
+  width: 112px;
+  height: 84px;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-subtle);
+}
+
+.lc-card__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.lc-card__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+.lc-card__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.lc-card__summary {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.lc-card__tags {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+
+.lc-card__actions {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+/* タグ */
+.lc-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.lc-tag:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.lc-tag--static {
+  cursor: default;
+}
+
+.lc-tag--active {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-100, var(--color-primary-soft));
+  color: var(--color-primary-700, var(--color-primary));
+}
+
+/* ---------- 右: 詳細ドロワー（右からスライドして出る） ---------- */
+.lc-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: rgba(8, 13, 19, 0.45);
+  display: flex;
+  justify-content: flex-end;
+  animation: lc-overlay-in var(--duration-base) var(--ease-standard);
+}
+
+@keyframes lc-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.lc-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: min(420px, 100%);
+  height: 100%;
+  overflow: auto;
+  padding: var(--sp-4);
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  box-shadow: var(--shadow-lg);
+  animation: lc-drawer-in var(--duration-base) var(--ease-standard);
+}
+
+@keyframes lc-drawer-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.lc-detail__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.lc-detail__title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.lc-detail__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-subtle);
+}
+
+.lc-detail__url {
+  font-size: var(--fs-xs);
+  color: var(--color-link);
+  overflow-wrap: anywhere;
+}
+
+.lc-detail__section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.lc-detail__section-title {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+.lc-detail__text {
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.lc-detail__actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.lc-metrics {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 4px var(--sp-3);
+  font-size: var(--fs-sm);
+}
+
+.lc-metrics__label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.lc-empty {
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+/* 一覧の状態表示（読込中など） */
+.lc-state {
+  padding: var(--sp-6);
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+/* ローカルファイルのパス表示 */
+.lc-path {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* お気に入り中のアイコンボタン。
+   赤（is-danger）は削除専用なので、お気に入りは黄色系で示す。 */
+.btn--icon.is-favorite {
+  color: var(--color-warning);
+}
+
+.btn--icon.is-favorite:hover:not(:disabled) {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}

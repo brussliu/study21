@@ -1,0 +1,71 @@
+/* =============================================================
+   STUDY 2.0 UI — Responsive（响应式断点）
+   桌面优先；小屏下侧栏抽屉化、检索/表单降列。
+   ============================================================= */
+
+/* 平板：收窄侧栏、表单降列 */
+@media (max-width: 1024px) {
+  .sidebar { width: 220px; }
+  .form-grid--4 { grid-template-columns: repeat(2, 1fr); }
+  .form-grid--3 { grid-template-columns: repeat(2, 1fr); }
+  .page { padding: var(--sp-4) var(--sp-4) var(--sp-8); }
+}
+
+/* 手机：侧栏抽屉化 */
+@media (max-width: 768px) {
+  .app { position: relative; }
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: 260px;
+    transform: translateX(-100%);
+    transition: transform var(--duration-base) var(--ease-standard);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar.is-open { transform: translateX(0); }
+
+  /* 侧栏抽屉遮罩 */
+  .sidebar-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: calc(var(--z-sidebar) - 1);
+    background: rgba(13, 20, 28, 0.5);
+    display: none;
+  }
+  .sidebar-backdrop.is-visible { display: block; }
+
+  .topbar { padding: 0 var(--sp-4); }
+  .topbar__inspire { display: none; }
+  .topbar__meta { display: none; }
+
+  .page { padding: var(--sp-4) var(--sp-3) var(--sp-7); }
+  .page-head__title { font-size: var(--fs-xl); }
+
+  .form-grid,
+  .form-grid--3,
+  .form-grid--4 { grid-template-columns: 1fr; }
+  .filters__row { flex-direction: column; gap: var(--sp-3); }
+  .filter-item { align-items: flex-start; flex-direction: column; gap: var(--sp-1); }
+  .filter-item .input,
+  .filter-item .select { width: 100%; min-width: 0; }
+
+  .dialog { max-height: calc(100vh - 16px); border-radius: var(--radius-lg); }
+  .overlay { padding: var(--sp-2); align-items: flex-end; }
+  .dialog:not(.dialog--full) { border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .dialog--sm, .dialog--md, .dialog--lg { max-width: none; }
+
+  .test-shell { padding: var(--sp-3); }
+  .test-nav { flex-direction: column; gap: var(--sp-3); }
+
+  .pagination { justify-content: center; }
+  .pagination__size { display: none; }
+}
+
+/* 超小屏 */
+@media (max-width: 480px) {
+  .page-head { flex-direction: column; align-items: flex-start; }
+  .page-head__actions { width: 100%; }
+  .page-head__actions .btn { flex: 1; }
+  .test-meta { gap: var(--sp-2); }
+}

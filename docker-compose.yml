@@ -1,0 +1,86 @@
+# Study 2.1 — 飞牛 NAS Docker 部署（三部分独立，互不影响）
+#
+# 三个独立镜像 / 三个独立容器：
+#   部分1  study21-web         nginx（PC/Mobile 前端 + 反向代理）
+#   部分2  study21-admin-api   可执行 JAR（内嵌 Tomcat，java -jar）
+#   部分3  study21-user-api    可执行 JAR（内嵌 Tomcat，java -jar）
+#
+# 首次全量：docker compose up -d --build
+# 只更新某一个（另外两个容器不受影响、不重启）：
+#   docker compose up -d --build web
+#   docker compose up -d --build admin-api
+#   docker compose up -d --build user-api
+#
+# 端口规划（避免与 study2 冲突，study2 现用 8080 / 54320）：
+#   PC 前端       http://<NAS-IP>:8090
+#   Mobile 前端   http://<NAS-IP>:8091
+#   admin-api     http://<NAS-IP>:8081
+#   user-api      http://<NAS-IP>:8082
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/nginx.Dockerfile
+    container_name: study21-web
+    ports:
+      - "8090:80"   # PC 前端
+      - "8091:81"   # Mobile 前端
+    depends_on:
+      - admin-api
+      - user-api
+    restart: unless-stopped
+    networks:
+      - study21
+
+  admin-api:
+    build:
+      context: .
+      dockerfile: deploy/docker/admin-api.Dockerfile
+    container_name: study21-admin-api
+    environment:
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${STUDY21_ALLOWED_ORIGINS:-http://localhost:8090,http://localhost:8091}
+      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://localhost:54320/study21}
+      STUDY21_DATASOURCE_USERNAME: ${STUDY21_DATASOURCE_USERNAME:-postgres}
+      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在未提交的 .env 中设置 STUDY21_DATASOURCE_PASSWORD}
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+    networks:
+      - study21
+
+  user-api:
+    build:
+      context: .
+      dockerfile: deploy/docker/user-api.Dockerfile
+    container_name: study21-user-api
+    environment:
+      APP_ENV: production
+      ALLOWED_ORIGINS: ${STUDY21_ALLOWED_ORIGINS:-http://localhost:8090,http://localhost:8091}
+      # DB 接続情報（保護者/生徒アカウントの登録・ログインに使用。
+      # admin-api と同じ接続先。パスワード未設定だと SCRAM 認証エラーで 500 になる）
+      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://localhost:54320/study21}
+      STUDY21_DATASOURCE_USERNAME: ${STUDY21_DATASOURCE_USERNAME:-postgres}
+      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在未提交的 .env 中设置 STUDY21_DATASOURCE_PASSWORD}
+      # 新規資料は家族別の非公開領域へ保存。旧2.0ルートは移行期間だけ読取専用で指定可能。
+      STUDY21_DOCUMENT_STORAGE_ROOT: /app/data/documents
+      STUDY2_DOCUMENT_STORAGE_ROOT: /app/data/legacy-documents
+      # 臨時ファイル（アップロード画像など）の保存領域
+      STUDY21_TEMPFILE_STORAGE_ROOT: /app/data/temp-files
+      # テスト情報の試験用紙ファイルの保存領域
+      STUDY21_TESTFILE_STORAGE_ROOT: /app/data/test-files
+    volumes:
+      - ${STUDY21_DOCUMENT_STORAGE_HOST_PATH:-./data/documents}:/app/data/documents
+      - ${STUDY2_DOCUMENT_STORAGE_HOST_PATH:-./data/legacy-documents}:/app/data/legacy-documents:ro
+      - ${STUDY21_TEMPFILE_STORAGE_HOST_PATH:-./data/temp-files}:/app/data/temp-files
+      - ${STUDY21_TESTFILE_STORAGE_HOST_PATH:-./data/test-files}:/app/data/test-files
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+    networks:
+      - study21
+
+networks:
+  study21:
+    driver: bridge

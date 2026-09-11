@@ -1,0 +1,146 @@
+/* =============================================================
+   STUDY 2.0 UI — Tables（数据表 + 分页）
+   ============================================================= */
+
+.table-section {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.table-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.table-section__title {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.table-section__meta { font-size: var(--fs-sm); color: var(--color-text-muted); }
+
+.table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.data-table {
+  width: 100%;
+  min-width: var(--table-min);
+  font-size: var(--fs-sm);
+}
+.data-table th,
+.data-table td {
+  padding: var(--sp-3) var(--sp-4);
+  text-align: left;
+  vertical-align: middle;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-surface-alt);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  border-bottom: 1px solid var(--color-border-strong);
+}
+.data-table tbody tr { transition: background-color var(--duration-fast) var(--ease-standard); }
+.data-table tbody tr:hover { background: var(--color-surface-hover); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table tbody tr.is-selected { background: var(--color-primary-soft); }
+
+.data-table .cell-strong { font-weight: var(--fw-semibold); color: var(--color-text-strong); }
+.data-table .cell-muted { color: var(--color-text-muted); }
+.data-table .cell-nowrap { white-space: nowrap; }
+
+/* 列对齐工具 */
+.data-table th.align-right, .data-table td.align-right { text-align: right; }
+.data-table th.align-center, .data-table td.align-center { text-align: center; }
+
+/* 可排序列 */
+.data-table th.is-sortable { cursor: pointer; user-select: none; }
+.data-table th.is-sortable:hover { color: var(--color-text); }
+.sort-icon {
+  display: inline-flex;
+  margin-left: var(--sp-1);
+  color: var(--color-text-subtle);
+  vertical-align: -2px;
+}
+.data-table th.is-sorted .sort-icon { color: var(--color-primary); }
+
+/* 复选列 / 操作列 */
+.data-table .col-check { width: 40px; }
+.data-table .col-actions { width: 120px; }
+.row-actions { display: inline-flex; gap: var(--sp-1); }
+/* <td class="row-actions"> に display を当てると table-cell でなくなり、
+   その列だけ行の下罫線が途切れる（セルが匿名 table-cell に包まれ、罫線を持つ
+   箱がインラインサイズになるため）。セルは table-cell のまま維持し、
+   ボタンの間隔は子要素の margin で確保する。 */
+td.row-actions { display: table-cell; }
+td.row-actions > * + * { margin-left: var(--sp-1); }
+
+/* ---------- 分页 ---------- */
+.pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+.pagination__info { font-size: var(--fs-sm); color: var(--color-text-muted); }
+.pagination__pages { display: flex; align-items: center; gap: var(--sp-1); }
+.page-btn {
+  min-width: 32px;
+  height: 32px;
+  padding: 0 var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+.page-btn:hover:not(:disabled):not(.is-active) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+.page-btn.is-active {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+  color: #ffffff;
+}
+.page-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.page-dots { color: var(--color-text-subtle); padding: 0 var(--sp-1); }
+
+/* 每页条数选择 */
+.pagination__size {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+.pagination__size .select { width: auto; height: var(--control-sm); }
