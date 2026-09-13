@@ -292,7 +292,7 @@ onMounted(load)
           <span class="doc-folder-main__meta">{{ documents.length }} 件</span>
           <input v-model="keyword" class="input doc-folder-main__search" type="search" placeholder="資料番号・コメント" @keyup.enter="load" />
           <button class="btn btn--primary" type="button" @click="load"><AppIcon name="search" size="sm" />検索</button>
-          <button class="btn btn--secondary" type="button" @click="newDocument"><AppIcon name="plus" size="sm" />新規</button>
+          <button class="btn btn--primary" type="button" @click="newDocument"><AppIcon name="plus" size="sm" /> 新規</button>
         </div>
         <div class="doc-folder-list">
           <div v-if="loading" class="doc-folder-list__empty">読込中...</div>

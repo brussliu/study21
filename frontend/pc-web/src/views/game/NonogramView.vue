@@ -24,6 +24,11 @@ type Mode = 'fill' | 'cross'
 /** 選択中のサイズ（プリセットの key）。 */
 const presetKey = ref<string>(NONOGRAM_PRESETS[0].key)
 const puzzle = ref<NonogramPuzzle>(createPuzzle(presetKey.value))
+/** 盤面のマスの大きさ（px）。5×5 は絵柄が見やすいように大きめにする。 */
+const CELL_SIZE_SMALL_PX = 56
+const CELL_SIZE_PX = 40
+/** 出題中の問題の大きさに合わせたマスの大きさ。 */
+const cellSize = computed(() => (puzzle.value.size <= 5 ? CELL_SIZE_SMALL_PX : CELL_SIZE_PX))
 const states = ref<NonoState[]>(freshStates())
 const mode = ref<Mode>('fill')
 /** ヒントで確定したマス（黄色い枠で示す）。 */
@@ -236,7 +241,7 @@ function cellLabel(state: NonoState, index: number): string {
           <span class="card__sub">{{ puzzle.size }} × {{ puzzle.size }} ／ {{ puzzle.label }}</span>
         </div>
         <div class="card__body gm-board-body">
-          <div class="gm-nono" :class="{ 'is-small': puzzle.size <= 5 }">
+          <div class="gm-nono" :style="{ '--gm-cell': `${cellSize}px` }">
             <span />
             <div
               class="gm-nono__colclues"
@@ -319,7 +324,8 @@ function cellLabel(state: NonoState, index: number): string {
               <div class="gm-toolbar">
                 <label class="field field--inline">
                   <span class="field__label">サイズ</span>
-                  <select v-model="presetKey" class="select" @change="newPuzzle">
+                  <!-- 選んだサイズは次の【新しい問題】から使う（解いている問題は変わらない）。 -->
+                  <select v-model="presetKey" class="select">
                     <option v-for="preset in NONOGRAM_PRESETS" :key="preset.key" :value="preset.key">
                       {{ preset.label }}
                     </option>

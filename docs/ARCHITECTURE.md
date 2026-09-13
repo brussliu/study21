@@ -5,7 +5,7 @@
 Study 2.1 是一个独立代码仓库，包含四个可独立构建、独立部署的应用：
 
 1. `pc-web`（PC 前端）
-2. `mobile-web`（Mobile 前端 / PWA）
+2. `mobile-web`（Mobile 前端 / PWA）… 骨組みのみ（業務画面は後で追加）
 3. `admin-api`（管理员后端）
 4. `user-api`（普通用户后端，供学生与家长使用）
 

@@ -66,10 +66,23 @@ async function clickCell(target: VueWrapper, index: number): Promise<void> {
   await target.findAll('.gm-gomoku-cell')[index].trigger('click')
 }
 
+/** 【新しい対局】ボタンを押す（モードの変更が反映されるのはここだけ）。 */
+async function clickNewGame(target: VueWrapper): Promise<void> {
+  const button = target.findAll('.gm-actions button').find((item) => item.text().includes('新しい対局'))
+  expect(button).toBeTruthy()
+  await button!.trigger('click')
+}
+
 /** 盤面のマスにフォーカスを当てる（矢印キーのテスト用）。 */
 function focusCell(target: VueWrapper, index: number): void {
   const element = target.findAll('.gm-gomoku-cell')[index].element
   if (element instanceof HTMLElement) element.focus()
+}
+
+/** 同じ画面で 2 人打つモードにする（既定は CPU なので、明示的に切り替えてから始める）。 */
+async function startSameScreenGame(target: VueWrapper): Promise<void> {
+  await target.get('[data-solo-mode]').setValue('local')
+  await clickNewGame(target)
 }
 
 /** 積み上がったトーストを取り出す。 */
@@ -282,8 +295,15 @@ describe('五目並べ：画面', () => {
     expect(view.text()).toContain('対局前')
   })
 
-  it('クリックすると石が置かれ、直前の着手に印が付く', async () => {
+  it('盤面のマスの大きさは --gm-cell で指定する（40px）', async () => {
     const view = await mountView()
+    const board = view.find('.gm-gomoku').element as HTMLElement
+    expect(board.style.getPropertyValue('--gm-cell').trim()).toBe('40px')
+  })
+
+  it('クリックすると石が置かれ、直前の着手に印が付く（同じ画面で 2 人）', async () => {
+    const view = await mountView()
+    await startSameScreenGame(view)
     await clickCell(view, at(7, 7))
     const cell = view.findAll('.gm-gomoku-cell')[at(7, 7)]
     expect(cell.classes()).toContain('is-taken')
@@ -303,8 +323,9 @@ describe('五目並べ：画面', () => {
     expect(view.findAll('.gm-metric__value')[0].text()).toBe('1')
   })
 
-  it('5 連を並べると勝利表示とトーストになる', async () => {
+  it('5 連を並べると勝利表示とトーストになる（同じ画面で 2 人）', async () => {
     const view = await mountView()
+    await startSameScreenGame(view)
     // 黒（先手）が 1 行目に 5 連、白は 11 行目に 4 つまで
     for (const index of [at(0, 0), at(10, 0), at(0, 1), at(10, 1), at(0, 2), at(10, 2), at(0, 3), at(10, 3), at(0, 4)]) {
       await clickCell(view, index)
@@ -319,8 +340,9 @@ describe('五目並べ：画面', () => {
     expect(view.findAll('.gm-stone')).toHaveLength(9)
   })
 
-  it('「待った」で直前の手を戻す（2 人対戦は 1 手）', async () => {
+  it('「待った」で直前の手を戻す（同じ画面で 2 人は 1 手）', async () => {
     const view = await mountView()
+    await startSameScreenGame(view)
     await clickCell(view, at(0, 0))
     await clickCell(view, at(10, 0))
     const undoButton = view.findAll('.gm-actions button')[1]
@@ -355,10 +377,37 @@ describe('五目並べ：画面', () => {
     expect(document.activeElement?.getAttribute('aria-label')).toBe('1行1列 空き')
   })
 
+  it('モードを変えても対局はやり直さず、新しい対局で反映する', async () => {
+    vi.useFakeTimers()
+    const view = await mountView()
+    await startSameScreenGame(view)
+    await clickCell(view, at(7, 7))
+    expect(view.findAll('.gm-stone')).toHaveLength(1)
+
+    await view.get('[data-solo-mode]').setValue('cpu')
+
+    // 対局はそのまま（CPU も動き出さない）
+    expect(view.findAll('.gm-stone')).toHaveLength(1)
+    expect(view.text()).not.toContain('CPU の手番')
+    vi.advanceTimersByTime(300)
+    await view.vm.$nextTick()
+    expect(view.findAll('.gm-stone')).toHaveLength(1)
+
+    // 【新しい対局】を押したときだけ反映される
+    await clickNewGame(view)
+    expect(view.findAll('.gm-stone')).toHaveLength(0)
+    await clickCell(view, at(7, 7))
+    expect(view.text()).toContain('CPU の手番')
+    vi.advanceTimersByTime(300)
+    await view.vm.$nextTick()
+    expect(view.findAll('.gm-stone')).toHaveLength(2)
+  })
+
   it('CPU モードでは自分の着手後に CPU が白を打つ', async () => {
     vi.useFakeTimers()
     const view = await mountView()
-    await view.find('select').setValue('cpu')
+    await view.get('[data-solo-mode]').setValue('cpu')
+    await clickNewGame(view)
     await clickCell(view, at(7, 7))
     expect(view.findAll('.gm-stone')).toHaveLength(1)
     expect(view.text()).toContain('CPU の手番')
@@ -375,7 +424,8 @@ describe('五目並べ：画面', () => {
   it('CPU モードの「待った」は 2 手戻す', async () => {
     vi.useFakeTimers()
     const view = await mountView()
-    await view.find('select').setValue('cpu')
+    await view.get('[data-solo-mode]').setValue('cpu')
+    await clickNewGame(view)
     await clickCell(view, at(7, 7))
     vi.advanceTimersByTime(300)
     await view.vm.$nextTick()

@@ -139,7 +139,7 @@ onMounted(() => { if (isFamilyUser.value) void load() })
         <h3 class="search-panel__title"><AppIcon name="search" /> 検索条件</h3>
         <div class="search-panel__actions">
           <button type="button" class="btn btn--primary" @click="search"><AppIcon name="search" size="sm" /> 検索</button>
-          <button type="button" class="btn btn--secondary" @click="newTest"><AppIcon name="plus" size="sm" /> 新規</button>
+          <button type="button" class="btn btn--primary" @click="newTest"><AppIcon name="plus" size="sm" /> 新規</button>
           <button type="button" class="btn btn--secondary" @click="reset"><AppIcon name="rotate" size="sm" /> リセット</button>
         </div>
       </div>

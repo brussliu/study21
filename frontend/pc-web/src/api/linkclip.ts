@@ -98,6 +98,8 @@ export interface SaveClipRequest {
   favorite?: boolean
   archived?: boolean
   tags: string[]
+  /** 保護者のときだけ使う。true なら、ひもづくお子さまのリンククリップにも同じ内容を登録する。 */
+  alsoForStudent?: boolean
 }
 
 /** 更新は楽観的ロック用の version が必須（不一致は 409）。 */

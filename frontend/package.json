@@ -24,7 +24,6 @@
     "test:shared": "npm run test -w @study21/web-shared",
     "build:pc": "npm run build -w pc-web",
     "build:mobile": "npm run build -w mobile-web",
-    "generate:prototype": "node ../scripts/generate-ui-pages.mjs",
     "dev:pc": "npm run dev -w pc-web",
     "dev:mobile": "npm run dev -w mobile-web"
   },

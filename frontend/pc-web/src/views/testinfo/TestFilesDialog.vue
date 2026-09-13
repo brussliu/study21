@@ -72,7 +72,7 @@ function download(file: TestFile): void {
 
 <template>
   <Teleport to="body">
-    <div v-if="open && !viewer && !annotating" class="doc-files-overlay" @click.self="emit('close')">
+    <div v-if="open && !viewer && !annotating" class="doc-files-overlay">
       <section class="doc-files-dialog ti-files" role="dialog" aria-modal="true" :aria-label="`${testNo} の試験用紙ファイル`">
         <header class="doc-files-head">
           <strong>{{ testNo }} のファイル（{{ files.length }} 件）</strong>

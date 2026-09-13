@@ -300,6 +300,19 @@ describe('リバーシ：画面（ReversiView）', () => {
     return wrapper.findAll('.gm-metric__value').map((node) => node.text())
   }
 
+  /** 同じ画面で 2 人打つモードにする（既定は CPU なので、明示的に切り替えてから始める）。 */
+  async function startSameScreenGame(target: ReturnType<typeof mountView>): Promise<void> {
+    await target.get('[data-solo-mode]').setValue('duo')
+    await clickNewGame(target)
+  }
+
+  /** 【新しい対局】ボタンを押す（モードの変更が反映されるのはここだけ）。 */
+  async function clickNewGame(target: ReturnType<typeof mountView>): Promise<void> {
+    const button = target.findAll('.gm-actions .btn').find((item) => item.text().includes('新しい対局'))
+    expect(button).toBeTruthy()
+    await button!.trigger('click')
+  }
+
   it('8×8 の盤面と初期の石・ヒントを描画する', () => {
     const wrapper = mountView()
     const cells = wrapper.findAll('.gm-rev-cell')
@@ -316,6 +329,12 @@ describe('リバーシ：画面（ReversiView）', () => {
     expect(cells[0].attributes('aria-label')).toBe('1行1列 空き')
     expect(wrapper.find('.gm-status').classes()).toContain('is-play')
     expect(metrics(wrapper)[2]).toBe('黒')
+  })
+
+  it('盤面のマスの大きさは --gm-cell で指定する（64px）', () => {
+    const wrapper = mountView()
+    const board = wrapper.find('.gm-rev').element as HTMLElement
+    expect(board.style.getPropertyValue('--gm-cell').trim()).toBe('64px')
   })
 
   it('合法手をクリックすると石を置き、挟んだ石を裏返す', async () => {
@@ -364,9 +383,49 @@ describe('リバーシ：画面（ReversiView）', () => {
     expect(wrapper.findAll('.gm-rev-disc')).toHaveLength(4)
   })
 
+  it('モードは CPU が先頭で、既定は CPU（2人対戦はネットと 同じ画面）', async () => {
+    const wrapper = mountView()
+
+    const select = wrapper.get('[data-solo-mode]')
+    expect(select.findAll('option').map((option) => option.attributes('value'))).toEqual(['cpu', 'match', 'duo'])
+    expect((select.element as HTMLSelectElement).value).toBe('cpu')
+  })
+
+  it('モードを変えても対局はやり直さず、新しい対局で反映する', async () => {
+    const wrapper = mountView()
+    await startSameScreenGame(wrapper)
+    await wrapper.findAll('.gm-rev-cell')[19].trigger('click')
+    const discs = wrapper.findAll('.gm-rev-disc').length
+    expect(discs).toBeGreaterThan(4)
+    const turnBefore = metrics(wrapper)[2]
+
+    await wrapper.get('[data-solo-mode]').setValue('cpu')
+
+    // 盤面も手番もそのまま
+    expect(wrapper.findAll('.gm-rev-disc')).toHaveLength(discs)
+    expect(metrics(wrapper)[2]).toBe(turnBefore)
+
+    // モードは変わっていないので、CPU は打たない
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await nextTick()
+    expect(wrapper.findAll('.gm-rev-disc')).toHaveLength(discs)
+
+    // 【新しい対局】を押したときだけ反映される
+    await clickNewGame(wrapper)
+    expect(wrapper.findAll('.gm-rev-disc')).toHaveLength(4)
+
+    await wrapper.findAll('.gm-rev-cell')[19].trigger('click')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    await nextTick()
+    const after = metrics(wrapper)
+    expect(Number(after[0]) + Number(after[1])).toBeGreaterThanOrEqual(5)
+    expect(after[2]).toBe('黒')
+  })
+
   it('CPU モードでは黒の着手後に白が自動で打つ', async () => {
     const wrapper = mountView()
-    await wrapper.find('select').setValue('cpu')
+    await wrapper.get('[data-solo-mode]').setValue('cpu')
+    await clickNewGame(wrapper)
     expect(wrapper.findAll('.gm-rev-disc')).toHaveLength(4)
 
     await wrapper.findAll('.gm-rev-cell')[19].trigger('click')

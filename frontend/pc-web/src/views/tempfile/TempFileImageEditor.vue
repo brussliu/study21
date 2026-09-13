@@ -271,7 +271,7 @@ const cropStyle = (): Record<string, string> => {
 
 <template>
   <Teleport to="body">
-    <div v-if="open && file" class="tf-editor-overlay" @click.self="emit('close')">
+    <div v-if="open && file" class="tf-editor-overlay">
       <section class="tf-editor" role="dialog" aria-modal="true" :aria-label="`画像編集 ${file.originalFileName}`">
         <header class="tf-editor__head">
           <strong><AppIcon name="image" size="sm" /> 画像編集</strong>

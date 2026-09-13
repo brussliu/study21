@@ -18,6 +18,12 @@ public class AccountEntity {
     private String seiKana;
     private String meiKana;
     private String grade;
+    /** 電話番号（任意） */
+    private String phone;
+    /** 通知設定: '1'=更新のお知らせをメールで受け取る / '0'=受け取らない */
+    private String mailNotify;
+    /** 通知設定: '1'=学習リマインダーを受け取る / '0'=受け取らない */
+    private String reminderNotify;
     private Long guardianId;
     private Date expiryDate;
     private Timestamp termsAgreedAt;
@@ -104,6 +110,30 @@ public class AccountEntity {
 
     public void setGrade(String grade) {
         this.grade = grade;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public String getMailNotify() {
+        return mailNotify;
+    }
+
+    public void setMailNotify(String mailNotify) {
+        this.mailNotify = mailNotify;
+    }
+
+    public String getReminderNotify() {
+        return reminderNotify;
+    }
+
+    public void setReminderNotify(String reminderNotify) {
+        this.reminderNotify = reminderNotify;
     }
 
     public Long getGuardianId() {

@@ -46,6 +46,16 @@ export const useAuthStore = defineStore('auth', () => {
     )
   }
 
+  /**
+   * 表示名だけを差し替える（「ユーザー情報の修正」で保存したあと、
+   * ヘッダーの名前を再ログインなしで反映するため）。
+   */
+  function updateDisplayName(name: string): void {
+    const normalized = name.trim()
+    if (normalized === '' || role.value === null) return
+    login(role.value, normalized)
+  }
+
   /** 管理者画面の既存モック認証用。一般ユーザーログインでは使用しない。 */
   function fakeLogin(nextRole: Role, username?: string): void {
     login(nextRole, username?.trim() || DEFAULT_NAMES[nextRole])
@@ -60,5 +70,5 @@ export const useAuthStore = defineStore('auth', () => {
     window.sessionStorage.removeItem(STORAGE_KEY)
   }
 
-  return { isAuthenticated, currentUser, role, login, fakeLogin, logout }
+  return { isAuthenticated, currentUser, role, login, updateDisplayName, fakeLogin, logout }
 })

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 
@@ -68,8 +68,10 @@ vi.mock('@/api/linkclip', () => ({
   recordLinkClipView: vi.fn(),
   checkLinkClipDuplicates: vi.fn(async () => ({ success: true, data: { duplicated: false, rows: [] } }))
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ role: 'GUARDIAN', accountId: 1 }) }))
+const authState = vi.hoisted(() => ({ role: 'GUARDIAN' as 'GUARDIAN' | 'STUDENT' | 'ADMIN', accountId: 1 }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
 
+import { createLinkClip } from '@/api/linkclip'
 import LinkClipView from '@/views/linkclip/LinkClipView.vue'
 
 describe('LinkClipView', () => {
@@ -97,6 +99,21 @@ describe('LinkClipView', () => {
     expect(labels[1]).toContain('検索')
     // 画面上部にインラインの入力エリアは無い（ダイアログで入力する）
     expect(wrapper.find('.lc-composer__head').exists()).toBe(false)
+  })
+
+  it('リセットボタンはこの画面の見た目が基準（secondary ＋ rotate アイコン）', async () => {
+    // 他の画面（サイト管理・端末コントロール等）はこの見た目に合わせる。
+    // ここを変えると各画面のリセットボタンも揃える必要があるため、テストで固定する。
+    const wrapper = mount(LinkClipView, { global: { plugins: [createPinia()] } })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    const reset = wrapper
+      .findAll('.search-panel__actions .btn')
+      .find((button) => button.text().includes('リセット'))
+    expect(reset).toBeTruthy()
+    expect(reset?.classes()).toContain('btn--secondary')
+    expect(reset?.classes()).not.toContain('btn--sm')
+    expect(reset?.find('svg.icon.icon--sm use').attributes('href')).toBe('#i-rotate')
   })
 
   it('「新規」でダイアログが開く', async () => {
@@ -157,5 +174,94 @@ describe('LinkClipView', () => {
     confirmSpy.mockRestore()
 
     expect(vi.mocked(deleteLinkClip)).toHaveBeenCalledWith(1)
+  })
+
+  /** 新規ダイアログを開く（ロールは authState で切り替える）。 */
+  async function openComposer() {
+    const wrapper = mount(LinkClipView, { global: { plugins: [createPinia()] } })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    await wrapper.findAll('.search-panel__actions button')[0].trigger('click')
+    await wrapper.vm.$nextTick()
+    return wrapper
+  }
+
+  /** ダイアログ内のチェックボックス（無ければ null）。 */
+  function studentCheckbox(wrapper: Awaited<ReturnType<typeof openComposer>>) {
+    return wrapper.find('.lc-composer input[type="checkbox"]')
+  }
+
+  describe('保護者の「お子さまのリンククリップにも登録する」', () => {
+    afterEach(() => {
+      authState.role = 'GUARDIAN'
+      vi.mocked(createLinkClip).mockClear()
+    })
+
+    it('GUARDIAN の新規ダイアログに表示され、既定は未選択', async () => {
+      authState.role = 'GUARDIAN'
+      const wrapper = await openComposer()
+
+      const checkbox = studentCheckbox(wrapper)
+      expect(checkbox.exists()).toBe(true)
+      expect((checkbox.element as HTMLInputElement).checked).toBe(false)
+      expect(wrapper.find('.lc-composer').text()).toContain('お子さまのリンククリップにも登録する')
+    })
+
+    it('STUDENT には表示しない', async () => {
+      authState.role = 'STUDENT'
+      const wrapper = await openComposer()
+
+      expect(wrapper.find('.lc-composer').exists()).toBe(true)
+      expect(studentCheckbox(wrapper).exists()).toBe(false)
+    })
+
+    it('編集ダイアログには表示しない', async () => {
+      authState.role = 'GUARDIAN'
+      const wrapper = mount(LinkClipView, { global: { plugins: [createPinia()] } })
+      await new Promise((resolve) => setTimeout(resolve, 30))
+
+      const editButton = wrapper.find('.lc-card__actions').findAll('button')
+        .find((button) => button.attributes('title') === '修正')
+      expect(editButton).toBeTruthy()
+      await editButton!.trigger('click')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.find('.lc-composer').text()).toContain('リンクを編集')
+      expect(studentCheckbox(wrapper).exists()).toBe(false)
+    })
+
+    it('チェックして保存すると alsoForStudent: true を送る', async () => {
+      authState.role = 'GUARDIAN'
+      const wrapper = await openComposer()
+
+      await wrapper.find('.lc-composer input[type="url"]').setValue('https://example.com/new')
+      await wrapper.find('.lc-composer input[placeholder^="タイトル"]').setValue('新しいリンク')
+      await studentCheckbox(wrapper).setValue(true)
+
+      const saveButton = wrapper.findAll('.lc-composer .btn').find((button) => button.text().includes('保存'))
+      expect(saveButton).toBeTruthy()
+      await saveButton!.trigger('click')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(vi.mocked(createLinkClip)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(createLinkClip).mock.calls[0][0]).toMatchObject({
+        url: 'https://example.com/new',
+        alsoForStudent: true
+      })
+    })
+
+    it('チェックしなければ alsoForStudent を付けない（既定の動作を変えない）', async () => {
+      authState.role = 'GUARDIAN'
+      const wrapper = await openComposer()
+
+      await wrapper.find('.lc-composer input[type="url"]').setValue('https://example.com/plain')
+      await wrapper.find('.lc-composer input[placeholder^="タイトル"]').setValue('通常のリンク')
+
+      const saveButton = wrapper.findAll('.lc-composer .btn').find((button) => button.text().includes('保存'))
+      await saveButton!.trigger('click')
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      const body = vi.mocked(createLinkClip).mock.calls[0][0]
+      expect(body.alsoForStudent).toBeFalsy()
+    })
   })
 })

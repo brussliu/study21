@@ -1,18 +1,33 @@
 package com.study21.admin.batch;
 
 /**
- * バッチ実行記録エンティティ（BAT_タスク実行情報）。
+ * バッチ実行履歴のエンティティ（BAT_バッチ実行履歴情報）。
+ * 有効／無効は BAT_バッチコントロール情報（BatchControlEntity）が持つ。
  */
 public class BatchExecutionEntity {
 
     private Long executionId;
-    private String taskCode;
+    /** バッチコード（BatchTaskRegistry のコード。旧: タスクコード） */
+    private String batchCode;
+    /** C=呼出 / L=循環 / R=定時 */
+    private String batchType;
+    /** 起動のされ方（C/L/R） */
+    private String triggerType;
     private String status;
+    /** 要求内容（JSON 文字列。任意） */
+    private String requestPayload;
+    /** 画面から起動した実行者。定時・循環などでは null */
+    private Long requestedByAccountId;
+    /** 人が起動していない場合の識別子（scheduler など） */
+    private String requestedByCode;
+    /** 開始から終了までのミリ秒 */
+    private Long durationMs;
+    /** 異常終了時のスタックトレースなど */
+    private String errorDetail;
     private String scheduleTime;
     private String startTime;
     private String endTime;
     private String message;
-    private String requestedBy;
     private java.sql.Timestamp createdAt;
     private java.sql.Timestamp updatedAt;
 
@@ -24,12 +39,12 @@ public class BatchExecutionEntity {
         this.executionId = executionId;
     }
 
-    public String getTaskCode() {
-        return taskCode;
+    public String getBatchCode() {
+        return batchCode;
     }
 
-    public void setTaskCode(String taskCode) {
-        this.taskCode = taskCode;
+    public void setBatchCode(String batchCode) {
+        this.batchCode = batchCode;
     }
 
     public String getStatus() {
@@ -72,12 +87,12 @@ public class BatchExecutionEntity {
         this.message = message;
     }
 
-    public String getRequestedBy() {
-        return requestedBy;
+    public String getRequestedByCode() {
+        return requestedByCode;
     }
 
-    public void setRequestedBy(String requestedBy) {
-        this.requestedBy = requestedBy;
+    public void setRequestedByCode(String requestedByCode) {
+        this.requestedByCode = requestedByCode;
     }
 
     public java.sql.Timestamp getCreatedAt() {
@@ -94,5 +109,53 @@ public class BatchExecutionEntity {
 
     public void setUpdatedAt(java.sql.Timestamp updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public String getBatchType() {
+        return batchType;
+    }
+
+    public void setBatchType(String batchType) {
+        this.batchType = batchType;
+    }
+
+    public String getTriggerType() {
+        return triggerType;
+    }
+
+    public void setTriggerType(String triggerType) {
+        this.triggerType = triggerType;
+    }
+
+    public String getRequestPayload() {
+        return requestPayload;
+    }
+
+    public void setRequestPayload(String requestPayload) {
+        this.requestPayload = requestPayload;
+    }
+
+    public Long getRequestedByAccountId() {
+        return requestedByAccountId;
+    }
+
+    public void setRequestedByAccountId(Long requestedByAccountId) {
+        this.requestedByAccountId = requestedByAccountId;
+    }
+
+    public Long getDurationMs() {
+        return durationMs;
+    }
+
+    public void setDurationMs(Long durationMs) {
+        this.durationMs = durationMs;
+    }
+
+    public String getErrorDetail() {
+        return errorDetail;
+    }
+
+    public void setErrorDetail(String errorDetail) {
+        this.errorDetail = errorDetail;
     }
 }

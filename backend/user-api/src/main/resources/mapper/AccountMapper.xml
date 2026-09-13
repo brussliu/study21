@@ -13,6 +13,9 @@
         <result property="seiKana"      column="姓かな"/>
         <result property="meiKana"      column="名かな"/>
         <result property="grade"        column="学年"/>
+        <result property="phone"        column="電話番号"/>
+        <result property="mailNotify"   column="メール通知"/>
+        <result property="reminderNotify" column="リマインダー通知"/>
         <result property="guardianId"   column="保護者ID"/>
         <result property="expiryDate"   column="有効期限"/>
         <result property="termsAgreedAt" column="利用規約同意日時"/>
@@ -35,11 +38,24 @@
 
     <select id="findByLoginId" resultMap="AccountMap">
         SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
-               "姓", "名", "姓かな", "名かな", "学年", "保護者ID", "有効期限",
+               "姓", "名", "姓かな", "名かな", "学年", "電話番号", "メール通知", "リマインダー通知",
+               "保護者ID", "有効期限",
                "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時"
           FROM public."ACC_アカウント"
          WHERE LOWER("ログインID") = LOWER(#{loginId})
            AND "アカウント種別" IN ('GUARDIAN', 'STUDENT')
+    </select>
+
+    <select id="findStudentByGuardianId" resultMap="AccountMap">
+        SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+               "姓", "名", "姓かな", "名かな", "学年", "電話番号", "メール通知", "リマインダー通知",
+               "保護者ID", "有効期限",
+               "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."ACC_アカウント"
+         WHERE "保護者ID" = #{guardianAccountId}
+           AND "アカウント種別" = 'STUDENT'
+         ORDER BY "アカウントID"
+         LIMIT 1
     </select>
 
     <select id="existsByLoginId" resultType="int">
@@ -52,6 +68,39 @@
         UPDATE public."ACC_アカウント"
            SET "パスワードハッシュ" = #{passwordHash},
                "更新ID" = 'PASSWORD_RESET',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+    </update>
+
+    <select id="findById" resultMap="AccountMap">
+        SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+               "姓", "名", "姓かな", "名かな", "学年", "電話番号", "メール通知", "リマインダー通知",
+               "保護者ID", "有効期限",
+               "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."ACC_アカウント"
+         WHERE "アカウントID" = #{accountId}
+    </select>
+
+    <!-- 編集できる項目だけを更新する。ログインID（メールアドレス）・種別・状態は触らない。 -->
+    <update id="updateProfile">
+        UPDATE public."ACC_アカウント"
+           SET "姓" = #{sei},
+               "名" = #{mei},
+               "姓かな" = #{seiKana},
+               "名かな" = #{meiKana},
+               "学年" = #{grade},
+               "電話番号" = #{phone},
+               "メール通知" = #{mailNotify},
+               "リマインダー通知" = #{reminderNotify},
+               "更新ID" = #{updatedBy},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+    </update>
+
+    <update id="updatePasswordHashBySelf">
+        UPDATE public."ACC_アカウント"
+           SET "パスワードハッシュ" = #{passwordHash},
+               "更新ID" = #{updatedBy},
                "更新日時" = CURRENT_TIMESTAMP
          WHERE "アカウントID" = #{accountId}
     </update>

@@ -8,7 +8,7 @@
 | Maven | 3.9+ | 多模块构建 |
 | Node.js | ≥ 20 | 前端构建 |
 | npm | ≥ 10 | 随 Node.js 安装 |
-| Windows PowerShell | 5.1+ 或 PowerShell 7 | 运行 `scripts/*.ps1` |
+| Windows PowerShell | 5.1+ 或 PowerShell 7 | （`scripts/*.ps1` は削除済み。必要な場合は git 履歴から復元） |
 | Git | 2.x | 独立仓库 |
 
 > 本阶段**不要求数据库**。两个后端在没有数据库、没有数据库环境变量的情况下即可启动。

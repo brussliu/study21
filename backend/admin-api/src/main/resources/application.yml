@@ -26,9 +26,9 @@ management:
     health:
       show-details: never
 
-logging:
-  pattern:
-    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %5p [%X{traceId:-}] %c{1} - %m%n"
+# ログの出力先・フォーマット・ローテーションは
+# backend/common-core/src/main/resources/logback-spring.xml に集約している
+# （app / sql / error の 3 ファイル、日次 + サイズでローテーション）。
 
 app:
   system-name: "Study 2.1"
@@ -39,3 +39,14 @@ app:
 study21:
   cors:
     allowed-origins: "${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174}"
+  log:
+    # 出力先。コンテナ内は /app/logs（NAS 側の logs/ をマウントする）。
+    dir: ${STUDY21_LOG_DIR:logs}
+    # 通常ログ（<service>-app.log）のレベル。
+    level: ${STUDY21_LOG_LEVEL:INFO}
+    # DB 操作ログ（<service>-sql.log）のレベル。0 にしたい場合は OFF。
+    sql-level: ${STUDY21_SQL_LOG_LEVEL:INFO}
+    # 過去ログの保持日数（archive/ に gzip で退避）。
+    retention-days: ${STUDY21_LOG_RETENTION_DAYS:90}
+    # 1 ファイルの上限サイズ。超えたらローテーション。
+    max-file-size: ${STUDY21_LOG_MAX_FILE_SIZE:100MB}

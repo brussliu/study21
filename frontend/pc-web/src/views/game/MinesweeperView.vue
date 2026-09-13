@@ -55,10 +55,6 @@ function newGame(): void {
   timer.reset()
 }
 
-function onChangeDifficulty(): void {
-  newGame()
-}
-
 /** クリア判定。クリアなら残りの地雷に旗を立ててタイマーを止める。 */
 function finishIfCleared(current: MineBoard): boolean {
   if (boardStatus(current) !== 'won') return false
@@ -251,7 +247,8 @@ function cellLabel(cell: MineCell, index: number): string {
               <div class="gm-toolbar">
                 <label class="field field--inline">
                   <span class="field__label">難易度</span>
-                  <select v-model="difficulty" class="select" @change="onChangeDifficulty">
+                  <!-- 選んだ難易度は次の【新しいゲーム】から使う（対局中は変わらない）。 -->
+                  <select v-model="difficulty" class="select">
                     <option v-for="preset in MINE_PRESETS" :key="preset.key" :value="preset.key">
                       {{ preset.label }}
                     </option>

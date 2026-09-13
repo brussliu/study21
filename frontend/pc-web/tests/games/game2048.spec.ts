@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import Game2048View from '@/views/game/Game2048View.vue'
 import {
   BOARD_2048_SIZE, TARGET_2048, addRandomTile, canMove, cloneBoard, createBoard2048,
   emptyIndexes, maxTile, move, slideLine, type Board2048, type Rng
 } from '@/features/game/game2048'
+
+// Game2048View は useRoute しか使わないので、テストでは必要最小限のモックに差し替える
+// （テンプレートの RouterLink はマウント時のスタブで置き換える）。
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ path: '/student/game/2048' })
+}))
 
 /** 決まった順番で数を返す擬似乱数（テストを再現可能にする）。 */
 function seededRng(seed: number): Rng {
@@ -281,5 +289,20 @@ describe('2048：補助関数', () => {
     expect(board.score).toBe(8)
     expect(board.moves).toBe(3)
     expect(board.reached).toBe(true)
+  })
+})
+
+/** 画面のテスト用に Game2048View をマウントする（RouterLink はスタブに置き換える）。 */
+function mountView(): VueWrapper {
+  return mount(Game2048View, { global: { stubs: { RouterLink: true } } })
+}
+
+describe('2048：画面', () => {
+  it('盤面のマスの大きさは --gm-cell で指定する（100px）', () => {
+    const wrapper = mountView()
+    const board = wrapper.find('.gm-g2048').element as HTMLElement
+    expect(board.style.getPropertyValue('--gm-cell').trim()).toBe('100px')
+    expect(wrapper.findAll('.gm-g2048-cell')).toHaveLength(16)
+    wrapper.unmount()
   })
 })

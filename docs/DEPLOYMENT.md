@@ -45,16 +45,26 @@
 
 > 不含数据库 URL / 用户名 / 密码。
 
-## 7. 反向代理示例
+## 7. 容器 / 反向代理配置
 
-见 `deploy/`：
+`deploy/` には**构建必需**の 4 ファイルだけを置いている（根目录 `docker-compose.yml` と
+`deploy/docker/nginx.Dockerfile` が相互に参照する）：
 
-- `deploy/nginx/study21.conf`：同域反向代理 `/api/admin/**`、`/api/user/**`。
-- `deploy/env/.env.production.example`：生产环境变量模板。
-- `deploy/README.md`：部署说明。
+- `deploy/docker/nginx.Dockerfile` — 前端镜像（pc-web / mobile-web をビルドして nginx で配信、PC:80 / Mobile:81）
+- `deploy/docker/admin-api.Dockerfile` / `user-api.Dockerfile` — 各后端的可执行 JAR 镜像
+- `deploy/docker/nginx.conf` — nginx 容器内の設定（`/api/admin`・`/api/user` の反向代理、访问日志定义）
 
-## 8. 日志位置原则
+旧版の `deploy/*.bat`・`deploy/nginx/study21.conf`・`deploy/env/.env.production.example` は
+不要のため削除した（部署は下記のスクリプトに一本化）。反向代理の実体は `deploy/docker/nginx.conf`。
 
-- 本机开发日志：`tmp/`（由启动脚本写入，已 gitignore）。
-- 生产日志：建议由部署平台或进程管理器（systemd / 容器日志）统一收集。
+部署の実行：工作区の `tools/deploy-to-nas.sh`（設定は `setting/deploy.env`）。
+前端（`web`＝pc-web + mobile-web）と后端（`admin-api` / `user-api`）の 3 サービスをまとめて
+再コンパイル・再起動する。ビルドキャッシュを使わずに作り直したいときは `--no-cache` を付ける。
+手順の詳細は `docs/DOCKER_DEPLOYMENT.md`。
+
+## 8. 日志位置
+
+- 本机开发日志・一时文件：`tmp/`（自动生成ツールやスクリーンショットもここ。gitignore 済み・デプロイ対象外）。
+- 生产日志：`<发布位置>/logs/`（backend は `<service>-app.log` / `-sql.log` / `-error.log`、
+  frontend は nginx 访问日志）。設計と運用手順は `docs/LOGGING.md`。
 - 日志不写入旧项目目录。

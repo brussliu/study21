@@ -72,7 +72,7 @@ function confirm(): void {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="ti-picker-overlay" @click.self="emit('close')">
+    <div v-if="open" class="ti-picker-overlay">
       <section class="ti-picker" role="dialog" aria-modal="true" aria-label="臨時ファイルから選択">
         <header class="ti-picker__head">
           <strong><AppIcon name="folder" size="sm" /> 臨時ファイルから選択</strong>

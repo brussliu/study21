@@ -1,231 +1,361 @@
-import { beforeEach, describe, expect, it } from 'vitest'
-import { DOMWrapper, mount, type VueWrapper } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { useToast } from '@study21/web-shared'
 import AppTopbar from '@/components/layout/AppTopbar.vue'
+import { reloadParentPage } from '@/features/user-profile/reloadPage'
+import { createAppRouter } from '@/router'
 import { useAuthStore } from '@/stores/auth'
 
-function mountTopbar(): VueWrapper {
-  const pinia = createPinia()
-  setActivePinia(pinia)
-  useAuthStore().fakeLogin('STUDENT', '山田 太郎')
-  // メニューとダイアログを document から探せるように body へ取り付ける。
-  return mount(AppTopbar, { global: { plugins: [pinia] }, attachTo: document.body })
+/**
+ * 「ユーザー情報の修正」「パスワードの変更」。
+ *
+ * どちらもページ遷移せず、右上のユーザー名メニューから**別々のダイアログ**で開く。
+ * 保存すると親ページ（開いていた画面）を再読み込みして変更を反映する。
+ * メールアドレスはログインID を兼ねるため変更できない（参照のみ）。
+ */
+vi.mock('@/features/user-profile/reloadPage', () => ({
+  reloadParentPage: vi.fn()
+}))
+
+const PROFILE = {
+  accountId: 2,
+  email: 'student@example.com',
+  sei: '山田',
+  mei: '太郎',
+  seiKana: 'やまだ',
+  meiKana: 'たろう',
+  grade: '中学1年生',
+  phone: '090-0000-0000',
+  mailNotify: true,
+  reminderNotify: false,
+  accountType: 'STUDENT' as const,
+  displayName: '山田 太郎'
 }
 
-/** ダイアログは body へ Teleport されるので、document から探す。 */
-function dialog(): DOMWrapper<Element> | null {
-  const element = document.body.querySelector('.dialog')
-  return element ? new DOMWrapper(element) : null
+type Profile = Omit<typeof PROFILE, 'accountType' | 'grade'> & {
+  accountType: 'STUDENT' | 'GUARDIAN'
+  grade: string | null
 }
 
-function menuItem(label: string): DOMWrapper<Element> {
-  const items = [...document.querySelectorAll('.up-menu__item')]
-  const found = items.find((item) => item.textContent?.includes(label))
-  if (!found) throw new Error(`menu item not found: ${label}`)
-  return new DOMWrapper(found)
+function ok(data: unknown, message = 'OK'): Response {
+  return new Response(JSON.stringify({ success: true, code: 'OK', message, data, timestamp: '' }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' }
+  })
+}
+
+function failure(message: string, status = 400): Response {
+  return new Response(
+    JSON.stringify({ success: false, code: 'VALIDATION_ERROR', message, data: null, timestamp: '' }),
+    { status, headers: { 'Content-Type': 'application/json' } }
+  )
 }
 
 function toastMessages(): string[] {
   return useToast().items.map((item) => item.message)
 }
 
-function toastTypes(): string[] {
-  return useToast().items.map((item) => item.type)
+function methodOf(call: unknown[]): string {
+  return ((call[1] as RequestInit).method ?? 'GET').toUpperCase()
+}
+
+function urlOf(call: unknown[]): string {
+  return String(call[0])
+}
+
+function bodyOf(call: unknown[]): Record<string, unknown> {
+  return JSON.parse(String((call[1] as RequestInit).body)) as Record<string, unknown>
+}
+
+/** ダイアログは body へ Teleport されるので document から探す。 */
+function dialog(): DOMWrapper<Element> | null {
+  const element = document.body.querySelector('.dialog')
+  return element ? new DOMWrapper(element) : null
+}
+
+function menuItem(label: string): DOMWrapper<Element> {
+  const found = [...document.querySelectorAll('.up-menu__item')].find((item) =>
+    item.textContent?.includes(label)
+  )
+  if (!found) throw new Error(`menu item not found: ${label}`)
+  return new DOMWrapper(found)
+}
+
+async function mountTopbar(role: 'STUDENT' | 'GUARDIAN' | 'ADMIN', profile: Profile = PROFILE): Promise<{
+  wrapper: VueWrapper
+  fetchMock: ReturnType<typeof vi.fn>
+  router: ReturnType<typeof createAppRouter>
+}> {
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useAuthStore().fakeLogin(role)
+  const router = createAppRouter()
+  await router.push('/student/home')
+  await router.isReady()
+
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    if (url.includes('/profile/password')) return ok(null, 'パスワードを変更しました。')
+    if (method === 'PUT') {
+      const body = bodyOf([url, init])
+      // サーバーは表示名（姓 + 名）を組み立て直して返す
+      return ok(
+        { ...profile, ...body, displayName: `${String(body.sei)} ${String(body.mei)}` },
+        'ユーザー情報を更新しました。'
+      )
+    }
+    return ok(profile)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  const wrapper = mount(AppTopbar, {
+    global: { plugins: [pinia, router] },
+    attachTo: document.body
+  })
+  await wrapper.get('.topbar__user').trigger('click')
+  return { wrapper, fetchMock, router }
 }
 
 beforeEach(() => {
   useToast().items.splice(0)
-  document.body.querySelectorAll('.overlay').forEach((node) => node.remove())
+  window.sessionStorage.clear()
+  document.body.innerHTML = ''
+  window.scrollTo = vi.fn()
+  vi.mocked(reloadParentPage).mockClear()
 })
 
-describe('右上のユーザーメニュー', () => {
-  it('ユーザー名はメニューのボタンになっている（初期は閉じている）', () => {
-    const wrapper = mountTopbar()
-    const user = wrapper.find('.up-user')
-    expect(user.exists()).toBe(true)
-    expect(user.text()).toContain('山田 太郎')
-    expect(user.attributes('aria-haspopup')).toBe('menu')
-    expect(user.attributes('aria-expanded')).toBe('false')
-    expect(wrapper.find('.up-menu').exists()).toBe(false)
-    wrapper.unmount()
+describe('右上メニューからのダイアログ表示', () => {
+  it('ページ遷移せずにユーザー情報の修正ダイアログを開く', async () => {
+    const { router } = await mountTopbar('STUDENT')
+
+    expect(menuItem('ユーザー情報の修正').exists()).toBe(true)
+    await menuItem('ユーザー情報の修正').trigger('click')
+    await flushPromises()
+
+    const dlg = dialog()
+    expect(dlg).not.toBeNull()
+    expect(dlg?.text()).toContain('ユーザー情報の修正')
+    // 画面遷移はしていない
+    expect(router.currentRoute.value.name).toBe('student-home')
+    expect(router.currentRoute.value.path).toBe('/student/home')
   })
 
-  it('クリックするとメニューが開き、2 つの項目とデモの注記を出す', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
+  it('パスワードの変更は別のダイアログで開く', async () => {
+    const { router } = await mountTopbar('STUDENT')
 
-    const menu = wrapper.find('.up-menu')
-    expect(menu.exists()).toBe(true)
-    expect(menu.attributes('role')).toBe('menu')
-    const labels = menu.findAll('[role="menuitem"]').map((item) => item.text())
-    expect(labels).toEqual(['ユーザー情報の変更', 'パスワードの変更'])
-    expect(menu.text()).toContain('デモ表示（保存されません）')
-    expect(wrapper.find('.up-user').attributes('aria-expanded')).toBe('true')
-    wrapper.unmount()
+    await menuItem('パスワードの変更').trigger('click')
+    await flushPromises()
+
+    const dlg = dialog()
+    expect(dlg?.text()).toContain('パスワードの変更')
+    expect(dlg?.find('#pwCurrent').exists()).toBe(true)
+    // 情報修正の項目は出ない（別ダイアログ）
+    expect(dlg?.find('#upSei').exists()).toBe(false)
+    expect(router.currentRoute.value.path).toBe('/student/home')
   })
 
-  it('メニュー外のクリックと Escape で閉じる', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    expect(wrapper.find('.up-menu').exists()).toBe(true)
+  it('保護者でも同じダイアログを使う', async () => {
+    await mountTopbar('GUARDIAN', { ...PROFILE, accountType: 'GUARDIAN', grade: null })
 
-    document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.up-menu').exists()).toBe(false)
+    await menuItem('ユーザー情報の修正').trigger('click')
+    await flushPromises()
 
-    await wrapper.find('.up-user').trigger('click')
-    expect(wrapper.find('.up-menu').exists()).toBe(true)
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
-    await wrapper.vm.$nextTick()
-    expect(wrapper.find('.up-menu').exists()).toBe(false)
-    wrapper.unmount()
+    expect(dialog()?.text()).toContain('ユーザー情報の修正')
+  })
+
+  it('管理者にはこのメニューを出さない（機能の対象外）', async () => {
+    await mountTopbar('ADMIN')
+
+    expect(document.querySelectorAll('.up-menu__item')).toHaveLength(0)
   })
 })
 
-describe('ユーザー情報の変更（デモ画面）', () => {
-  it('メニューから開くと、デモ表示であることと現在の情報が出る', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
+describe('ユーザー情報の修正ダイアログ', () => {
+  async function openProfileDialog(role: 'STUDENT' | 'GUARDIAN' = 'STUDENT', profile: Profile = PROFILE) {
+    const mounted = await mountTopbar(role, profile)
+    await menuItem('ユーザー情報の修正').trigger('click')
+    await flushPromises()
+    return mounted
+  }
 
-    const panel = dialog()
-    expect(panel).not.toBeNull()
-    expect(panel!.text()).toContain('ユーザー情報の変更')
-    expect(panel!.text()).toContain('デモ')
-    expect(panel!.text()).toContain('この画面はデモ表示です')
-    // メニューは閉じている
-    expect(wrapper.find('.up-menu').exists()).toBe(false)
+  it('保存済みの内容を表示し、メールアドレスは変更できない', async () => {
+    await openProfileDialog()
 
-    // 表示名はログイン中のユーザー名が入っている
-    const name = panel!.find<HTMLInputElement>('#upName')
-    expect((name.element as HTMLInputElement).value).toBe('山田 太郎')
-    // 権限は読み取り専用のバッジ
-    expect(panel!.text()).toContain('学生')
-    wrapper.unmount()
+    const dlg = dialog()
+    expect(dlg?.get('#upSei').element).toHaveProperty('value', '山田')
+    expect(dlg?.get('[data-testid="profile-email"]').text()).toBe(PROFILE.email)
+    const emailInputs = (dlg?.findAll('input') ?? []).filter(
+      (input) => (input.element as HTMLInputElement).value === PROFILE.email
+    )
+    expect(emailInputs).toHaveLength(0)
+    expect(dlg?.text()).toContain('変更できません')
   })
 
-  it('表示名を消して保存すると、エラーが出て閉じない', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
+  it('生徒は学年を編集でき、保護者には出さない', async () => {
+    await openProfileDialog()
+    expect(dialog()?.find('#upGrade').exists()).toBe(true)
 
-    const panel = dialog()!
-    const name = panel.find<HTMLInputElement>('#upName')
-    await name.setValue('')
-    const save = panel.findAll('button').find((button) => button.text().includes('保存'))!
-    await save.trigger('click')
-    await wrapper.vm.$nextTick()
+    document.body.innerHTML = ''
+    await openProfileDialog('GUARDIAN', { ...PROFILE, accountType: 'GUARDIAN', grade: null })
+    expect(dialog()?.find('#upGrade').exists()).toBe(false)
+  })
 
-    expect(dialog()).not.toBeNull()
-    expect(dialog()!.find('.field__error').text()).toBe('表示名を入力してください。')
-    expect(name.classes()).toContain('is-invalid')
-    expect(toastTypes()).toContain('warning')
+  it('必須項目が空だと保存せずにエラーを出す', async () => {
+    const { fetchMock } = await openProfileDialog()
+
+    await dialog()!.get('#upSei').setValue('   ')
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(dialog()?.text()).toContain('姓を入力してください。')
+    expect(fetchMock.mock.calls.some((call) => methodOf(call) === 'PUT')).toBe(false)
     expect(toastMessages()).toContain('入力内容を確認してください。')
-    wrapper.unmount()
   })
 
-  it('メールアドレスの形式とパスワードの一致もチェックする', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
+  it('保存すると更新し、ダイアログを閉じて親ページを再読み込みする', async () => {
+    const { fetchMock } = await openProfileDialog()
+
+    await dialog()!.get('#upSei').setValue('鈴木')
+    await dialog()!.get('#upMei').setValue('花子')
+    await dialog()!.get('#upPhone').setValue('090-1111-2222')
+    await dialog()!.get('#upGrade').setValue('中学2年生')
+    const checks = dialog()!.findAll('.up-check-list input[type="checkbox"]')
+    await checks[0].setValue(false)
+    await checks[1].setValue(true)
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    const put = fetchMock.mock.calls.find((call) => methodOf(call) === 'PUT')
+    expect(urlOf(put as unknown[])).toBe('/api/user/profile')
+    expect(bodyOf(put as unknown[])).toMatchObject({
+      sei: '鈴木',
+      mei: '花子',
+      grade: '中学2年生',
+      phone: '090-1111-2222',
+      mailNotify: false,
+      reminderNotify: true
+    })
+    expect(bodyOf(put as unknown[])).not.toHaveProperty('email')
+    expect(useAuthStore().currentUser).toBe('鈴木 花子')
+    expect(toastMessages()).toContain('ユーザー情報を更新しました。')
+    // ダイアログは閉じ、親ページは再読み込みされる
+    expect(dialog()).toBeNull()
+    expect(reloadParentPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('キャンセルでは保存も再読み込みもしない', async () => {
+    const { fetchMock } = await openProfileDialog()
+
+    await dialog()!.get('#upSei').setValue('変更')
+    await dialog()!.get('.up-foot .btn--secondary').trigger('click')
+    await flushPromises()
+
+    expect(dialog()).toBeNull()
+    expect(fetchMock.mock.calls.some((call) => methodOf(call) === 'PUT')).toBe(false)
+    expect(reloadParentPage).not.toHaveBeenCalled()
+  })
+
+  it('サーバーがエラーを返したらその文言を表示し、ダイアログは開いたまま', async () => {
+    const { fetchMock } = await openProfileDialog()
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) =>
+      (init?.method ?? 'GET').toUpperCase() === 'PUT'
+        ? failure('ふりがな（せい）を入力してください。')
+        : ok(PROFILE)
+    )
+
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(toastMessages()).toContain('ふりがな（せい）を入力してください。')
+    expect(dialog()).not.toBeNull()
+    expect(reloadParentPage).not.toHaveBeenCalled()
+  })
+})
+
+describe('パスワードの変更ダイアログ', () => {
+  async function openPasswordDialog() {
+    const mounted = await mountTopbar('STUDENT')
     await menuItem('パスワードの変更').trigger('click')
-    await wrapper.vm.$nextTick()
+    await flushPromises()
+    return mounted
+  }
 
-    const panel = dialog()!
-    await panel.find<HTMLInputElement>('#upEmail').setValue('not-an-email')
-    await panel.find<HTMLInputElement>('#upNew').setValue('newpass123')
-    await panel.find<HTMLInputElement>('#upConfirm').setValue('newpass124')
-    const save = panel.findAll('button').find((button) => button.text().includes('保存'))!
-    await save.trigger('click')
-    await wrapper.vm.$nextTick()
+  it('英字と数字を含む8文字以上でないと変更できない', async () => {
+    const { fetchMock } = await openPasswordDialog()
 
-    const errors = dialog()!.findAll('.field__error').map((error) => error.text())
-    expect(errors).toContain('メールアドレスの形式が正しくありません。')
-    expect(errors).toContain('現在のパスワードを入力してください。')
-    expect(errors).toContain('新しいパスワードが一致しません。')
-    wrapper.unmount()
+    await dialog()!.get('#pwCurrent').setValue('secret123')
+    await dialog()!.get('#pwNew').setValue('abcdefgh')
+    await dialog()!.get('#pwConfirm').setValue('abcdefgh')
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(dialog()?.text()).toContain('英字と数字をそれぞれ1文字以上')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('「パスワードの変更」から開くとパスワード欄が展開されている', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
+  it('確認用が一致しないと変更できない', async () => {
+    const { fetchMock } = await openPasswordDialog()
+
+    await dialog()!.get('#pwCurrent').setValue('secret123')
+    await dialog()!.get('#pwNew').setValue('newpass123')
+    await dialog()!.get('#pwConfirm').setValue('newpass124')
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(dialog()?.text()).toContain('新しいパスワードが一致しません。')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('変更できたら API を呼び、ダイアログを閉じて親ページを再読み込みする', async () => {
+    const { fetchMock } = await openPasswordDialog()
+
+    await dialog()!.get('#pwCurrent').setValue('secret123')
+    await dialog()!.get('#pwNew').setValue('newpass123')
+    await dialog()!.get('#pwConfirm').setValue('newpass123')
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    const call = fetchMock.mock.calls.find((entry) => urlOf(entry as unknown[]).includes('/password'))
+    expect(urlOf(call as unknown[])).toBe('/api/user/profile/password')
+    expect(methodOf(call as unknown[])).toBe('POST')
+    expect(bodyOf(call as unknown[])).toEqual({ currentPassword: 'secret123', newPassword: 'newpass123' })
+    expect(toastMessages()).toContain('パスワードを変更しました。')
+    expect(dialog()).toBeNull()
+    expect(reloadParentPage).toHaveBeenCalledTimes(1)
+    // ログインは継続する
+    expect(useAuthStore().isAuthenticated).toBe(true)
+  })
+
+  it('現在のパスワードが違うときはサーバーの文言を表示し、再読み込みしない', async () => {
+    const { fetchMock } = await openPasswordDialog()
+    fetchMock.mockImplementation(async () => failure('現在のパスワードが正しくありません。'))
+
+    await dialog()!.get('#pwCurrent').setValue('wrongpass1')
+    await dialog()!.get('#pwNew').setValue('newpass123')
+    await dialog()!.get('#pwConfirm').setValue('newpass123')
+    await dialog()!.get('.up-foot .btn--primary').trigger('click')
+    await flushPromises()
+
+    expect(toastMessages()).toContain('現在のパスワードが正しくありません。')
+    expect(dialog()).not.toBeNull()
+    expect(reloadParentPage).not.toHaveBeenCalled()
+  })
+
+  it('開き直すと入力内容は残さない', async () => {
+    const { wrapper } = await openPasswordDialog()
+
+    await dialog()!.get('#pwCurrent').setValue('secret123')
+    await dialog()!.get('.up-foot .btn--secondary').trigger('click')
+    await flushPromises()
+    expect(dialog()).toBeNull()
+
+    // メニューは閉じているので開き直してから選ぶ
+    await wrapper.get('.topbar__user').trigger('click')
     await menuItem('パスワードの変更').trigger('click')
-    await wrapper.vm.$nextTick()
+    await flushPromises()
 
-    const panel = dialog()!
-    const toggle = panel.find<HTMLInputElement>('input[type="checkbox"]')
-    expect((toggle.element as HTMLInputElement).checked).toBe(true)
-    expect(panel.find('#upCurrent').exists()).toBe(true)
-    expect(panel.find('#upNew').exists()).toBe(true)
-    expect(panel.find('#upConfirm').exists()).toBe(true)
-
-    // 目のアイコンで表示／非表示を切り替えられる（新しいパスワード欄のボタン）
-    const eye = panel.findAll('button')
-      .find((button) => button.attributes('aria-label') === '新しいパスワードを表示')!
-    expect(eye).toBeTruthy()
-    expect((panel.find('#upNew').element as HTMLInputElement).type).toBe('password')
-    await eye.trigger('click')
-    expect((panel.find('#upNew').element as HTMLInputElement).type).toBe('text')
-    wrapper.unmount()
-  })
-
-  it('正しく入力して保存すると、デモのため保存しない旨を出して閉じる', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
-
-    const panel = dialog()!
-    await panel.find<HTMLInputElement>('#upName').setValue('山田 花子')
-    await panel.find<HTMLInputElement>('#upEmail').setValue('hanako@example.com')
-    const save = panel.findAll('button').find((button) => button.text().includes('保存'))!
-    await save.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    expect(toastTypes()).toContain('info')
-    expect(toastMessages()).toContain('デモ表示のため、内容は保存していません。')
-    expect(dialog()).toBeNull()
-    // 保存しても表示名（画面上のセッション）は変わらない
-    expect(wrapper.find('.up-user').text()).toContain('山田 太郎')
-    wrapper.unmount()
-  })
-
-  it('「初期値に戻す」で入力が元に戻る', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
-
-    const panel = dialog()!
-    await panel.find<HTMLInputElement>('#upName').setValue('変更中')
-    const reset = panel.findAll('button').find((button) => button.text().includes('初期値に戻す'))!
-    await reset.trigger('click')
-    await wrapper.vm.$nextTick()
-
-    expect((dialog()!.find<HTMLInputElement>('#upName').element as HTMLInputElement).value).toBe('山田 太郎')
-    wrapper.unmount()
-  })
-
-  it('キャンセルと × と Escape で閉じる', async () => {
-    const wrapper = mountTopbar()
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
-
-    const cancel = dialog()!.findAll('button').find((button) => button.text() === 'キャンセル')!
-    await cancel.trigger('click')
-    await wrapper.vm.$nextTick()
-    expect(dialog()).toBeNull()
-
-    await wrapper.find('.up-user').trigger('click')
-    await menuItem('ユーザー情報の変更').trigger('click')
-    await wrapper.vm.$nextTick()
-    // ダイアログは window の keydown を監視しているので、bubbles を付けて伝播させる
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await wrapper.vm.$nextTick()
-    expect(dialog()).toBeNull()
-    wrapper.unmount()
+    expect(dialog()?.get('#pwCurrent').element).toHaveProperty('value', '')
+    expect(dialog()?.get('#pwNew').element).toHaveProperty('value', '')
   })
 })

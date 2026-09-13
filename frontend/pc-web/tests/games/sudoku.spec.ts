@@ -290,10 +290,33 @@ describe('数独：画面', () => {
     wrapper.unmount()
   })
 
-  it('盤面のマスの大きさは --gm-cell で指定する（難易度によらず 56px）', () => {
+  it('盤面のマスの大きさは --gm-cell で指定する（難易度によらず 72px）', () => {
     const wrapper = mountView()
     const board = wrapper.find('.gm-sudoku').element as HTMLElement
-    expect(board.style.getPropertyValue('--gm-cell').trim()).toBe('56px')
+    expect(board.style.getPropertyValue('--gm-cell').trim()).toBe('72px')
+    wrapper.unmount()
+  })
+
+  it('難易度を変えても盤面はそのまま、新しい問題で反映する', async () => {
+    const wrapper = mountView()
+    await emptyCells(wrapper)[0].trigger('click')
+    await wrapper.findAll('.gm-numpad .btn')[2].trigger('click') // 「3」
+    const index = selectedIndex(wrapper)
+    expect(wrapper.findAll('.gm-sudoku-cell')[index].text()).toBe('3')
+
+    await wrapper.find('select').setValue('hard')
+
+    // 盤面（初期数字の数・入力した数字）はそのまま
+    expect(wrapper.findAll('.gm-sudoku-cell.is-given')).toHaveLength(34)
+    expect(wrapper.findAll('.gm-sudoku-cell')[index].text()).toBe('3')
+
+    // 【新しい問題】を押したときだけ反映される
+    await buttonByText(wrapper, '新しい問題').trigger('click')
+    expect(wrapper.findAll('.gm-sudoku-cell.is-given')).toHaveLength(27)
+    // 入力内容もリセットされ、空きマスはすべて空になっている
+    const entered = wrapper.findAll('.gm-sudoku-cell')
+      .filter((cell) => !cell.classes().includes('is-given') && cell.text() !== '')
+    expect(entered).toHaveLength(0)
     wrapper.unmount()
   })
 

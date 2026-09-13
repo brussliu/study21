@@ -515,6 +515,25 @@ INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タ�
 VALUES ('DAILY_REPORT','DAILY_REPORT_REMINDER_ENABLED','ENUM','1','true,false','学習日報：当日未記入時のホーム画面リマインダー（true/false）')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 
+-- 学習日報の通知（提出時に日報の内容を LINE へ送る。送信の実装はこれから）
+-- 学習日報の通知（提出時に日報の内容を LINE へ送る。送信の実装はこれから）
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_ENABLED','ENUM','0','true,false','学習日報：提出時に LINE へ送るか（true/false）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_TO','TEXT','0',NULL,'学習日報：送信先ID（userId / groupId / roomId。複数はカンマ区切り。空なら「デフォルト送信先ID」へ送る）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_SEND_ON_RESUBMIT','ENUM','0','true,false','学習日報：再提出（提出後に編集して再度提出）でも送るか（true/false）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_TEMPLATE','TEXT','0',NULL,'学習日報：メッセージ本文のテンプレート（{{日付}}・{{記入者}}・{{授業一覧}}・{{振り返り}}・{{今夜の勉強}}・{{提出日時}}・{{時限数}}・{{曜日}} を置換）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_LESSON_TEMPLATE','TEXT','0',NULL,'学習日報：授業1件のテンプレート（{{時限}}・{{教科}}・{{授業内容}}・{{掌握度}}・{{学習集中度}}・{{学習量}}・{{学習態度}}・{{ノート}} を置換。{{授業一覧}} の中で1件ずつ使う）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+
+
 -- ---------------- ENGLISH_WORD_TEXTBOOK_AI (単語教材取込AI) ----------------
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('ENGLISH_WORD_TEXTBOOK_AI','ENGLISH_WORD_TEXTBOOK_AI_PROVIDER','ENUM','1','qwen:1,qwen:2,qwen:3,qwen:4,qwen:5,doubao:1,doubao:2,deepseek:1,deepseek:2,chatgpt:1,chatgpt:2','英単語教材取込：AIモデルページで設定した使用モデル')
@@ -752,4 +771,3 @@ ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('LINE','LINE_MESSAGING_WEBHOOK_VALIDATE_SIGNATURE','ENUM','1','true,false','LINE Webhook：署名検証（true/false）')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
-

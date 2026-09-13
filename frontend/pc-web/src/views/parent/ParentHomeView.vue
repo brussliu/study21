@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import StudyOverview from '@/components/home/StudyOverview.vue'
 import SystemStatus from '@/components/SystemStatus.vue'
 import { useToast } from '@study21/web-shared'
 
@@ -108,6 +109,15 @@ const students: MockStudent[] = [
           </button>
         </div>
       </div>
+    </section>
+
+    <!-- 学習状況（2.0 の english.jsp の内容。生徒ホームと同じ構成でお子さまの状況を見る） -->
+    <section class="panel panel--plain" aria-label="お子さまの学習状況">
+      <div class="panel__head">
+        <h2 class="panel__title">お子さまの学習状況</h2>
+        <span class="panel__meta">{{ students[0]?.name }}（{{ students[0]?.grade }}）</span>
+      </div>
+      <StudyOverview :learner="students[0]?.name ?? ''" />
     </section>
   </div>
 </template>
@@ -231,5 +241,20 @@ const students: MockStudent[] = [
 .student-info__meta {
   font-size: var(--fs-xs);
   color: var(--color-text-muted);
+}
+
+/* 学習状況（StudyOverview）は自前のカードを持つため、外側の panel は枠を持たない。 */
+.panel--plain {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  padding: 0;
+}
+.panel--plain .panel__head {
+  margin-bottom: var(--sp-3);
+}
+.panel__meta {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
 }
 </style>

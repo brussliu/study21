@@ -18,7 +18,7 @@
         <section class="test-card" id="demoPanel"><div style="font-size:26px;font-weight:700">抑える</div><div class="cell-muted">他動詞・一段動詞 · おさえる</div><div class="cell-muted" style="margin-top:8px">中国語：控制、抑制</div></section>
     
         <nav class="test-nav">
-          <span class="test-nav__counter">各题型のデモを切り替えて確認できます</span>
+          <span class="test-nav__counter">各問題形式のデモを切り替えて確認できます</span>
           <button class="btn btn--primary" id="demoNext">次の問題</button>
         </nav>
       </div>

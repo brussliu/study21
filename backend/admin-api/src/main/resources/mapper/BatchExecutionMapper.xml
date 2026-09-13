@@ -3,37 +3,64 @@
 <mapper namespace="com.study21.admin.batch.BatchExecutionMapper">
 
     <resultMap id="ExecutionMap" type="com.study21.admin.batch.BatchExecutionEntity">
-        <id     property="executionId"  column="実行ID"/>
-        <result property="taskCode"     column="タスクコード"/>
-        <result property="status"       column="状態"/>
-        <result property="scheduleTime" column="予定時刻"/>
-        <result property="startTime"    column="開始時刻"/>
-        <result property="endTime"      column="終了時刻"/>
-        <result property="message"      column="メッセージ"/>
-        <result property="requestedBy"  column="依頼者"/>
-        <result property="createdAt"    column="登録日時"/>
-        <result property="updatedAt"    column="更新日時"/>
+        <id     property="executionId"          column="実行ID"/>
+        <result property="batchCode"            column="バッチコード"/>
+        <result property="batchType"            column="バッチ種別"/>
+        <result property="triggerType"          column="起動種別"/>
+        <result property="status"               column="状態"/>
+        <result property="requestPayload"       column="要求内容"/>
+        <result property="requestedByAccountId" column="依頼者アカウントID"/>
+        <result property="requestedByCode"      column="依頼元コード"/>
+        <result property="scheduleTime"         column="予定時刻"/>
+        <result property="startTime"            column="開始時刻"/>
+        <result property="endTime"              column="終了時刻"/>
+        <result property="durationMs"           column="処理時間ms"/>
+        <result property="message"              column="メッセージ"/>
+        <result property="errorDetail"          column="エラー詳細"/>
+        <result property="createdAt"            column="登録日時"/>
+        <result property="updatedAt"            column="更新日時"/>
     </resultMap>
 
-    <insert id="insert" useGeneratedKeys="true" keyProperty="executionId">
-        INSERT INTO public."BAT_タスク実行情報"
-            ("タスクコード","タスク種別","起動種別","状態","要求内容","依頼者",
-             "予定時刻","開始時刻","終了時刻","メッセージ","登録日時","更新日時")
+    <sql id="ExecutionColumns">
+        "実行ID", "バッチコード", "バッチ種別", "起動種別", "状態", "要求内容",
+        "依頼者アカウントID", "依頼元コード", "予定時刻", "開始時刻", "終了時刻",
+        "処理時間ms", "メッセージ", "エラー詳細", "登録日時", "更新日時"
+    </sql>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="executionId" keyColumn="実行ID">
+        INSERT INTO public."BAT_バッチ実行履歴情報"
+            ("バッチコード", "バッチ種別", "起動種別", "状態", "要求内容",
+             "依頼者アカウントID", "依頼元コード",
+             "予定時刻", "開始時刻", "終了時刻", "処理時間ms",
+             "メッセージ", "エラー詳細", "登録日時", "更新日時")
         VALUES
-            (#{taskCode}, 'C', 'C', #{status}, NULL::jsonb, #{requestedBy},
-             CURRENT_TIMESTAMP, #{startTime}, NULL, #{message}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            (#{batchCode}, #{batchType}, #{triggerType}, #{status},
+             <choose>
+                 <when test="requestPayload != null and requestPayload != ''">
+                     #{requestPayload}::jsonb,
+                 </when>
+                 <otherwise>NULL::jsonb,</otherwise>
+             </choose>
+             #{requestedByAccountId}, #{requestedByCode},
+             COALESCE(#{scheduleTime}::timestamp, CURRENT_TIMESTAMP),
+             #{startTime}::timestamp, #{endTime}::timestamp, #{durationMs},
+             #{message}, #{errorDetail}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     </insert>
 
     <update id="markRunning">
-        UPDATE public."BAT_タスク実行情報"
-           SET "状態" = 'RUNNING', "開始時刻" = CURRENT_TIMESTAMP, "更新日時" = CURRENT_TIMESTAMP
+        UPDATE public."BAT_バッチ実行履歴情報"
+           SET "状態" = 'RUNNING',
+               "開始時刻" = CURRENT_TIMESTAMP,
+               "更新日時" = CURRENT_TIMESTAMP
          WHERE "実行ID" = #{executionId}
     </update>
 
+    <!-- 終了時は処理時間も記録する（開始時刻が無い場合は 0 とする）。 -->
     <update id="markFinished">
-        UPDATE public."BAT_タスク実行情報"
+        UPDATE public."BAT_バッチ実行履歴情報"
            SET "状態" = #{status},
                "終了時刻" = CURRENT_TIMESTAMP,
+               "処理時間ms" = #{durationMs},
                "メッセージ" = #{message},
                "エラー詳細" = #{errorDetail},
                "更新日時" = CURRENT_TIMESTAMP
@@ -41,36 +68,79 @@
     </update>
 
     <select id="findById" resultMap="ExecutionMap">
-        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
-          FROM public."BAT_タスク実行情報"
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
          WHERE "実行ID" = #{executionId}
     </select>
 
-    <select id="findRunningByTaskCode" resultMap="ExecutionMap">
-        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
-          FROM public."BAT_タスク実行情報"
-         WHERE "タスクコード" = #{taskCode}
+    <!-- 二重起動の防止: 未完了（待機中・実行中）の実行を探す。 -->
+    <select id="findRunningByBatchCode" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "バッチコード" = #{batchCode}
            AND "状態" IN ('QUEUED','RUNNING')
          ORDER BY "実行ID" DESC
          LIMIT 1
     </select>
 
     <select id="findRecent" resultMap="ExecutionMap">
-        SELECT "実行ID","タスクコード","状態","予定時刻","開始時刻","終了時刻","メッセージ","依頼者","登録日時","更新日時"
-          FROM public."BAT_タスク実行情報"
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
         <where>
-            <if test="taskCode != null and taskCode != ''">
-                "タスクコード" = #{taskCode}
+            <if test="batchCode != null and batchCode != ''">
+                "バッチコード" = #{batchCode}
             </if>
         </where>
          ORDER BY "実行ID" DESC
          LIMIT #{limit}
     </select>
 
-    <select id="countByTaskCodeAndStatus" resultType="int">
+    <select id="countByBatchCodeAndStatus" resultType="int">
         SELECT count(*)
-          FROM public."BAT_タスク実行情報"
-         WHERE "タスクコード" = #{taskCode}
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "バッチコード" = #{batchCode}
            AND "状態" = #{status}
+    </select>
+
+    <!-- バッチごとの最新 1 件（一覧画面の「最新実行」を 1 クエリで引く）。 -->
+    <select id="findLatestPerBatch" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM (
+                SELECT DISTINCT ON ("バッチコード") *
+                  FROM public."BAT_バッチ実行履歴情報"
+                 ORDER BY "バッチコード", "実行ID" DESC
+               ) latest
+         ORDER BY "バッチコード"
+    </select>
+
+    <!-- 履歴の絞り込み条件（件数と一覧で同じ条件を使う）。 -->
+    <sql id="HistoryFilter">
+        <where>
+            <if test="batchCode != null and batchCode != ''">
+                AND "バッチコード" = #{batchCode}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態" = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND ("バッチコード" ILIKE '%' || #{keyword} || '%'
+                     OR "メッセージ" ILIKE '%' || #{keyword} || '%'
+                     OR "エラー詳細" ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="countHistory" resultType="long">
+        SELECT count(*)
+          FROM public."BAT_バッチ実行履歴情報"
+        <include refid="HistoryFilter"/>
+    </select>
+
+    <select id="searchHistory" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+        <include refid="HistoryFilter"/>
+         ORDER BY "実行ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
     </select>
 </mapper>

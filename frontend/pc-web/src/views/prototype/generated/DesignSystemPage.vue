@@ -357,7 +357,7 @@
       </div><div class="overlay" id="dlg-full" hidden data-close-on-backdrop="">
         <div class="dialog dialog--full" role="dialog" aria-modal="true" data-size="full">
           <div class="dialog__head"><h2 class="dialog__title"><svg class="icon icon--edit"><use href="/prototype-assets/icons/icons.svg#i-edit"></use></svg>Fullscreen ダイアログ</h2><button class="dialog__close" data-dialog-close="" aria-label="閉じる"><svg class="icon"><use href="/prototype-assets/icons/icons.svg#i-x"></use></svg></button></div>
-          <div class="dialog__body"><p class="cell-muted">全屏サイズ：複雑なフォームや GeoGebra エディタの埋め込みに使用。Esc / 閉じるで終了。</p></div>
+          <div class="dialog__body"><p class="cell-muted">全画面サイズ：複雑なフォームや GeoGebra エディタの埋め込みに使用。Esc / 閉じるで終了。</p></div>
           <div class="dialog__foot"><button class="btn btn--secondary" data-dialog-close="">キャンセル</button><button class="btn btn--primary" data-dialog-close="">保存</button></div>
         </div>
       </div>

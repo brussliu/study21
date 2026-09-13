@@ -1,8 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { mount, type VueWrapper } from '@vue/test-utils'
+import NonogramView from '@/views/game/NonogramView.vue'
 import {
   NONOGRAM_PICTURES, NONOGRAM_PRESETS, cluesFor, createPuzzle, createRandomPuzzle, hintIndex,
   isSolved, lineProgress, mistakes, puzzleFromPicture, type NonoState
 } from '@/features/game/nonogram'
+
+// NonogramView は useRoute しか使わないので、テストでは必要最小限のモックに差し替える
+// （テンプレートの RouterLink はマウント時のスタブで置き換える）。
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ path: '/student/game/nonogram' })
+}))
 
 /** 決まった順番で数を返す擬似乱数（テストを再現可能にする）。 */
 function seededRng(seed: number): () => number {
@@ -246,5 +254,55 @@ describe('ノノグラム：解答から出題まで通しで確認する', () =
       expect(isSolved(filledFrom(puzzle.solution), puzzle.solution)).toBe(true)
       expect(mistakes(filledFrom(puzzle.solution), puzzle.solution)).toEqual([])
     }
+  })
+})
+
+/** 画面のテスト用に NonogramView をマウントする（RouterLink はスタブに置き換える）。 */
+function mountView(): VueWrapper {
+  return mount(NonogramView, { global: { stubs: { RouterLink: true } } })
+}
+
+/** サイドパネルのボタンをラベルで探す。 */
+function buttonByText(wrapper: VueWrapper, label: string) {
+  const found = wrapper.findAll('.gm-actions .btn').find((button) => button.text().includes(label))
+  if (!found) throw new Error(`ボタンが見つかりません: ${label}`)
+  return found
+}
+
+describe('ノノグラム：画面', () => {
+  it('盤面のマスの大きさは --gm-cell で指定する（5×5 は 56px、15×15 は 40px）', async () => {
+    const wrapper = mountView()
+    const board = () => wrapper.find('.gm-nono').element as HTMLElement
+    expect(board().style.getPropertyValue('--gm-cell').trim()).toBe('56px')
+
+    // サイズの変更は【新しい問題】から効く
+    await wrapper.find('select').setValue('challenge')
+    await buttonByText(wrapper, '新しい問題').trigger('click')
+    expect(board().style.getPropertyValue('--gm-cell').trim()).toBe('40px')
+    wrapper.unmount()
+  })
+
+  it('サイズを変えても盤面はそのまま、新しい問題で反映する', async () => {
+    const wrapper = mountView()
+    expect(wrapper.findAll('.gm-nono__cell')).toHaveLength(25)
+    expect(wrapper.find('.card__sub').text()).toContain('5 × 5')
+
+    // 1 マス塗って進行中にする
+    await wrapper.findAll('.gm-nono__cell')[0].trigger('mousedown', { button: 0 })
+    expect(wrapper.findAll('.gm-nono__cell.is-filled')).toHaveLength(1)
+
+    await wrapper.find('select').setValue('challenge')
+
+    // 盤面（大きさ・塗ったマス）はそのまま
+    expect(wrapper.findAll('.gm-nono__cell')).toHaveLength(25)
+    expect(wrapper.findAll('.gm-nono__cell.is-filled')).toHaveLength(1)
+    expect(wrapper.find('.card__sub').text()).toContain('5 × 5')
+
+    // 【新しい問題】を押したときだけ反映される
+    await buttonByText(wrapper, '新しい問題').trigger('click')
+    expect(wrapper.findAll('.gm-nono__cell')).toHaveLength(225)
+    expect(wrapper.findAll('.gm-nono__cell.is-filled')).toHaveLength(0)
+    expect(wrapper.find('.card__sub').text()).toContain('15 × 15')
+    wrapper.unmount()
   })
 })

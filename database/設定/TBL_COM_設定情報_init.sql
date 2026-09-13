@@ -1156,6 +1156,10 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 
 -- ---------------- DAILY_REPORT ----------------
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','DAILY_REPORT_REMINDER_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_ENABLED','GLOBAL','false') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_SEND_ON_RESUBMIT','GLOBAL','false') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_TEMPLATE','GLOBAL','【学習日報】
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_LESSON_TEMPLATE','GLOBAL','・{{時限}}限 / {{教科}}
 
 -- ---------------- ENGLISH_WORD_TEXTBOOK_AI ----------------
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_WORD_TEXTBOOK_AI','ENGLISH_WORD_TEXTBOOK_AI_PROVIDER','GLOBAL','qwen:1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
@@ -1545,6 +1549,23 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_RETRY_LIMIT','GLOBAL','2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 
 -- ---------------- LINE ----------------
+日付：{{日付}}（{{曜日}}）
+記入者：{{記入者}}
+
+■ 授業内容（{{時限数}}限）
+{{授業一覧}}
+■ 全体の振り返り
+{{振り返り}}
+
+■ 今夜の勉強内容
+{{今夜の勉強}}
+
+提出日時：{{提出日時}}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+{{授業内容}}
+掌握度：{{掌握度}}
+集中度：{{学習集中度}}　学習量：{{学習量}}　態度：{{学習態度}}
+ノート：{{ノート}}
+────────────') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('LINE','LINE_MESSAGING_PUSH_URL','GLOBAL','https://api.line.me/v2/bot/message/push') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('LINE','LINE_MESSAGING_WEBHOOK_VALIDATE_SIGNATURE','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 

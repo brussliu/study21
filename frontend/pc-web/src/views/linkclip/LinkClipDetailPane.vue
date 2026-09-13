@@ -112,7 +112,7 @@ function remove(): void {
 </script>
 
 <template>
-  <div v-if="row" class="lc-drawer-overlay" @click.self="close">
+  <div v-if="row" class="lc-drawer-overlay">
     <aside class="lc-detail" role="dialog" aria-modal="true" aria-label="リンク詳細">
       <div class="lc-detail__head">
         <h3 class="lc-detail__title">{{ row.pageTitle }}</h3>

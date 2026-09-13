@@ -15,7 +15,7 @@
         </div>
     
         <section class="test-card">
-          <div class="cell-muted" style="margin-bottom:8px">中文含义 / 日文含义 / English word</div>
+          <div class="cell-muted" style="margin-bottom:8px">中国語の意味 / 日本語の意味 / English word</div>
           <div style="font-size:28px;font-weight:700" id="word">abandon</div>
           <div class="row" style="gap:8px;margin-top:8px"><span class="badge badge--outline">中文：捨てる</span><span class="badge badge--outline">日文：捨てる</span></div>
           <button class="btn btn--secondary btn--sm" style="margin-top:12px" id="speak"><svg class="icon"><use href="/prototype-assets/icons/icons.svg#i-play"></use></svg>発音</button>

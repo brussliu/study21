@@ -397,7 +397,7 @@ onBeforeUnmount(() => {
     <input ref="uploadInput" type="file" multiple style="display: none" @change="onUploadChange">
 
     <!-- 画像編集ダイアログ（切抜き範囲・回転・鮮明化・圧縮・別名保存） -->
-    <div v-if="editOpen" class="overlay" @click.self="closeEditor">
+    <div v-if="editOpen" class="overlay">
       <div class="dialog dialog--lg" role="dialog" aria-modal="true" aria-labelledby="tfEditorTitle">
         <div class="dialog__head">
           <h2 class="dialog__title" id="tfEditorTitle">

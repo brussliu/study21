@@ -34,7 +34,21 @@ public class SecurityConfig {
                         // 保護者・生徒の新規登録 / ログイン / パスワード再設定（認証前の公開エンドポイント）
                         .requestMatchers("/api/user/register", "/api/user/login", "/api/user/password/**").permitAll()
                         .requestMatchers("/api/user/logout", "/api/user/documents/**", "/api/user/document-folders/**",
-                                "/api/user/temp-files/**", "/api/user/test-infos/**", "/api/user/link-clips/**")
+                                "/api/user/temp-files/**", "/api/user/test-infos/**", "/api/user/link-clips/**",
+                                // 自分の情報の修正・パスワード変更（ログイン中のみ）
+                                "/api/user/profile", "/api/user/profile/**",
+                                // サイト管理・端末コントロール（当面ロールでは分けない。ログイン必須）
+                                "/api/user/net-sites", "/api/user/net-sites/**",
+                                "/api/user/net-terminals", "/api/user/net-terminals/**",
+                                // サイトアクセス履歴・Web閲覧履歴（インターネット利用履歴）。参照のみ
+                                "/api/user/net-access-logs", "/api/user/net-access-logs/**",
+                                "/api/user/web-browsing-logs", "/api/user/web-browsing-logs/**",
+                                // 学習日報（閲覧のみ）
+                                "/api/user/daily-reports", "/api/user/daily-reports/**",
+                                "/api/user/study-monitor", "/api/user/study-monitor/**",
+                                "/api/user/games", "/api/user/games/**",
+                                // TODO
+                                "/api/user/todos", "/api/user/todos/**")
                         .authenticated()
                         .anyRequest().denyAll())
                 .exceptionHandling(ex -> ex

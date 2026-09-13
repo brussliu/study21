@@ -57,7 +57,7 @@
                 <select class="select" style="width:auto" aria-label="区分"><option>2.休憩</option><option>1.通常</option><option>3.ゲーム</option></select>
               </div>
               <div class="card__body">
-                <div class="bar-chart" aria-label="上网柱状图">
+                <div class="bar-chart" aria-label="ネット利用の棒グラフ">
                   <div class="bar-chart__col"><div class="bar-chart__bar" style="height:20%"></div><div class="bar-chart__bar is-rest" style="height:34%"></div><span class="bar-chart__label">08時</span></div>
                   <div class="bar-chart__col"><div class="bar-chart__bar" style="height:44%"></div><div class="bar-chart__bar is-rest" style="height:12%"></div><span class="bar-chart__label">12時</span></div>
                   <div class="bar-chart__col"><div class="bar-chart__bar" style="height:62%"></div><div class="bar-chart__bar is-rest" style="height:22%"></div><span class="bar-chart__label">16時</span></div>

@@ -378,7 +378,7 @@ onBeforeUnmount(() => {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="overlay" @click.self="close" @paste="onPaste">
+    <div v-if="open" class="overlay" @paste="onPaste">
       <div class="dialog dialog--lg" role="dialog" aria-modal="true" aria-labelledby="testInfoDialogTitle">
         <div class="dialog__head">
           <h2 id="testInfoDialogTitle" class="dialog__title">

@@ -28,7 +28,10 @@ frontend/pc-web/
 │   │   └── prototypePages.generated.ts  # 94 页面注册表（脚本生成）
 │   ├── layouts/                     # AdminLayout / UserLayout
 │   ├── components/layout/           # AppSidebar / AppTopbar / AppBreadcrumb / PageTitle
+│   ├── components/account/          # UserProfileDialog / PasswordChangeDialog（右上メニューから開く）
+│   ├── api/                         # account / documents / linkclip / net / register / tempfiles / testinfo
 │   ├── views/
+│   │   ├── net/                     # SiteManagementView（サイト管理）/ TerminalControlView（端末コントロール）
 │   │   ├── login/                   # UserLoginView / AdminLoginView
 │   │   ├── prototype/               # PrototypePageView + generated/（94 页）
 │   │   └── error/                   # 403 / 404 / 500
@@ -71,14 +74,17 @@ DOM 结构与类名，样式全部来自 `src/assets/prototype/layout.css`（与
 - 路由守卫：`src/router/index.ts` 的 `beforeEach`（未登录访问受保护路由 → 登录页；
   已登录访问登录页 → 按角色回 `/admin/home`、`/parent/home`、`/student/home`）。
 - 登录页：`src/views/login/UserLoginView.vue`（学生/家长）与 `AdminLoginView.vue`（管理员）。
-- **不调用真实后端认证接口**，不保存密码。
+  登录调用真实 API（`/api/user/login`・`/api/admin/login`），只把用户名与角色放进
+  `sessionStorage`（**不保存密码**）。
+- 个人信息的修正与密码变更分别是**对话框**（`src/components/account/`，从右上菜单打开），
+  保存后重新加载父页面。详见 `docs/ACCOUNT.md`。
 
 ## 6. prototype/generated 规则（临时页面区域）
 
 - 临时区域：`src/views/prototype/generated/`，共 94 个 `.vue` 页面。
 - 注册表：`src/config/prototypePages.generated.ts`（由脚本生成，勿手改）。
 - 动态加载：`src/views/prototype/PrototypePageView.vue` 用 `import.meta.glob` 按 slug 懒加载组件。
-- 生成脚本：`scripts/generate-ui-pages.mjs`（从 ui-demo 提取 `.page-body` 内容生成 Vue 组件）。
+- 生成脚本：以前は `scripts/`（`generate-ui-pages.mjs` / `render-ui-pages-from-browser.mjs`）に置いていたが、そのディレクトリは削除済み。再生成が必要なときは git 履歴から復元するか、`tmp/` 配下に置いて使う。
 - 路由：`/{area}/home` 与 `/{area}/:screen` 均落到 `PrototypePageView`。
 - 本区域是**临时迁移页面**，不是已完成业务功能；页面头部显示「UI移行版」徽章标识。
 

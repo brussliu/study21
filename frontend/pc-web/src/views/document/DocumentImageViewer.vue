@@ -152,7 +152,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="doc-viewer-overlay" @click.self="emit('close')">
+  <div class="doc-viewer-overlay">
     <div class="doc-viewer">
       <header class="doc-viewer__bar">
         <strong>{{ current.originalFileName }}</strong>

@@ -8,15 +8,15 @@
 
   const PROVIDERS = ['chat-gpt', 'deepseek', 'doubao', 'gemini'];
   const ESSAY_MODEL_PROVIDERS = [
-    { key: 'qwen', label: '千问', prefix: 'qwen' },
+    { key: 'qwen', label: '千問', prefix: 'qwen' },
     { key: 'doubao', label: '豆包', prefix: 'doubao' },
     { key: 'deepseek', label: 'DeepSeek', prefix: 'deepseek' },
     { key: 'chatgpt', label: 'OpenAI', prefix: 'chatgpt' }
   ];
   const CATEGORIES = [
     { id: 'models', label: 'AIモデル', icon: 'fa-brain', description: '各AIサービスおよびOCR AIのモデル、APIキー、URLを設定します。', fields: [
-      ...modelFields('qwen','千问'), ...modelFields('doubao','豆包'), ...modelFields('deepseek','DeepSeek'), ...modelFields('chatgpt','OpenAI'),
-      f('bigmodelOcrModel','モデル指定','BigModel / 智谱 OCR','text'), f('bigmodelOcrApiKey','API Key','BigModel / 智谱 OCR','password'), f('bigmodelOcrUrl','URL','BigModel / 智谱 OCR','text')
+      ...modelFields('qwen','千問'), ...modelFields('doubao','豆包'), ...modelFields('deepseek','DeepSeek'), ...modelFields('chatgpt','OpenAI'),
+      f('bigmodelOcrModel','モデル指定','BigModel / 智譜 OCR','text'), f('bigmodelOcrApiKey','API Key','BigModel / 智譜 OCR','password'), f('bigmodelOcrUrl','URL','BigModel / 智譜 OCR','text')
     ]},
     { id: 'translation', label: '単語翻訳発音', icon: 'fa-language', description: '中国語・日本語の単語・例文翻訳APIと、英語の単語・例文発音取得API、同時処理数を設定します。', fields: [
       f('zhWordApi','中国語・単語翻訳API','中国語翻訳','select',['YouDao','Google']), f('zhSentenceApi','中国語・例文翻訳API','中国語翻訳','select',['YouDao','Google']), f('zhThreads','中国語・処理スレッド数','中国語翻訳','number',null,'1～20',1,20),
@@ -67,7 +67,7 @@
       rangeField(tabField(f('essayOcrRetryLimit','最大再実行回数','batC11','range',null,'通信またはJSON構造検証エラー時の画像単位の再実行回数です。',0,5),'その他'),1,'回',''),
       fullField(tabField(aiModelDropdownField('essayGradingAiProvider','batC12','英検基準の採点・添削に使用するモデルです。',false),'基本設定')),
       rangeField(tabField(f('essayGradingRequestTimeoutSeconds','リクエストタイムアウト','batC12','range',null,'AI APIへの1回の通信を待つ最大秒数です。',30,1800),'基本設定'),10,'s',''),
-      tabField(f('essayGradingPrompt','System Prompt','batC12','textarea',null,'採点基準、字数判定原則、出力制約、タイトル生成を設定します。'),'System Prompt'),
+      tabField(f('essayGradingPrompt','System Prompt','batC12','textarea',null,'採点基準、文字数判定原則、出力制約、タイトル生成を設定します。'),'System Prompt'),
       tabField(f('essayGradingUserPrompt','User Prompt','batC12','textarea',null,'{{level}}、{{question_text}}、{{essay_text}}、{{word_count}}を置換します。'),'User Prompt'),
       rangeField(tabField(f('essayGradingRetryLimit','最大再実行回数','batC12','range',null,'AIエラーまたはJSON構造検証エラー時の作文単位の再実行回数です。',0,5),'その他'),1,'回','')
     ]},
@@ -93,21 +93,21 @@
     ]},
     { id: 'english_reading_intensive', label: '英語読解・精読', icon: 'fa-book-open', description: '長文画像をOCRし、導読・逐文精読・設問解析を生成する4段階処理を設定します。API KeyとURLは「AIモデル」の接続設定を共通利用します。', sections: [
       { id:'bat-c15', title:'batC15（OCR実行・結果集計）', description:'OCR処理方式を選択し、各方式のOCR結果を集計して後続処理で使用する構造へ整形します。', icon:'fa-file-image', tabs:['基本設定'], ioNotice:{icon:'fa-file-image',input:'方式A・方式BのOCR結果',output:'長文・設問の最終構造（JSON）'}, fieldKeys:['intensiveBatC15AiProvider','intensiveOcrTextMethod'] },
-      { id:'bat-c15-1', title:'batC15-1（方式A 設問画像OCR・最終整形）', description:'方式Aで設問画像をAI認識し、智谱OCRの文章文字と統合して最終JSONへ整形します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-file-image',input:'設問画像・智谱OCR文字',output:'最終整形JSON'}, fieldKeys:['intensiveMethodAArticleOcrProvider','intensiveOcrQuestionSystemPrompt','intensiveOcrQuestionUserPrompt','intensiveOcrMethodAStructureSystemPrompt','intensiveOcrMethodAStructureUserPrompt'] },
-      { id:'bat-c15-3', title:'batC15-3（方式B OCR・AI構造化）', description:'方式Bで全画像を智谱OCRで文字化し、AIで問題構造へ変換します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-file-image',input:'全画像のOCR文字',output:'問題構造（JSON）'}, fieldKeys:['intensiveMethodBOcrProvider','intensiveOcrStructureSystemPrompt','intensiveOcrStructureUserPrompt'] },
+      { id:'bat-c15-1', title:'batC15-1（方式A 設問画像OCR・最終整形）', description:'方式Aで設問画像をAI認識し、智譜OCRの文章文字と統合して最終JSONへ整形します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-file-image',input:'設問画像・智譜OCR文字',output:'最終整形JSON'}, fieldKeys:['intensiveMethodAArticleOcrProvider','intensiveOcrQuestionSystemPrompt','intensiveOcrQuestionUserPrompt','intensiveOcrMethodAStructureSystemPrompt','intensiveOcrMethodAStructureUserPrompt'] },
+      { id:'bat-c15-3', title:'batC15-3（方式B OCR・AI構造化）', description:'方式Bで全画像を智譜OCRで文字化し、AIで問題構造へ変換します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-file-image',input:'全画像のOCR文字',output:'問題構造（JSON）'}, fieldKeys:['intensiveMethodBOcrProvider','intensiveOcrStructureSystemPrompt','intensiveOcrStructureUserPrompt'] },
       { id:'bat-c16', title:'batC16（基本情報・導読抽出）', description:'長文の基本情報と読解ガイドを生成します。', icon:'fa-compass', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-compass',input:'OCR済み長文',output:'基本情報・導読（JSON）'}, fieldKeys:['intensiveGuideAiProvider','intensiveGuideTimeoutSeconds','intensiveGuideSystemPrompt','intensiveGuideUserPrompt'] },
       { id:'bat-c17', title:'batC17（解説・重点語彙生成）', description:'逐文解説、文法と重点語彙を生成します。', icon:'fa-book-reader', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-book-reader',input:'分割済み英文',output:'逐文解説・語彙（JSON）'}, fieldKeys:['intensiveExplanationAiProvider','intensiveExplanationTimeoutSeconds','intensiveExplanationBatchSize','intensiveExplanationThreads','intensiveExplanationSystemPrompt','intensiveExplanationUserPrompt'] },
       { id:'bat-c18', title:'batC18（設問解析）', description:'設問、選択肢、正解根拠と解説を生成します。', icon:'fa-question-circle', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-question-circle',input:'長文・設問構造',output:'解析結果（JSON）'}, fieldKeys:['intensiveQuestionAiProvider','intensiveQuestionTimeoutSeconds','intensiveQuestionSystemPrompt','intensiveQuestionUserPrompt'] }
     ], fields: [
       fullField(tabField(aiModelDropdownField('intensiveBatC15AiProvider','batC15','OCR結果の集計・最終整形で使用するモデルです。',false),'基本設定')),
-      tabField(f('intensiveOcrTextMethod','文字モードの処理方式','batC15','select',[{value:'A',label:'方式A（画像別並列OCR）'},{value:'B',label:'方式B（智谱OCR＋AI構造化）'}],'【文字】を選択したときに使用します。【文字+図】は方式Aで処理します。'),'基本設定'),
-      tabField(f('intensiveMethodAArticleOcrProvider','文章OCRモデル','batC15-1 方式A','select',[{value:'bigmodel:1',label:'BigModel / 智谱 OCR（glm-ocr）'}],'方式Aでは文章画像を智谱OCRで文字化します。'),'基本設定'),
+      tabField(f('intensiveOcrTextMethod','文字モードの処理方式','batC15','select',[{value:'A',label:'方式A（画像別並列OCR）'},{value:'B',label:'方式B（智譜OCR＋AI構造化）'}],'【文字】を選択したときに使用します。【文字+図】は方式Aで処理します。'),'基本設定'),
+      tabField(f('intensiveMethodAArticleOcrProvider','文章OCRモデル','batC15-1 方式A','select',[{value:'bigmodel:1',label:'BigModel / 智譜 OCR（glm-ocr）'}],'方式Aでは文章画像を智譜OCRで文字化します。'),'基本設定'),
       tabField(f('intensiveOcrQuestionSystemPrompt','設問画像 System Prompt','batC15-1 方式A','textarea',null,'設問画像スレッド専用のプロンプトです。未設定時は共通OCR System Promptを使用します。'),'System Prompt'),
       tabField(f('intensiveOcrQuestionUserPrompt','設問画像 User Prompt','batC15-1 方式A','textarea',null,'{{image_count}}、{{image_categories_json}}を置換します。設問画像スレッド専用に設定できます。'),'User Prompt'),
-      tabField(f('intensiveOcrMethodAStructureSystemPrompt','最終整形 System Prompt','batC15-1 方式A','textarea',null,'智谱OCR文字と設問OCR結果を統合して最終JSONを整形します。'),'System Prompt'),
+      tabField(f('intensiveOcrMethodAStructureSystemPrompt','最終整形 System Prompt','batC15-1 方式A','textarea',null,'智譜OCR文字と設問OCR結果を統合して最終JSONを整形します。'),'System Prompt'),
       tabField(f('intensiveOcrMethodAStructureUserPrompt','最終整形 User Prompt','batC15-1 方式A','textarea',null,'{{image_count}}、{{image_categories_json}}、{{ocr_texts}}、{{question_structure_json}}を置換します。'),'User Prompt'),
-      tabField(f('intensiveMethodBOcrProvider','OCR用モデル','batC15-3 方式B','select',[{value:'bigmodel:1',label:'BigModel / 智谱 OCR（glm-ocr）'}],'画像を文字へ変換するOCR専用モデルです。方式B選択時に使用します。'),'基本設定'),
-      tabField(f('intensiveOcrStructureSystemPrompt','System Prompt','batC15-3 方式B','textarea',null,'智谱OCRで抽出した文字をAIが構造化するルールです。作答印・赤字正解は認識しません。'),'System Prompt'),
+      tabField(f('intensiveMethodBOcrProvider','OCR用モデル','batC15-3 方式B','select',[{value:'bigmodel:1',label:'BigModel / 智譜 OCR（glm-ocr）'}],'画像を文字へ変換するOCR専用モデルです。方式B選択時に使用します。'),'基本設定'),
+      tabField(f('intensiveOcrStructureSystemPrompt','System Prompt','batC15-3 方式B','textarea',null,'智譜OCRで抽出した文字をAIが構造化するルールです。作答印・赤字正解は認識しません。'),'System Prompt'),
       tabField(f('intensiveOcrStructureUserPrompt','User Prompt','batC15-3 方式B','textarea',null,'{{image_count}}、{{image_categories_json}}、{{ocr_texts}}、{{question_structure_json}}を置換します。'),'User Prompt'),
       fullField(tabField(aiModelDropdownField('intensiveGuideAiProvider','batC16','基本情報・導読の生成に使用するモデルです。',false),'基本設定')),
       rangeField(tabField(f('intensiveGuideTimeoutSeconds','リクエストタイムアウト','batC16','range',null,'AI APIへの1回の通信を待つ最大秒数です。',30,1800),'基本設定'),10,'s',''),
@@ -143,8 +143,14 @@
       tabField(f('monitorFirstSystemPrompt','System Prompt','System Prompt','textarea',null,'画面内容を優先して、6種類の状態と confidence / reason をJSONで返します。'),'System Prompt'),
       tabField(f('monitorFirstUserPrompt','User Prompt','User Prompt','textarea',null,'画像左上の撮影日時を確認するよう指示し、画像だけを渡します。'),'User Prompt')
     ]},
-    { id: 'daily_report', label: '学習日報', icon: 'fa-clipboard-list', description: '当日の学習日報が未記入の場合にホーム画面で通知するかを設定します。', fields: [
-      f('dailyReportReminderEnabled','未記入リマインダー','ホーム画面通知','select',[{value:'true',label:'有効'},{value:'false',label:'無効'}],'有効の場合、当日の学習日報がまだ保存されていないとホーム画面に案内を表示します。')
+    { id: 'daily_report', label: '学習日報', icon: 'fa-clipboard-list', description: '学習日報の通知（ホーム画面のリマインダーと、提出時に LINE へ送る内容）を設定します。', fields: [
+      f('dailyReportReminderEnabled','未記入リマインダー','ホーム画面通知','select',[{value:'true',label:'有効'},{value:'false',label:'無効'}],'有効の場合、当日の学習日報がまだ保存されていないとホーム画面に案内を表示します。'),
+      // 提出時の LINE 通知（2.0 は日報の保存後に LINE へ送っていた。2.1 は【提出】時に送る予定）
+      f('lineDailyReportEnabled','日報を LINE へ送る','LINE通知','select',['true','false'],'学習日報を提出したときに、日報の内容を LINE へ送ります。送信先は「LINE連携」の設定を使います。'),
+      f('lineDailyReportTo','日報の送信先ID','LINE通知','text',null,'userId / groupId / roomId。複数はカンマ区切り。空のときは「LINE連携」のデフォルト送信先IDへ送ります。'),
+      f('lineDailyReportSendOnResubmit','再提出でも送る','LINE通知','select',['true','false'],'提出後に編集して再度提出したときも送るかどうかです。'),
+      fullField(f('lineDailyReportTemplate','メッセージ本文のテンプレート','LINE通知','textarea',null,'{{日付}}・{{曜日}}・{{記入者}}・{{時限数}}・{{授業一覧}}・{{振り返り}}・{{今夜の勉強}}・{{提出日時}} を実行時に置換します。')),
+      fullField(f('lineDailyReportLessonTemplate','授業1件のテンプレート','LINE通知','textarea',null,'{{時限}}・{{教科}}・{{授業内容}}・{{掌握度}}・{{学習集中度}}・{{学習量}}・{{学習態度}}・{{ノート}} を置換します。{{授業一覧}} の中で1件ずつ使います。'))
     ]},
     { id: 'english_word_detail_ai', label: '英単語詳細AI取得', icon: 'fa-robot', description: '単語母表から詳細知識をAI Batchで生成し、中級編D・Eの問題データを生成する設定です。', sections: [
       { id:'detail', title:'batC21（英単語詳細AI取得）', description:'単語母表から詳細知識をAI Batchで生成し、検証・レビューして正式版へ反映する設定です。', icon:'fa-robot', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-font',input:'母表単語',output:'詳細知識（JSON）'}, fieldKeys:['wordDetailAiProvider','wordDetailAiBatchSize','wordDetailAiThreads','wordDetailAiRequestTimeoutSeconds','wordDetailAiMaxCompletionTokens','wordDetailAiTemperature','wordDetailAiSystemPrompt','wordDetailAiUserPrompt','wordDetailAiRetryLimit'] },
@@ -317,7 +323,7 @@
       title: '共通AI接続設定（各AIバッチ共通）',
       description: '各バッチから参照するモデル、API Key、URLをAIサービス別に管理します。',
       icon: 'fa-brain',
-      tabs: ['千问', '豆包', 'DeepSeek', 'OpenAI', 'BigModel / 智谱 OCR'],
+      tabs: ['千問', '豆包', 'DeepSeek', 'OpenAI', 'BigModel / 智譜 OCR'],
       matches: function() { return true; },
       resolveTab: function(field) { return field.group; }
     }
@@ -412,7 +418,7 @@
       });
       return result;
     }, []);
-    if (includeBigModel) options.push({ value: 'bigmodel:1', label: 'BigModel / 智谱 OCR / ' + (currentSettings.bigmodelOcrModel || 'glm-ocr') });
+    if (includeBigModel) options.push({ value: 'bigmodel:1', label: 'BigModel / 智譜 OCR / ' + (currentSettings.bigmodelOcrModel || 'glm-ocr') });
     return options;
   }
   function modelFields(prefix, label) {
@@ -425,7 +431,7 @@
     }
     fields.push(f(prefix+'ApiKey','API Key',label,'password'), f(prefix+'Url','URL',label,'text'));
     const urlField = fields[fields.length - 1];
-    if (prefix === 'qwen') urlField.help = '基础URL（/compatible-mode/v1）和完整的 /chat/completions URL 均可使用。';
+    if (prefix === 'qwen') urlField.help = 'ベースURL（/compatible-mode/v1）と完全な /chat/completions URL のどちらでも使用できます。';
     urlField.testProvider = prefix === 'chatgpt' ? 'openai' : prefix;
     return fields;
   }

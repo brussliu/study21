@@ -44,7 +44,9 @@ public final class LinkClipModels {
             String thumbnailUrl,
             Boolean favorite,
             Boolean archived,
-            List<String> tags) {}
+            List<String> tags,
+            /** 保護者のときだけ有効。true なら紐づくお子さまのアカウントにも同じ内容を登録する。 */
+            Boolean alsoForStudent) {}
 
     /** 更新時は楽観的ロック用の version を必須にする。 */
     public record UpdateRequest(

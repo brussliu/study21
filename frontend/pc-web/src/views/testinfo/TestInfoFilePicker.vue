@@ -78,7 +78,7 @@ function confirm(): void {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="ti-picker-overlay" @click.self="emit('close')">
+    <div v-if="open" class="ti-picker-overlay">
       <section class="ti-picker" role="dialog" aria-modal="true" aria-label="テスト情報から選択">
         <header class="ti-picker__head">
           <strong><AppIcon name="clipboard" size="sm" /> テスト情報から選択</strong>

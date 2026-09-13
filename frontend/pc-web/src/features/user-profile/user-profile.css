@@ -1,6 +1,6 @@
 /* =============================================================
-   ユーザー情報（右上のユーザー名メニューと変更ダイアログ）
-   ※ 現状はデモ表示のみ。更新 API・DB 保存は未実装（保存しても何も変わらない）。
+   ユーザー情報（右上のユーザー名メニューと 2 つのダイアログ）
+   ・ユーザー情報の修正 / パスワードの変更 はページ遷移せずダイアログで行う
    色は assets/prototype/tokens.css の変数のみを使う。
    ============================================================= */
 
@@ -83,15 +83,7 @@
   color: var(--color-primary);
 }
 
-.up-menu__note {
-  margin: var(--sp-1) 0 0;
-  padding: var(--sp-2) var(--sp-3) 0;
-  border-top: 1px solid var(--color-border);
-  font-size: var(--fs-xs);
-  color: var(--color-text-subtle);
-}
-
-/* ---------- 変更ダイアログ ---------- */
+/* ---------- ダイアログ本体 ---------- */
 .up-body {
   display: flex;
   flex-direction: column;
@@ -111,13 +103,25 @@
   color: var(--color-text-strong);
 }
 
+.up-lead {
+  margin: 0;
+}
+
+.up-loading {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
 .up-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--sp-3) var(--sp-4);
 }
 
-.up-grid .field--wide {
+.up-grid .field--wide,
+.up-grid .up-field--wide {
   grid-column: 1 / -1;
 }
 
@@ -126,34 +130,6 @@
   font-size: var(--fs-2xs);
   font-weight: var(--fw-regular);
   color: var(--color-danger);
-}
-
-.up-avatar {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-}
-
-.up-avatar__circle {
-  flex: none;
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: var(--color-primary-soft);
-  color: var(--color-primary);
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-bold);
-  user-select: none;
-}
-
-.up-avatar__meta {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-1);
-  align-items: flex-start;
 }
 
 .up-password-row {
@@ -175,9 +151,16 @@
 
 .up-readonly {
   display: flex;
-  align-items: center;
-  gap: var(--sp-2);
+  flex-direction: column;
+  gap: var(--sp-1);
+  justify-content: center;
   min-height: var(--control-md);
+}
+
+.up-readonly__value {
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+  word-break: break-all;
 }
 
 .up-foot {

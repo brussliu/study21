@@ -1,5 +1,8 @@
 package com.study21.user.linkclip;
 
+import com.study21.user.account.AccountEntity;
+import com.study21.user.account.AccountMapper;
+import com.study21.user.account.AccountType;
 import com.study21.user.security.UserPrincipal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,10 +30,13 @@ public class LinkClipService {
 
     private final LinkClipMapper mapper;
     private final LinkClipMetadataFetcher metadataFetcher;
+    private final AccountMapper accountMapper;
 
-    public LinkClipService(LinkClipMapper mapper, LinkClipMetadataFetcher metadataFetcher) {
+    public LinkClipService(LinkClipMapper mapper, LinkClipMetadataFetcher metadataFetcher,
+                           AccountMapper accountMapper) {
         this.mapper = mapper;
         this.metadataFetcher = metadataFetcher;
+        this.accountMapper = accountMapper;
     }
 
     // ---------- 一覧 ----------
@@ -76,13 +82,64 @@ public class LinkClipService {
     @Transactional
     public LinkClipModels.Saved create(UserPrincipal user, LinkClipModels.SaveRequest request) {
         long ownerId = user.accountId();
+        // 「お子さまにも登録」の検証は登録前に行う（片方だけ残る状態を作らない）
+        Long studentOwnerId = resolveStudentOwnerId(user, request);
+
         LinkClipEntity clip = buildClip(ownerId, request.url(), request.pageTitle(), request.siteName(),
                 request.folderCode(), request.sourceCode(), request.clipType(), request.summary(),
                 request.aiSummary(), request.memo(), request.publisherName(), request.publishedAt(),
                 request.videoSeconds(), request.thumbnailUrl(), request.favorite(), request.archived());
         mapper.insert(clip);
         replaceTags(ownerId, clip.getLinkClipId(), request.tags());
+
+        if (studentOwnerId != null) {
+            LinkClipEntity copy = copyFor(clip, studentOwnerId);
+            mapper.insert(copy);
+            replaceTags(studentOwnerId, copy.getLinkClipId(), request.tags());
+        }
         return new LinkClipModels.Saved(rowOf(ownerId, clip.getLinkClipId()));
+    }
+
+    /**
+     * 保護者が「お子さまのリンククリップにも登録する」を選んだときの登録先アカウント。
+     * 選んでいなければ null。保護者以外が指定した場合や、お子さまが紐づいていない場合は 400 にする
+     * （登録先はクライアントから受け取らず、保護者ID から必ず引き直す）。
+     */
+    private Long resolveStudentOwnerId(UserPrincipal user, LinkClipModels.SaveRequest request) {
+        if (!Boolean.TRUE.equals(request.alsoForStudent())) {
+            return null;
+        }
+        if (user.accountType() != AccountType.GUARDIAN) {
+            throw LinkClipApiException.invalid("この操作は保護者アカウントでのみ利用できます。");
+        }
+        AccountEntity student = accountMapper.findStudentByGuardianId(user.accountId());
+        if (student == null) {
+            throw LinkClipApiException.invalid("お子さまのアカウントが見つからないため、お子さまには登録できません。");
+        }
+        return student.getAccountId();
+    }
+
+    /** 同じ内容を別の所有者向けに複製する（ID・版・閲覧状況・取得日時は引き継がない）。 */
+    private LinkClipEntity copyFor(LinkClipEntity source, long ownerId) {
+        LinkClipEntity copy = new LinkClipEntity();
+        copy.setOwnerAccountId(ownerId);
+        copy.setFolderCode(source.getFolderCode());
+        copy.setSourceCode(source.getSourceCode());
+        copy.setClipType(source.getClipType());
+        copy.setSiteName(source.getSiteName());
+        copy.setPageTitle(source.getPageTitle());
+        copy.setUrl(source.getUrl());
+        copy.setNormalizedUrl(source.getNormalizedUrl());
+        copy.setSummary(source.getSummary());
+        copy.setAiSummary(source.getAiSummary());
+        copy.setMemo(source.getMemo());
+        copy.setPublisherName(source.getPublisherName());
+        copy.setPublishedAt(source.getPublishedAt());
+        copy.setVideoSeconds(source.getVideoSeconds());
+        copy.setThumbnailUrl(source.getThumbnailUrl());
+        copy.setFavorite(source.isFavorite());
+        copy.setArchived(source.isArchived());
+        return copy;
     }
 
     @Transactional

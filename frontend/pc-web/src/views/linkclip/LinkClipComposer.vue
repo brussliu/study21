@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import { useAuthStore } from '@/stores/auth'
 import {
   checkLinkClipDuplicates, createLinkClip, previewLinkClip, updateLinkClip,
   type ClipRow, type LinkPreview, type SaveClipRequest
@@ -20,6 +21,10 @@ const props = defineProps<{ open: boolean; editing: ClipRow | null }>()
 const emit = defineEmits<{ saved: []; close: [] }>()
 
 const toast = useToast()
+const auth = useAuthStore()
+
+/** 「お子さまのリンククリップにも登録する」は新規作成かつ保護者のときだけ出す。 */
+const showsStudentOption = computed(() => !isEditing.value && auth.role === 'GUARDIAN')
 
 const saving = ref(false)
 const previewing = ref(false)
@@ -30,6 +35,8 @@ const folderCode = ref<string>('INBOX')
 const pageTitle = ref('')
 const tagsInput = ref('')
 const memo = ref('')
+/** 保護者のときだけ表示する「お子さまにも登録」のチェック。既定は未選択。 */
+const alsoForStudent = ref(false)
 
 const preview = ref<LinkPreview | null>(null)
 
@@ -61,6 +68,7 @@ function resetForm(): void {
     siteName: null, sourceCode: undefined, clipType: undefined, summary: null,
     publisherName: null, publishedAt: null, videoSeconds: null, thumbnailUrl: null
   }
+  alsoForStudent.value = false
 }
 
 /** ダイアログが開くたびに、編集対象を読み込む（新規なら初期化）。 */
@@ -168,7 +176,9 @@ async function save(): Promise<void> {
     publishedAt: meta.value.publishedAt ?? null,
     videoSeconds: meta.value.videoSeconds ?? null,
     thumbnailUrl: meta.value.thumbnailUrl ?? null,
-    tags: parseTags(tagsInput.value)
+    tags: parseTags(tagsInput.value),
+    // 新規作成のときだけ送る（編集ではお子さま側を上書きしない）
+    alsoForStudent: isEditing.value ? undefined : alsoForStudent.value
   }
 
   saving.value = true
@@ -178,7 +188,9 @@ async function save(): Promise<void> {
       toast.success('リンクを更新しました。')
     } else {
       await createLinkClip(body)
-      toast.success('リンクを保存しました。')
+      toast.success(alsoForStudent.value
+        ? 'リンクを保存し、お子さまのリンククリップにも登録しました。'
+        : 'リンクを保存しました。')
     }
     // 閉じるのは親に任せる（emit('saved') で親がダイアログを閉じて一覧を再読込する）。
     emit('saved')
@@ -191,7 +203,7 @@ async function save(): Promise<void> {
 </script>
 
 <template>
-  <div v-if="open" class="overlay" @click.self="close">
+  <div v-if="open" class="overlay">
     <section class="dialog dialog--lg lc-composer" role="dialog" aria-modal="true" aria-labelledby="lcComposerTitle">
       <div class="dialog__head">
         <h2 id="lcComposerTitle" class="dialog__title"><AppIcon name="bookmark" size="sm" /> {{ title }}</h2>
@@ -228,6 +240,13 @@ async function save(): Promise<void> {
           <div class="field field--wide">
             <label class="field__label">メモ</label>
             <textarea v-model="memo" class="textarea" rows="2" placeholder="あとで見返すための一言メモ" />
+          </div>
+          <div v-if="showsStudentOption" class="field field--wide">
+            <label class="check">
+              <input v-model="alsoForStudent" type="checkbox" />
+              お子さまのリンククリップにも登録する
+            </label>
+            <p class="field__hint">お子さまのアカウントにも同じリンクを登録します（あとから各自で編集できます）。</p>
           </div>
         </div>
 

@@ -8,7 +8,7 @@
         </div>
     
         <section class="test-card">
-          <div class="cell-muted">中文含义 / 日文含义を見て英語を入力してください</div>
+          <div class="cell-muted">中国語の意味 / 日本語の意味を見て英語を入力してください</div>
           <div style="font-size:22px;font-weight:700;margin-top:8px" id="meaning">捨てる（中文：捨てる）</div>
         </section>
     

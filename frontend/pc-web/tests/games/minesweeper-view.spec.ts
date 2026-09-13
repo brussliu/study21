@@ -34,6 +34,13 @@ function boardCellSize(wrapper: VueWrapper): string {
   return board.style.getPropertyValue('--gm-cell').trim()
 }
 
+/** 【新しいゲーム】ボタンを押す（設定の変更が反映されるのはここだけ）。 */
+async function clickNewGame(wrapper: VueWrapper): Promise<void> {
+  const button = wrapper.findAll('.gm-actions button').find((item) => item.text().includes('新しいゲーム'))
+  expect(button).toBeTruthy()
+  await button!.trigger('click')
+}
+
 /** 決まった順番で数を返す擬似乱数（ビューと盤面の再現で同じ配置にする）。 */
 function seededRng(seed: number): () => number {
   let value = seed
@@ -82,9 +89,7 @@ describe('マインスイーパー画面', () => {
     await wrapper.findAll('.gm-mine-cell')[40].trigger('click')
     await wrapper.findAll('.gm-mine-cell')[0].trigger('contextmenu')
 
-    const newGame = wrapper.findAll('.gm-actions button').find((button) => button.text().includes('新しいゲーム'))
-    expect(newGame).toBeTruthy()
-    await newGame!.trigger('click')
+    await clickNewGame(wrapper)
 
     expect(wrapper.findAll('.gm-mine-cell.is-open')).toHaveLength(0)
     expect(wrapper.findAll('.gm-mine-cell.is-flag')).toHaveLength(0)
@@ -92,22 +97,45 @@ describe('マインスイーパー画面', () => {
     expect(metric(wrapper, '開いたマス')).toBe('0 / 71')
   })
 
-  it('難易度を変えると盤面の大きさが変わる', async () => {
-    const wrapper = await mountView()
-    await wrapper.find('select').setValue('intermediate')
-    expect(wrapper.findAll('.gm-mine-cell')).toHaveLength(256)
-    expect(metric(wrapper, '残りの地雷')).toBe('40')
-    expect(wrapper.find('.card__sub').text()).toContain('16 × 16')
+  it('難易度を変えても対局はやり直さず、新しいゲームで反映する', async () => {
+    const rng = seededRng(7)
+    const random = vi.spyOn(Math, 'random').mockImplementation(() => rng())
+    try {
+      const wrapper = await mountView()
+      await wrapper.findAll('.gm-mine-cell')[FIRST_CLICK].trigger('click')
+      const opened = wrapper.findAll('.gm-mine-cell.is-open').length
+      expect(opened).toBeGreaterThan(0)
+
+      await wrapper.find('select').setValue('intermediate')
+
+      // 盤面・進行状況・表示はそのまま（やり直さない）
+      expect(wrapper.findAll('.gm-mine-cell')).toHaveLength(81)
+      expect(wrapper.findAll('.gm-mine-cell.is-open')).toHaveLength(opened)
+      expect(wrapper.find('.gm-status__title').text()).toBe('プレイ中')
+      expect(metric(wrapper, '残りの地雷')).toBe('10')
+      expect(wrapper.find('.card__sub').text()).toContain('9 × 9')
+
+      // 【新しいゲーム】を押したときだけ反映される
+      await clickNewGame(wrapper)
+      expect(wrapper.findAll('.gm-mine-cell')).toHaveLength(256)
+      expect(metric(wrapper, '残りの地雷')).toBe('40')
+      expect(wrapper.find('.card__sub').text()).toContain('16 × 16')
+      expect(wrapper.find('.gm-status__title').text()).toBe('開始前')
+      wrapper.unmount()
+    } finally {
+      random.mockRestore()
+    }
   })
 
   it('マスの大きさは難易度にかかわらず同じ（40px）', async () => {
     const wrapper = await mountView()
     expect(boardCellSize(wrapper)).toBe('40px')
 
-    await wrapper.find('select').setValue('intermediate')
-    expect(boardCellSize(wrapper)).toBe('40px')
-
     await wrapper.find('select').setValue('expert')
+    expect(boardCellSize(wrapper)).toBe('40px')
+    expect(wrapper.findAll('.gm-mine-cell')).toHaveLength(81)
+
+    await clickNewGame(wrapper)
     expect(boardCellSize(wrapper)).toBe('40px')
     expect(wrapper.findAll('.gm-mine-cell')).toHaveLength(480)
   })

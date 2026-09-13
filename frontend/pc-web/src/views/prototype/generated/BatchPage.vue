@@ -91,7 +91,7 @@ const groups: BatchGroup[] = [
     rows: [
       { code: 'batC07', type: 'C（呼出）', desc: 'AI内容生成（STY_AI内容情報）', active: true, loop: '—', parallel: true, pageCode: 'AI_MODEL' },
       { code: 'batC09', type: 'C（呼出）', desc: 'AI OCR（画像/PDF文字認識）', active: true, loop: '—', parallel: true, pageCode: 'AI_MODEL' },
-      { code: 'batC91', type: 'C（呼出）', desc: 'AI OCR（智谱OCR 共通処理）', active: true, loop: '—', parallel: true, pageCode: 'AI_MODEL' }
+      { code: 'batC91', type: 'C（呼出）', desc: 'AI OCR（智譜OCR 共通処理）', active: true, loop: '—', parallel: true, pageCode: 'AI_MODEL' }
     ]
   },
   {

@@ -51,6 +51,13 @@ CREATE TABLE IF NOT EXISTS public."ACC_アカウント" (
     "名かな"             VARCHAR(100) NULL,
     -- 学年: 生徒のみ必須（例: 小学3年生 / 中学1年生 / 高校2年生）。保護者・管理者は NULL
     "学年"               VARCHAR(50)  NULL,
+    -- 電話番号: 任意（「ユーザー情報の修正」画面で入力。ハイフン有無はどちらでも可）
+    "電話番号"           VARCHAR(20)  NULL,
+    -- 通知設定: '1'=受け取る / '0'=受け取らない（「状態」と同じ規約）
+    --   メール通知 = 更新のお知らせをメールで受け取る（既定 '1'）
+    "メール通知"         VARCHAR(1)   NOT NULL DEFAULT '1',
+    --   リマインダー通知 = 学習リマインダーを受け取る（既定 '0'）
+    "リマインダー通知"   VARCHAR(1)   NOT NULL DEFAULT '0',
     -- ★保護者ID（生徒→保護者の自己参照。保護者・管理者は NULL）
     "保護者ID"           BIGINT       NULL,
     -- ★生成列: 複合FKで「参照先が保護者であること」を保証する補助キー
@@ -94,6 +101,9 @@ CREATE TABLE IF NOT EXISTS public."ACC_アカウント" (
     CONSTRAINT "CK_ACC_かな必須" CHECK (
         "アカウント種別" <> 'STUDENT' OR ("姓かな" IS NOT NULL AND "名かな" IS NOT NULL)
     ),
+    -- 通知設定は '0' / '1' のみ（状態と同じ規約）
+    CONSTRAINT "CK_ACC_メール通知" CHECK ("メール通知" IN ('0', '1')),
+    CONSTRAINT "CK_ACC_リマインダー通知" CHECK ("リマインダー通知" IN ('0', '1')),
     -- 有効期限: 管理者以外は必須
     CONSTRAINT "CK_ACC_有効期限" CHECK (
         "アカウント種別" = 'ADMIN' OR "有効期限" IS NOT NULL

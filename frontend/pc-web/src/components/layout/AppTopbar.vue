@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
-import UserProfileDialog from '@/components/layout/UserProfileDialog.vue'
+import UserProfileDialog from '@/components/account/UserProfileDialog.vue'
+import PasswordChangeDialog from '@/components/account/PasswordChangeDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
+import { reloadParentPage } from '@/features/user-profile/reloadPage'
 import '@/features/user-profile/user-profile.css'
 
 defineEmits<{
@@ -35,20 +37,38 @@ const roleText = computed(() =>
   auth.role === 'ADMIN' ? '管理者' : auth.role === 'GUARDIAN' ? '保護者' : '学生'
 )
 
-/** 右上のユーザー名メニュー（ユーザー情報の変更 / パスワードの変更）。 */
+/** 右上のユーザー名メニュー（ユーザー情報の修正 / パスワードの変更）。 */
 const anchor = ref<HTMLElement | null>(null)
 const menuOpen = ref(false)
-const profileOpen = ref(false)
-const profileFocus = ref<'profile' | 'password'>('profile')
+/** ユーザー情報の修正 / パスワードの変更（ページ遷移せずダイアログで開く）。 */
+const profileDialogOpen = ref(false)
+const passwordDialogOpen = ref(false)
+
+/**
+ * メニューを出すのは保護者・生徒だけ（管理者はアカウントの系統が別で、
+ * この機能の対象外のため出さない）。
+ */
+const canEditProfile = computed(() => auth.role === 'STUDENT' || auth.role === 'GUARDIAN')
 
 function toggleMenu(): void {
   menuOpen.value = !menuOpen.value
 }
 
-function openProfile(focus: 'profile' | 'password'): void {
-  profileFocus.value = focus
+/** 情報の修正とパスワードの変更は別ダイアログで開く（ページ遷移しない）。 */
+function openProfile(section: 'profile' | 'password'): void {
   menuOpen.value = false
-  profileOpen.value = true
+  if (section === 'profile') {
+    profileDialogOpen.value = true
+  } else {
+    passwordDialogOpen.value = true
+  }
+}
+
+/** ダイアログで保存できたら、開いていた親ページを再読み込みして変更を反映する。 */
+function onAccountSaved(): void {
+  profileDialogOpen.value = false
+  passwordDialogOpen.value = false
+  reloadParentPage()
 }
 
 /** メニュー外のクリックで閉じる（開くボタン自身のクリックは無視する）。 */
@@ -115,13 +135,14 @@ onBeforeUnmount(() => {
         </button>
 
         <div v-if="menuOpen" class="up-menu" role="menu" aria-label="ユーザーメニュー">
-          <button type="button" class="up-menu__item" role="menuitem" @click="openProfile('profile')">
-            <AppIcon name="edit" size="sm" class="icon--edit" /> ユーザー情報の変更
-          </button>
-          <button type="button" class="up-menu__item" role="menuitem" @click="openProfile('password')">
-            <AppIcon name="shield" size="sm" /> パスワードの変更
-          </button>
-          <p class="up-menu__note">デモ表示（保存されません）</p>
+          <template v-if="canEditProfile">
+            <button type="button" class="up-menu__item" role="menuitem" @click="openProfile('profile')">
+              <AppIcon name="edit" size="sm" class="icon--edit" /> ユーザー情報の修正
+            </button>
+            <button type="button" class="up-menu__item" role="menuitem" @click="openProfile('password')">
+              <AppIcon name="shield" size="sm" /> パスワードの変更
+            </button>
+          </template>
         </div>
       </div>
 
@@ -133,8 +154,17 @@ onBeforeUnmount(() => {
       >
         <AppIcon :name="theme.theme === 'dark' ? 'sun' : 'moon'" />
       </button>
-
-      <UserProfileDialog :open="profileOpen" :focus="profileFocus" @close="profileOpen = false" />
     </div>
+
+    <UserProfileDialog
+      :open="profileDialogOpen"
+      @close="profileDialogOpen = false"
+      @saved="onAccountSaved"
+    />
+    <PasswordChangeDialog
+      :open="passwordDialogOpen"
+      @close="passwordDialogOpen = false"
+      @saved="onAccountSaved"
+    />
   </header>
 </template>

@@ -475,7 +475,7 @@
    ============================================================= */
 .gm-sudoku {
   /* 既定値。実際の大きさは画面（SudokuView）が --gm-cell で指定する。 */
-  --gm-cell: 56px;
+  --gm-cell: 72px;
   display: grid;
   grid-template-columns: repeat(9, var(--gm-cell));
   border: 2px solid var(--color-border-strong);
@@ -483,6 +483,9 @@
   overflow: hidden;
   background: var(--color-surface);
   width: max-content;
+  /* 盤面が横に収まらないときは縮めず、親（.gm-board-body）の横スクロールに任せる。
+     縮むと overflow: hidden で右端の列が切れてしまう。 */
+  flex-shrink: 0;
 }
 
 .gm-sudoku-cell {
@@ -592,7 +595,8 @@
   border-radius: var(--radius-lg);
   background: var(--color-surface-alt);
   width: max-content;
-  --gm-cell: 72px;
+  /* 既定値。実際の大きさは画面（Game2048View）が --gm-cell で指定する。 */
+  --gm-cell: 100px;
 }
 
 .gm-g2048-cell {
@@ -604,7 +608,8 @@
   border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text-strong);
-  font-size: var(--fs-2xl);
+  /* 数字の大きさはマスの大きさに合わせる（--gm-cell は画面から指定される） */
+  font-size: calc(var(--gm-cell) * 0.28);
   font-weight: var(--fw-bold);
   font-variant-numeric: tabular-nums;
   transition: background-color var(--duration-fast) var(--ease-standard),
@@ -643,7 +648,8 @@
    五目並べ
    ============================================================= */
 .gm-gomoku {
-  --gm-cell: 28px;
+  /* 既定値。実際の大きさは画面（GomokuView）が --gm-cell で指定する。 */
+  --gm-cell: 40px;
   display: grid;
   gap: 0;
   padding: var(--sp-2);
@@ -651,6 +657,8 @@
   border-radius: var(--radius-md);
   background: var(--color-surface-alt);
   width: max-content;
+  /* 横に収まらないときは縮めず、親（.gm-board-body）の横スクロールに任せる。 */
+  flex-shrink: 0;
 }
 
 .gm-gomoku-cell {
@@ -715,7 +723,8 @@
    リバーシ
    ============================================================= */
 .gm-rev {
-  --gm-cell: 46px;
+  /* 既定値。実際の大きさは画面（ReversiView）が --gm-cell で指定する。 */
+  --gm-cell: 64px;
   display: grid;
   gap: 2px;
   padding: var(--sp-2);
@@ -772,13 +781,17 @@
    ノノグラム
    ============================================================= */
 .gm-nono {
-  --gm-cell: 28px;
+  /* 既定値。実際の大きさは画面（NonogramView）が --gm-cell で指定する。 */
+  --gm-cell: 40px;
   display: grid;
   grid-template-columns: auto auto;
   gap: var(--sp-2);
   align-items: end;
   justify-content: center;
   width: max-content;
+  /* 横に収まらないときは縮めず、親（.gm-board-body）の横スクロールに任せる。
+     縮むと盤面（overflow: hidden）の右端の列が切れてしまう。 */
+  flex-shrink: 0;
 }
 
 .gm-nono__colclues {
@@ -875,10 +888,6 @@
   background: var(--color-danger-soft);
 }
 
-/* 5×5 の敷居を下げた問題ではセルを大きめにする */
-.gm-nono.is-small {
-  --gm-cell: 40px;
-}
 
 /* ---------- レスポンシブ ---------- */
 @media (max-width: 1024px) {

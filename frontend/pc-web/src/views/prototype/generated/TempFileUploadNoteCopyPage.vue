@@ -5,7 +5,7 @@
         <div class="row" style="gap:6px"><button class="btn btn--secondary btn--sm">全画面</button><button class="btn btn--secondary btn--sm">このページを消去</button><button class="btn btn--primary btn--sm" id="saveAll">すべて保存</button><button class="btn btn--icon btn--sm" id="close"><svg class="icon"><use href="/prototype-assets/icons/icons.svg#i-x"></use></svg></button></div>
       </div>
       <div class="popup-shell__body">
-        <div class="alert alert--warning" style="margin-bottom:12px"><svg class="icon"><use href="/prototype-assets/icons/icons.svg#i-alert"></use></svg><div class="alert__body"><div class="alert__title">副本（バックアップ）</div>このページは <code>temp_file_upload_note.jsp</code> の中文命名备份副本（`temp_file_upload_note - 副本.jsp`）の再現です。機能は同一です。</div></div>
+        <div class="alert alert--warning" style="margin-bottom:12px"><svg class="icon"><use href="/prototype-assets/icons/icons.svg#i-alert"></use></svg><div class="alert__body"><div class="alert__title">副本（バックアップ）</div>このページは <code>temp_file_upload_note.jsp</code> の中国語名のバックアップ副本（`temp_file_upload_note - 副本.jsp`）の再現です。機能は同一です。</div></div>
         <div class="note-layout">
           <aside class="note-pages" id="pageList"><div class="note-page-item is-active">ページ 1</div><div class="note-page-item">ページ 2</div><div class="note-page-item">ページ 3</div><div class="note-page-item">ページ 4</div><div class="note-page-item">ページ 5</div><div class="note-page-item">ページ 6</div><div class="note-page-item">ページ 7</div><div class="note-page-item">ページ 8</div><div class="note-page-item">ページ 9</div><div class="note-page-item">ページ 10</div></aside>
           <div>

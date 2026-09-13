@@ -52,7 +52,7 @@ function openDocumentFile(file: DocumentFileInfo): void {
 
 <template>
   <Teleport to="body">
-    <div v-if="open && !viewer" class="doc-files-overlay" @click.self="emit('close')">
+    <div v-if="open && !viewer" class="doc-files-overlay">
       <section class="doc-files-dialog" role="dialog" aria-modal="true" :aria-label="`資料 ${docNo} のファイル一覧`">
         <header class="doc-files-head">
           <strong>{{ docNo }} のファイル（{{ files.length }} 件）</strong>

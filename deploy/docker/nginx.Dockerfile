@@ -12,6 +12,9 @@ RUN npm run build -w mobile-web
 
 # 阶段2：nginx 托管两个前端 + 反向代理两个后端
 FROM nginx:1.27-alpine
+# タイムゾーン（TZ=Asia/Tokyo）を効かせる。Alpine には tzdata が入っておらず、
+# 入っていないと TZ を設定してもログの時刻が UTC のままになる。
+RUN apk add --no-cache tzdata
 COPY deploy/docker/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=frontend-build /app/pc-web/dist /usr/share/nginx/html
 COPY --from=frontend-build /app/mobile-web/dist /usr/share/nginx/html/m

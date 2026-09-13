@@ -16,7 +16,7 @@ function screen(
 /**
  * UI 移行期間用メニュー。
  * 役割別の権限が未確定のため、現在は三つのエリアで同じ画面を表示する。
- * アイコンは原 ui-demo の側栏（design-system.html）と同一の `#i-*` を参照。
+ * アイコンは原 ui-demo のサイドバー（design-system.html）と同一の `#i-*` を参照。
  */
 export function frameworkMenu(area: AppArea): MenuItem[] {
   return [screen(area, `${area}-home`, 'ホーム', 'home', 'home')]
@@ -54,14 +54,24 @@ export function prototypeMenu(area: AppArea): MenuItem[] {
     screen(area, 'testinfo', 'テスト情報管理', 'testinfo', 'clipboard'),
     screen(area, 'document', '資料管理', 'document', 'folder'),
     screen(area, 'temp-file', '臨時ファイル管理', 'temp-file', 'image'),
-    screen(area, 'site', 'サイト管理', 'site', 'globe'),
+    screen(area, 'network', 'ネットワーク制御', 'site', 'globe', [
+      screen(area, 'site', 'サイト管理', 'site', 'globe'),
+      screen(area, 'terminal-control', '端末コントロール', 'terminal-control', 'monitor'),
+      screen(area, 'internet-usage', 'インターネット利用履歴', 'internet-usage', 'clock')
+    ]),
     screen(area, 'link-clip', 'リンククリップ', 'link-clip', 'bookmark'),
-    screen(area, 'terminal-control', '端末コントロール', 'terminal-control', 'monitor'),
-    screen(area, 'agent-control', 'アプリ制御', 'agent-control', 'shield'),
-    screen(area, 'agent-history', 'エージェント履歴', 'agent-history', 'user'),
-    screen(area, 'batch', 'バッチ管理', 'batch', 'sliders'),
+    screen(area, 'app-control', 'アプリ制御', 'agent-control', 'shield', [
+      screen(area, 'app-manage', 'アプリ管理', 'agent-control', 'shield'),
+      screen(area, 'app-history', 'アプリ利用履歴', 'agent-history', 'clock')
+    ]),
+    screen(area, 'batch', 'バッチ管理', 'batch', 'sliders', [
+      screen(area, 'batch-list', 'バッチ一覧', 'batch', 'sliders'),
+      screen(area, 'batch-history', 'バッチ実行履歴', 'batch-history', 'clock'),
+      screen(area, 'batch-ai-history', 'AI呼出履歴', 'batch-ai-history', 'play')
+    ]),
     screen(area, 'study-monitor', '学習状況モニター', 'study-monitor', 'video'),
-    screen(area, 'history', '履歴管理', 'history', 'clock'),
+    // 「履歴管理」（2.0 の history.jsp を再現したプロトタイプ画面）は左メニューから外した。
+    // 中身は インターネット利用履歴 / バッチ実行履歴 / AI呼出履歴 として個別の画面に移している。
     screen(area, 'setting', '設定', 'setting', 'sliders')
   ]
 }

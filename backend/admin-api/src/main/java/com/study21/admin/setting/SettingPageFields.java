@@ -161,6 +161,12 @@ public final class SettingPageFields {
 
         // --- 学習日報 (DAILY_REPORT) ---
         put(m, "dailyReportReminderEnabled", "DAILY_REPORT", "DAILY_REPORT_REMINDER_ENABLED");
+        // 提出時の LINE 通知（設定画面では「学習日報」に置く。送信そのものは未実装）
+        put(m, "lineDailyReportEnabled",          "DAILY_REPORT", "LINE_DAILY_REPORT_ENABLED");
+        put(m, "lineDailyReportTo",               "DAILY_REPORT", "LINE_DAILY_REPORT_TO");
+        put(m, "lineDailyReportSendOnResubmit",   "DAILY_REPORT", "LINE_DAILY_REPORT_SEND_ON_RESUBMIT");
+        put(m, "lineDailyReportTemplate",         "DAILY_REPORT", "LINE_DAILY_REPORT_TEMPLATE");
+        put(m, "lineDailyReportLessonTemplate",   "DAILY_REPORT", "LINE_DAILY_REPORT_LESSON_TEMPLATE");
 
         // --- 英単語詳細AI取得 (ENGLISH_WORD_DETAIL_AI / WORD_QUESTION) ---
         put(m, "wordDetailAiProvider",            "ENGLISH_WORD_DETAIL_AI", "ENGLISH_WORD_DETAIL_AI_PROVIDER");
@@ -274,6 +280,7 @@ public final class SettingPageFields {
         put(m, "lineMessagingDefaultTo",              "LINE", "LINE_MESSAGING_DEFAULT_TO");
         put(m, "lineMessagingChannelSecret",          "LINE", "LINE_MESSAGING_CHANNEL_SECRET");
         put(m, "lineMessagingWebhookValidateSignature", "LINE", "LINE_MESSAGING_WEBHOOK_VALIDATE_SIGNATURE");
+
 
         BY_FIELD_KEY = Collections.unmodifiableMap(m);
 

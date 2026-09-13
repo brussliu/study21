@@ -11,6 +11,9 @@ import {
 import { useGameTimer } from '@/features/game/useGameTimer'
 import '@/features/game/game.css'
 
+/** 盤面のマスの大きさ（px）。数字が読みやすい大きさにする。 */
+const CELL_SIZE_PX = 100
+
 /** タブ表示（GameView）ではページ見出しをタブ側が持つため、この見出しは出さない。 */
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
@@ -178,7 +181,11 @@ onBeforeUnmount(() => {
           <span class="card__sub">{{ BOARD_2048_SIZE }} × {{ BOARD_2048_SIZE }} ／ 目標 {{ TARGET_2048 }}</span>
         </div>
         <div class="card__body gm-board-body">
-          <div class="gm-g2048" role="group" :aria-label="boardLabel">
+          <div
+            class="gm-g2048" role="group"
+            :style="{ '--gm-cell': `${CELL_SIZE_PX}px` }"
+            :aria-label="boardLabel"
+          >
             <div
               v-for="(value, index) in board.cells" :key="index"
               class="gm-g2048-cell"

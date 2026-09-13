@@ -67,11 +67,12 @@ describe('遊び方カードの言語切り替え', () => {
     await router.isReady()
     const wrapper = mount(GomokuView, { global: { plugins: [router] } })
 
+    // 既定は CPU モード（ユーザーの指定）なので、白は「CPU」と分かる表記になる
     const legend = () => wrapper.findAll('.gm-legend__item').map((item) => item.text())
-    expect(legend()).toEqual(['黒（先手・あなた）', '白（後手）'])
+    expect(legend()).toEqual(['黒（先手・あなた）', '白（後手・CPU）'])
 
     await wrapper.find('.gm-lang__btn:last-child').trigger('click')
-    expect(legend()).toEqual(['黑（先手・你）', '白（后手）'])
+    expect(legend()).toEqual(['黑（先手・你）', '白（后手・CPU）'])
     wrapper.unmount()
   })
 })

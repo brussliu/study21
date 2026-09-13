@@ -178,7 +178,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="ti-annot-overlay" @click.self="emit('close')">
+    <div v-if="open" class="ti-annot-overlay">
       <section class="ti-annot" role="dialog" aria-modal="true" :aria-label="`注釈 ${fileName}`">
         <header class="ti-annot__head">
           <strong><AppIcon name="edit" size="sm" class="icon--edit" /> 注釈・回転</strong>

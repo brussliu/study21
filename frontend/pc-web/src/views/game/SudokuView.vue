@@ -15,7 +15,7 @@ import '@/features/game/game.css'
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 
 /** 盤面のマスの大きさ（px）。見やすい大きさで全難易度共通。 */
-const CELL_SIZE_PX = 56
+const CELL_SIZE_PX = 72
 
 const route = useRoute()
 const toast = useToast()
@@ -88,11 +88,6 @@ function newGame(): void {
   finished.value = false
   undoStack.value = []
   timer.reset()
-}
-
-function onChangeDifficulty(): void {
-  newGame()
-  toast.info('新しい問題を作りました。')
 }
 
 /** 最初の入力でタイマーを動かし始める。 */
@@ -384,7 +379,8 @@ newGame()
               <div class="gm-toolbar">
                 <label class="field field--inline">
                   <span class="field__label">難易度</span>
-                  <select v-model="difficulty" class="select" @change="onChangeDifficulty">
+                  <!-- 選んだ難易度は次の【新しい問題】から使う（解いている問題は変わらない）。 -->
+                  <select v-model="difficulty" class="select">
                     <option v-for="preset in SUDOKU_PRESETS" :key="preset.key" :value="preset.key">
                       {{ preset.label }}
                     </option>

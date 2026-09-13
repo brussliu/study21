@@ -64,8 +64,7 @@ export const routes: RouteRecordRaw[] = [
       {
         path: 'home',
         name: 'admin-home',
-        component: () => import('@/views/prototype/PrototypePageView.vue'),
-        props: { screen: 'home' },
+        component: () => import('@/views/home/HomeView.vue'),
         meta: { title: 'ホーム', layout: 'admin' }
       },
       {
@@ -104,6 +103,60 @@ export const routes: RouteRecordRaw[] = [
       },
       ...gameRoutes('admin'),
       {
+        path: 'site',
+        name: 'admin-site',
+        component: () => import('@/views/net/SiteManagementView.vue'),
+        meta: { title: 'サイト管理', layout: 'admin' }
+      },
+      {
+        path: 'terminal-control',
+        name: 'admin-terminal-control',
+        component: () => import('@/views/net/TerminalControlView.vue'),
+        meta: { title: '端末コントロール', layout: 'admin' }
+      },
+      {
+        path: 'batch',
+        name: 'admin-batch',
+        component: () => import('@/views/batch/BatchListView.vue'),
+        meta: { title: 'バッチ一覧', layout: 'admin' }
+      },
+      {
+        path: 'batch-history',
+        name: 'admin-batch-history',
+        component: () => import('@/views/batch/BatchHistoryView.vue'),
+        meta: { title: 'バッチ実行履歴', layout: 'admin' }
+      },
+      {
+        path: 'batch-ai-history',
+        name: 'admin-batch-ai-history',
+        component: () => import('@/views/batch/AiCallHistoryView.vue'),
+        meta: { title: 'AI呼出履歴', layout: 'admin' }
+      },
+      {
+        path: 'internet-usage',
+        name: 'admin-internet-usage',
+        component: () => import('@/views/network/InternetUsageHistoryView.vue'),
+        meta: { title: 'インターネット利用履歴', layout: 'admin' }
+      },
+      {
+        path: 'daily-report',
+        name: 'admin-daily-report',
+        component: () => import('@/views/daily-report/DailyReportView.vue'),
+        meta: { title: '学習日報', layout: 'admin' }
+      },
+      {
+        path: 'todo',
+        name: 'admin-todo',
+        component: () => import('@/views/todo/TodoView.vue'),
+        meta: { title: 'TODO', layout: 'admin' }
+      },
+      {
+        path: 'study-monitor',
+        name: 'admin-study-monitor',
+        component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
+        meta: { title: '学習状況モニター', layout: 'admin' }
+      },
+      {
         path: ':screen',
         name: 'admin-screen',
         component: () => import('@/views/prototype/PrototypePageView.vue'),
@@ -120,8 +173,7 @@ export const routes: RouteRecordRaw[] = [
       {
         path: 'home',
         name: 'student-home',
-        component: () => import('@/views/prototype/PrototypePageView.vue'),
-        props: { screen: 'home' },
+        component: () => import('@/views/home/HomeView.vue'),
         meta: { title: 'ホーム', layout: 'user' }
       },
       {
@@ -159,6 +211,60 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('student'),
+      {
+        path: 'site',
+        name: 'student-site',
+        component: () => import('@/views/net/SiteManagementView.vue'),
+        meta: { title: 'サイト管理', layout: 'user' }
+      },
+      {
+        path: 'terminal-control',
+        name: 'student-terminal-control',
+        component: () => import('@/views/net/TerminalControlView.vue'),
+        meta: { title: '端末コントロール', layout: 'user' }
+      },
+      {
+        path: 'batch',
+        name: 'student-batch',
+        component: () => import('@/views/batch/BatchListView.vue'),
+        meta: { title: 'バッチ一覧', layout: 'user' }
+      },
+      {
+        path: 'batch-history',
+        name: 'student-batch-history',
+        component: () => import('@/views/batch/BatchHistoryView.vue'),
+        meta: { title: 'バッチ実行履歴', layout: 'user' }
+      },
+      {
+        path: 'batch-ai-history',
+        name: 'student-batch-ai-history',
+        component: () => import('@/views/batch/AiCallHistoryView.vue'),
+        meta: { title: 'AI呼出履歴', layout: 'user' }
+      },
+      {
+        path: 'internet-usage',
+        name: 'student-internet-usage',
+        component: () => import('@/views/network/InternetUsageHistoryView.vue'),
+        meta: { title: 'インターネット利用履歴', layout: 'user' }
+      },
+      {
+        path: 'daily-report',
+        name: 'student-daily-report',
+        component: () => import('@/views/daily-report/DailyReportView.vue'),
+        meta: { title: '学習日報', layout: 'user' }
+      },
+      {
+        path: 'todo',
+        name: 'student-todo',
+        component: () => import('@/views/todo/TodoView.vue'),
+        meta: { title: 'TODO', layout: 'user' }
+      },
+      {
+        path: 'study-monitor',
+        name: 'student-study-monitor',
+        component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
+        meta: { title: '学習状況モニター', layout: 'user' }
+      },
       {
         path: ':screen',
         name: 'student-screen',
@@ -214,6 +320,60 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('parent'),
+      {
+        path: 'site',
+        name: 'parent-site',
+        component: () => import('@/views/net/SiteManagementView.vue'),
+        meta: { title: 'サイト管理', layout: 'user' }
+      },
+      {
+        path: 'terminal-control',
+        name: 'parent-terminal-control',
+        component: () => import('@/views/net/TerminalControlView.vue'),
+        meta: { title: '端末コントロール', layout: 'user' }
+      },
+      {
+        path: 'batch',
+        name: 'parent-batch',
+        component: () => import('@/views/batch/BatchListView.vue'),
+        meta: { title: 'バッチ一覧', layout: 'user' }
+      },
+      {
+        path: 'batch-history',
+        name: 'parent-batch-history',
+        component: () => import('@/views/batch/BatchHistoryView.vue'),
+        meta: { title: 'バッチ実行履歴', layout: 'user' }
+      },
+      {
+        path: 'batch-ai-history',
+        name: 'parent-batch-ai-history',
+        component: () => import('@/views/batch/AiCallHistoryView.vue'),
+        meta: { title: 'AI呼出履歴', layout: 'user' }
+      },
+      {
+        path: 'internet-usage',
+        name: 'parent-internet-usage',
+        component: () => import('@/views/network/InternetUsageHistoryView.vue'),
+        meta: { title: 'インターネット利用履歴', layout: 'user' }
+      },
+      {
+        path: 'daily-report',
+        name: 'parent-daily-report',
+        component: () => import('@/views/daily-report/DailyReportView.vue'),
+        meta: { title: '学習日報', layout: 'user' }
+      },
+      {
+        path: 'todo',
+        name: 'parent-todo',
+        component: () => import('@/views/todo/TodoView.vue'),
+        meta: { title: 'TODO', layout: 'user' }
+      },
+      {
+        path: 'study-monitor',
+        name: 'parent-study-monitor',
+        component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
+        meta: { title: '学習状況モニター', layout: 'user' }
+      },
       {
         path: ':screen',
         name: 'parent-screen',

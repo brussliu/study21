@@ -45,6 +45,9 @@
   --subject-english:  #2f6fb5;
   --subject-japanese: #c1516a;
   --subject-math:     #6a58b8;
+  /* 理科（化学・物理・生物など）。緑は「提出済みの日」の背景（success-soft）と重なるため、
+     あえて緑を使わず、青緑（cyan）にする */
+  --subject-science:  #0b7285;
 
   /* ---------- 语义化别名（组件只引用这些；themes.css 负责暗色覆盖） ---------- */
   --color-bg:             var(--neutral-50);

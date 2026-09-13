@@ -4,13 +4,30 @@
    ここには Study 2.1 のアプリ全体で共有したい小さな追加ルールだけを置く。
    ============================================================================ */
 
+/* ============================================================================
+ * 複数行の入力（textarea）
+ *
+ * 設計システムの `.input` は **1 行入力用**で、`height: ハンドル高さ` ＋ `padding: 0 12px`
+ * しか持たない。これを `<textarea class="input" rows="3">` に使うと、
+ * 文字が上端に張り付き（上下の余白 0）、高さも 1 行ぶんに潰れてしまう。
+ * textarea は `.textarea` と同じ扱い（上下の余白＋行数なりの高さ）にする。
+ * ========================================================================== */
+textarea.input {
+  height: auto;
+  min-height: var(--control-md);
+  padding: var(--sp-2) var(--sp-3);
+  line-height: var(--lh-normal);
+  resize: vertical;
+}
+
 /* 操作アイコンの色（全ページ共通）
-   削除＝赤 / 編集＝青 / 参照（目）＝緑。ダウンロードなどは従来の色のまま。
+   削除＝赤 / 編集＝青 / 参照（目）＝緑 / 却下＝橙。ダウンロードなどは従来の色のまま。
 
    ・アイコンボタン（.btn--icon）の削除は .is-danger を使う。
      ホバー時の背景と無効時の淡い色もここで揃う。
    ・それ以外の場所（テキスト付きボタン・独自の操作ボタン・プロトタイプ画面）は
-     アイコン自身に .icon--danger / .icon--edit / .icon--view を付ける。
+     アイコン自身に .icon--danger / .icon--edit / .icon--view / .icon--reject を付ける。
+   却下（承認の取り消し）は削除と紛らわしくないよう**赤を使わない**（橙＝注意）。
    デザインシステムの `.btn .icon { color: inherit }` より優先させる必要があるため、
    ボタン内では特異性を上げたセレクタで上書きする。 */
 .btn--icon.is-danger {
@@ -45,6 +62,12 @@
   color: var(--color-success);
 }
 
+/* 却下（承認の取り消し）。削除の赤と区別するため橙にする。 */
+.icon--reject,
+.btn .icon.icon--reject {
+  color: var(--color-warning);
+}
+
 /* アイコンボタンのホバー背景（全ページ共通）
    アイコンの色に合わせて淡い同系色を敷く（削除＝淡い赤 / 編集＝淡い青 / 参照＝淡い緑）。
    狙いは 2 つ:
@@ -67,23 +90,46 @@
   background: var(--color-success-soft);
 }
 
+/* 却下（橙）。ホバー背景も淡い橙にする。 */
+:is(.btn--icon, .doc-card__action):has(> .icon--reject):hover:not(:disabled) {
+  background: var(--color-warning-soft);
+}
+
 /* 塗りつぶしボタン（文字が白）の中では、アイコンは文字色を継承させる。
    例: btn--primary の中に目（参照）アイコンを置いても白のまま。 */
 .btn--primary .icon.icon--danger,
 .btn--primary .icon.icon--edit,
 .btn--primary .icon.icon--view,
+.btn--primary .icon.icon--reject,
 .btn--danger .icon.icon--danger,
 .btn--danger .icon.icon--edit,
-.btn--danger .icon.icon--view {
+.btn--danger .icon.icon--view,
+.btn--danger .icon.icon--reject {
   color: inherit;
 }
 
 /* 検索条件エリアと結果（一覧）エリアの間隔。
-   一覧ページの外枠（.page-body / .doc-list-page / .ti-page / .tf-page）は既に flex gap を
-   持っているため、デザインシステム既定の margin-bottom を打ち消して二重取りをなくす
-   （実測: 32px → 16px）。 */
+   一覧ページの外枠（.page-body / .doc-list-page / .ti-page / .tf-page / .prototype-screen）は
+   既に flex gap を持っているため、デザインシステム既定の margin-bottom を打ち消して
+   二重取りをなくす（実測: 32px → 16px）。間隔の値は下の .prototype-screen 側で持つ。 */
 .search-panel:not(:last-child) {
   margin-bottom: 0;
+}
+
+/* 生成された移行画面（.prototype-screen）と、その中の「表示中」タブパネルの縦の間隔。
+   これらの画面には外枠のスタイルが無く、上で margin-bottom を打ち消しているため、
+   検索条件と一覧などのカードが隙間なく接していた（実測 0px）。実装済みの一覧画面
+   （.tf-page = flex column + gap var(--sp-4)）と同じ間隔をここで一元管理する。
+   注意 1: カード自身に margin を持たせると二重取りになるため、間隔は gap だけで持つ。
+   注意 2: デザインシステムでは .tabs__panel が display:none、.is-active だけ display:block。
+   パネル自身の display を書き換えると非表示のはずのタブまで見えてしまうため、
+   間隔は表示中のパネル（.is-active）にだけ与える。 */
+.prototype-screen,
+.prototype-screen .tabs__panel.is-active {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
 }
 
 /* ページングの省略記号（例: 1 2 3 4 5 … 20）。数字ボタンと同じ幅を確保して行を揃える。 */
@@ -96,4 +142,35 @@
   color: var(--color-text-subtle);
   font-size: var(--fs-sm);
   user-select: none;
+}
+
+/* インターネット利用履歴（Web閲覧履歴）: URL は長いので 1 行に省略する
+   （全文は title 属性で見られる）。表が横に広がりすぎるのを防ぐ。 */
+.data-table td.cell-url {
+  max-width: 22rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================================
+ * ページング（一覧の右下）
+ *
+ * 設計システムの `.pagination` は「左に件数情報・右にページ番号」の 2 つを想定している。
+ * 1 ページの件数の選択（`.pagination__size`）も**ページ番号の左隣**に置くため
+ * （ユーザーの指定）、件数情報を左端へ寄せて 件数 + ページ番号 を右にまとめる。
+ * ========================================================================== */
+.pagination > .pagination__info:first-child {
+  margin-right: auto;
+}
+
+/* ============================================================================
+ * 検索条件の「残り幅いっぱいに広げる」項目
+ *
+ * 設計システムの `.filter-item--grow` は中の `.input` しか伸ばさないため、
+ * 項目そのものは内容ぶんの幅のままになり、後ろの項目が次の行へ折り返してしまう
+ * （例: AI呼出履歴のキーワード）。項目自体を伸ばして 1 行に収める。
+ * ========================================================================== */
+.filter-item--grow {
+  flex: 1 1 12rem;
 }
