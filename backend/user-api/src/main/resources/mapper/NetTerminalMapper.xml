@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.net.NetTerminalMapper">
+
+    <resultMap id="NetTerminalMap" type="com.study21.user.net.NetTerminalEntity">
+        <id     property="terminalId"         column="端末ID"/>
+        <result property="ipAddress"          column="IPアドレス"/>
+        <result property="terminalName"       column="端末名称"/>
+        <result property="terminalMode"       column="端末モード"/>
+        <result property="status"             column="状態"/>
+        <result property="note"               column="備考"/>
+        <result property="lastSeenAt"         column="最終接続日時"/>
+        <result property="version"            column="バージョン"/>
+        <result property="createdByAccountId" column="登録者アカウントID"/>
+        <result property="updatedByAccountId" column="更新者アカウントID"/>
+        <result property="createdByCode"      column="登録元コード"/>
+        <result property="updatedByCode"      column="更新元コード"/>
+        <result property="createdAt"          column="登録日時"/>
+        <result property="updatedAt"          column="更新日時"/>
+        <result property="updatedByName"      column="更新者名"/>
+    </resultMap>
+
+    <sql id="TerminalColumns">
+        t."端末ID", t."IPアドレス", t."端末名称", t."端末モード", t."状態", t."備考", t."最終接続日時",
+        t."バージョン", t."登録者アカウントID", t."更新者アカウントID", t."登録元コード", t."更新元コード",
+        t."登録日時", t."更新日時",
+        NULLIF(BTRIM(COALESCE(a."姓", '') || ' ' || COALESCE(a."名", '')), '') AS "更新者名"
+    </sql>
+
+    <sql id="TerminalFrom">
+        FROM public."NET_端末コントロール情報" t
+        LEFT JOIN public."ACC_アカウント" a ON a."アカウントID" = t."更新者アカウントID"
+    </sql>
+
+    <sql id="TerminalWhere">
+        <where>
+            <if test="terminalMode != null and terminalMode != ''">
+                AND t."端末モード" = #{terminalMode}
+            </if>
+            <if test="status != null and status != ''">
+                AND t."状態" = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (t."IPアドレス" ILIKE '%' || #{keyword} || '%'
+                     OR t."端末名称" ILIKE '%' || #{keyword} || '%'
+                     OR t."備考" ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="search" resultMap="NetTerminalMap">
+        SELECT <include refid="TerminalColumns"/>
+        <include refid="TerminalFrom"/>
+        <include refid="TerminalWhere"/>
+         ORDER BY t."更新日時" DESC, t."端末ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*)
+        <include refid="TerminalFrom"/>
+        <include refid="TerminalWhere"/>
+    </select>
+
+    <select id="findById" resultMap="NetTerminalMap">
+        SELECT <include refid="TerminalColumns"/>
+        <include refid="TerminalFrom"/>
+         WHERE t."端末ID" = #{terminalId}
+    </select>
+
+    <!-- 有効な端末のうち同じ IP のもの（IP は「有効な行の間でだけ」一意） -->
+    <select id="findActiveByIpAddress" resultMap="NetTerminalMap">
+        SELECT <include refid="TerminalColumns"/>
+        <include refid="TerminalFrom"/>
+         WHERE t."IPアドレス" = #{ipAddress}
+           AND t."状態" = '1'
+        <if test="excludeTerminalId != null">
+           AND t."端末ID" != #{excludeTerminalId}
+        </if>
+         LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.net.NetTerminalEntity"
+            useGeneratedKeys="true" keyProperty="terminalId" keyColumn="端末ID">
+        INSERT INTO public."NET_端末コントロール情報" (
+            "IPアドレス", "端末名称", "端末モード", "状態", "備考",
+            "登録者アカウントID", "更新者アカウントID", "登録元コード")
+        VALUES (
+            #{ipAddress}, #{terminalName}, #{terminalMode}, #{status}, #{note},
+            #{createdByAccountId}, #{updatedByAccountId}, 'APP')
+    </insert>
+
+    <update id="update">
+        UPDATE public."NET_端末コントロール情報"
+           SET "IPアドレス" = #{ipAddress},
+               "端末名称" = #{terminalName},
+               "端末モード" = #{terminalMode},
+               "状態" = #{status},
+               "備考" = #{note},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "端末ID" = #{terminalId}
+        <if test="version != null">
+           AND "バージョン" = #{version}
+        </if>
+    </update>
+
+    <update id="updateMode">
+        UPDATE public."NET_端末コントロール情報"
+           SET "端末モード" = #{terminalMode},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "端末ID" = #{terminalId}
+        <if test="version != null">
+           AND "バージョン" = #{version}
+        </if>
+    </update>
+
+    <!-- 選択した端末のモードを一括変更する。 -->
+    <update id="updateModes">
+        UPDATE public."NET_端末コントロール情報"
+           SET "端末モード" = #{terminalMode},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "端末ID" IN
+        <foreach collection="terminalIds" item="terminalId" open="(" separator="," close=")">
+            #{terminalId}
+        </foreach>
+    </update>
+
+    <select id="countByIds" resultType="long">
+        SELECT COUNT(*)
+          FROM public."NET_端末コントロール情報"
+         WHERE "端末ID" IN
+        <foreach collection="terminalIds" item="terminalId" open="(" separator="," close=")">
+            #{terminalId}
+        </foreach>
+    </select>
+</mapper>

@@ -1,0 +1,493 @@
+/* TODO（一覧・カレンダー・Excel 風の子タスク入力）。色は tokens.css の変数のみ。 */
+
+.todo-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* 上部: カウンタと表示切替 */
+.todo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.todo-counter {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.todo-counter__value {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.todo-counter__label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.todo-counter--doing .todo-counter__value { color: var(--color-info); }
+.todo-counter--done .todo-counter__value { color: var(--color-success); }
+.todo-counter--open .todo-counter__value { color: var(--color-warning); }
+
+.todo-view-switch {
+  display: flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+/* 期限の表示（過ぎたら赤） */
+.todo-due {
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-due--overdue {
+  color: var(--color-danger);
+  font-weight: 600;
+}
+
+.todo-due--today {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+/* 親タスクの行と子タスクの行（子タスクは開いたときだけ表の行として出す） */
+.todo-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.todo-title-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/*
+ * 親タスクの見出し。タイトル自身が開閉ボタンになっていて、
+ * 表示は「タイトル 完了/全体」（例: ハリポタ 0/17）。
+ *
+ * 開閉の三角はセルの左余白に置く（`position: absolute`）。見出しの文字の前に
+ * 置くと、子タスクを持つ行だけタイトルが右にずれて、持たない行と縦にそろわない。
+ */
+.todo-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+/*
+ * 三角の位置。タイトルはセルの余白（--sp-4）から始まるので、
+ * その余白の中（左端から 1px）に収める。三角はボタンの中にあるので、
+ * クリックでも開閉できる。
+ */
+.todo-toggle__icon {
+  position: absolute;
+  left: calc(-1 * (var(--sp-4) - 1px));
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.todo-toggle:hover .todo-toggle__title {
+  color: var(--color-primary);
+}
+
+.todo-toggle__title {
+  font-weight: var(--fw-semibold);
+}
+
+.todo-toggle__count {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 開いている親タスクの行 */
+.todo-row--expanded > td {
+  border-bottom-color: transparent;
+}
+
+/* 子タスクの行（親と同じ列に並ぶ。少し淡くして親子の関係を見せる） */
+.todo-child-row > td {
+  background: var(--color-surface-alt);
+  font-size: var(--fs-sm);
+}
+
+/*
+ * 子タスクのタイトルは、親タスクの **タイトル文字**（セルの余白 --sp-4 から始まる）より
+ * 3 文字ぶん右に下げる（ツリー記号は使わない）。
+ * 開閉の三角は余白の中に置いているので、親のタイトル文字はセルの余白と同じ位置。
+ */
+/* 設計システムの `.data-table td` より優先させるため、クラスを重ねる */
+.data-table td.todo-child-row__title {
+  padding-left: calc(var(--sp-4) + 3ch);
+}
+
+.todo-child__done {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+/* カレンダー */
+.todo-calendar__head,
+.todo-calendar__week {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--sp-1);
+}
+
+.todo-calendar__head span {
+  padding: var(--sp-1) 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.todo-calendar__week + .todo-calendar__week {
+  margin-top: var(--sp-1);
+}
+
+.todo-day {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-height: 4.25rem;
+  padding: var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.todo-day:hover {
+  border-color: var(--color-primary);
+}
+
+.todo-day--empty {
+  border-style: dashed;
+  background: transparent;
+  opacity: 0.45;
+}
+
+.todo-day--today {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.todo-day__num {
+  font-weight: 600;
+}
+
+.todo-day__badges {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+/*
+ * 子タスクの Excel 風グリッド（IRJ の functionManagement.jsp の
+ * 「入力項目定義 / 出力項目定義」に合わせる）。
+ *   ・罫線と行の高さを揃え、セルは input/select が枠いっぱいに入る
+ *   ・セルを選ぶと緑（表計算の選択と同じ見え方）
+ *   ・ドラッグで範囲選択、選択中のセルは太い枠で示す
+ * 色は tokens.css の変数のみ。
+ */
+.todo-grid {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  table-layout: fixed;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.todo-grid th,
+.todo-grid td {
+  border: 1px solid var(--color-border);
+  box-sizing: border-box;
+}
+
+.todo-grid thead th {
+  height: 2.25rem;
+  padding: 0 var(--sp-2);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.todo-grid tbody td {
+  position: relative;
+  height: 2rem;
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  vertical-align: middle;
+}
+
+/*
+ * 編集中でないセルは値をテキストで出す（クリックしただけでは入力欄を出さない）。
+ * 長い文字はセル幅で省略する（表の行の高さを揃えるため）。
+ */
+.todo-grid td[data-col] .todo-grid__value {
+  display: block;
+  overflow: hidden;
+  padding: 0 var(--sp-2);
+  line-height: calc(2rem - 2px);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 表そのものにもフォーカスが移る（選んだセルを方向キーで動かすため） */
+.todo-grid:focus {
+  outline: none;
+}
+
+.todo-grid:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 入力中のセルは白地のまま（選択の緑は残しつつ、枠で「入力中」を示す） */
+.todo-grid td.is-editing {
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+/* セルの中の入力は枠を持たない（セル全体が入力欄に見えるように） */
+.todo-grid td[data-col] input,
+.todo-grid td[data-col] select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: calc(2rem - 2px);
+  margin: 0;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+}
+
+.todo-grid td[data-col] input[type="date"] {
+  padding-right: var(--sp-1);
+}
+
+.todo-grid td[data-col] input:focus,
+.todo-grid td[data-col] select:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.todo-grid td.todo-grid__no {
+  /* 幅は colgroup（％）で決める */
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-grid td.todo-grid__remove {
+  padding: 0;
+  text-align: center;
+  background: var(--color-surface-alt);
+}
+
+.todo-grid thead th.todo-grid__no-head {
+  text-align: center;
+}
+
+/*
+ * ダイアログの中の「子タスク」の見出し。
+ * `.table-section__head` は左右に余白を持つので、ここでは使わず
+ * 上の項目（タイトル・メモ）と同じ左端に揃える。
+ */
+.todo-grid__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+
+/*
+ * 列の幅を変えるつまみ（見出しの右端）。
+ * 掴みやすいように少し広く取り、中心が必ず見出しの内側に来るようにする
+ * （中心が罫線の上だと、掴む位置によっては別の要素に当たってしまう）。
+ */
+.todo-grid__resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.todo-grid__resizer::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  left: 8px;
+  width: 1px;
+  height: 60%;
+  background: var(--color-border);
+}
+
+.todo-grid__resizer:hover::after,
+.todo-grid__resizer:focus-visible::after {
+  left: 7px;
+  width: 2px;
+  background: var(--color-primary);
+}
+
+/* 見出しはドラッグ中に文字が選択されないようにする（列幅の操作だけにする） */
+.todo-grid thead {
+  user-select: none;
+}
+
+.todo-grid__resizer:focus-visible {
+  outline: none;
+}
+
+/* 選択中のセル（1 つだけ選んでいるとき） */
+.todo-grid td.is-selected {
+  background: var(--color-success-soft);
+  box-shadow: inset 0 0 0 2px var(--color-success);
+}
+
+/* ドラッグで選んだ範囲 */
+.todo-grid td.is-range {
+  background: var(--color-success-soft);
+}
+
+.todo-grid td.is-range-top {
+  border-top-color: var(--color-success);
+}
+
+.todo-grid td.is-range-bottom {
+  border-bottom-color: var(--color-success);
+}
+
+.todo-grid td.is-range-left {
+  border-left-color: var(--color-success);
+}
+
+.todo-grid td.is-range-right {
+  border-right-color: var(--color-success);
+}
+
+.todo-grid__hint {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/*
+ * ダイアログ上部のフォーム。
+ * タイトルとメモは 1 行まるごと使い、優先度と期限は同じ行に並べる。
+ * 項目どうしの間隔は行間（row-gap）で広めに取る。
+ */
+.todo-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.todo-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.todo-field--full {
+  grid-column: 1 / -1;
+}
+
+.todo-field__label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  color: var(--color-text-muted);
+}
+
+/* タブ行の右側（カウンタと新規） */
+.todo-head__spacer {
+  margin-left: auto;
+}
+
+/* 一覧のカードの見出しの上に余白を入れる */
+.todo-head .tabs {
+  margin-bottom: 0;
+}
+
+/*
+ * 検索条件は一覧カードの見出し行にまとめる（バッチ実行履歴と同じ形）。
+ * 見出し・件数のあとに右寄せで並べる。折り返しは持たせず（1 行に収める）、
+ * 幅が足りないときは見出し行ごと次の行に落とす（.table-section__head が flex-wrap を持つ）。
+ * 設計システムの .input / .select は width:100% なので、ここでは中身に合わせて縮める。
+ */
+.todo-filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.todo-filters .input,
+.todo-filters .select {
+  width: auto;
+}
+
+.todo-filters .input {
+  min-width: 12rem;
+}
+
+.todo-filters .select {
+  min-width: 9rem;
+}
+
+.todo-filters__check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* 操作アイコンの色（進行中→完了は緑、完了→未着手はオレンジ） */
+.todo-page .icon--success {
+  color: var(--color-success);
+}

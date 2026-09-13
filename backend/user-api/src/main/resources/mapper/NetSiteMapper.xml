@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.net.NetSiteMapper">
+
+    <resultMap id="NetSiteMap" type="com.study21.user.net.NetSiteEntity">
+        <id     property="siteId"             column="サイトID"/>
+        <result property="siteName"           column="サイト名称"/>
+        <result property="siteUrl"            column="サイトURL"/>
+        <result property="hostName"           column="ホスト名"/>
+        <result property="kindCode"           column="区分コード"/>
+        <result property="judgeMethodCode"    column="判定方法コード"/>
+        <result property="categoryCode"       column="分類コード"/>
+        <result property="categoryName"       column="分類名称"/>
+        <result property="approvalStatus"     column="承認ステータス"/>
+        <result property="approvedByAccountId" column="承認者アカウントID"/>
+        <result property="approvedAt"         column="承認日時"/>
+        <result property="status"             column="状態"/>
+        <result property="note"               column="備考"/>
+        <result property="version"            column="バージョン"/>
+        <result property="createdByAccountId" column="登録者アカウントID"/>
+        <result property="updatedByAccountId" column="更新者アカウントID"/>
+        <result property="createdByCode"      column="登録元コード"/>
+        <result property="updatedByCode"      column="更新元コード"/>
+        <result property="createdAt"          column="登録日時"/>
+        <result property="updatedAt"          column="更新日時"/>
+    </resultMap>
+
+    <sql id="SiteColumns">
+        "サイトID", "サイト名称", "サイトURL", "ホスト名", "区分コード", "判定方法コード",
+        "分類コード", "分類名称", "承認ステータス", "承認者アカウントID", "承認日時",
+        "状態", "備考", "バージョン",
+        "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+        "登録日時", "更新日時"
+    </sql>
+
+    <!-- 検索条件（画面のフィルタと同じ。空の条件は無視する）。 -->
+    <sql id="SiteWhere">
+        <where>
+            <if test="kindCode != null and kindCode != ''">
+                AND "区分コード" = #{kindCode}
+            </if>
+            <if test="judgeMethodCode != null and judgeMethodCode != ''">
+                AND "判定方法コード" = #{judgeMethodCode}
+            </if>
+            <if test="categoryCode != null and categoryCode != ''">
+                AND "分類コード" = #{categoryCode}
+            </if>
+            <if test="approvalStatus != null and approvalStatus != ''">
+                AND "承認ステータス" = #{approvalStatus}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態" = #{status}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND ("サイト名称" ILIKE '%' || #{keyword} || '%'
+                     OR "サイトURL" ILIKE '%' || #{keyword} || '%'
+                     OR "ホスト名" ILIKE '%' || #{keyword} || '%'
+                     OR "備考" ILIKE '%' || #{keyword} || '%'
+                     OR "分類名称" ILIKE '%' || #{keyword} || '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="search" resultMap="NetSiteMap">
+        SELECT <include refid="SiteColumns"/>
+          FROM public."NET_サイト情報"
+        <include refid="SiteWhere"/>
+         ORDER BY ${sortColumn} ${sortDirection}, "サイトID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(*)
+          FROM public."NET_サイト情報"
+        <include refid="SiteWhere"/>
+    </select>
+
+    <select id="findById" resultMap="NetSiteMap">
+        SELECT <include refid="SiteColumns"/>
+          FROM public."NET_サイト情報"
+         WHERE "サイトID" = #{siteId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="siteId" keyColumn="サイトID">
+        INSERT INTO public."NET_サイト情報"
+            ("サイト名称", "サイトURL", "ホスト名", "区分コード", "判定方法コード",
+             "分類コード", "分類名称", "承認ステータス", "状態", "備考", "バージョン",
+             "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+             "登録日時", "更新日時")
+        VALUES
+            (#{siteName}, #{siteUrl}, #{hostName}, #{kindCode}, #{judgeMethodCode},
+             #{categoryCode}, #{categoryName}, #{approvalStatus}, #{status}, #{note}, 1,
+             #{createdByAccountId}, #{updatedByAccountId}, #{createdByCode}, #{updatedByCode},
+             CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    </insert>
+
+    <!-- 編集すると未承認に戻す（承認者・承認日時もクリアする）。バージョンで楽観的ロック。 -->
+    <update id="update">
+        UPDATE public."NET_サイト情報"
+           SET "サイト名称" = #{siteName},
+               "サイトURL" = #{siteUrl},
+               "ホスト名" = #{hostName},
+               "区分コード" = #{kindCode},
+               "判定方法コード" = #{judgeMethodCode},
+               "分類コード" = #{categoryCode},
+               "分類名称" = #{categoryName},
+               "承認ステータス" = 'PENDING',
+               "承認者アカウントID" = NULL,
+               "承認日時" = NULL,
+               "状態" = #{status},
+               "備考" = #{note},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新元コード" = #{updatedByCode},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "サイトID" = #{siteId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."NET_サイト情報"
+         WHERE "サイトID" = #{siteId}
+    </delete>
+
+    <update id="approve">
+        UPDATE public."NET_サイト情報"
+           SET "承認ステータス" = 'APPROVED',
+               "承認者アカウントID" = #{approvedByAccountId},
+               "承認日時" = #{approvedAt},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "サイトID" = #{siteId}
+    </update>
+
+    <!-- 却下する（未承認・承認済みのどちらからでも）。承認者・承認日時は残さない。 -->
+    <update id="reject">
+        UPDATE public."NET_サイト情報"
+           SET "承認ステータス" = 'REJECTED',
+               "承認者アカウントID" = NULL,
+               "承認日時" = NULL,
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "サイトID" = #{siteId}
+    </update>
+
+</mapper>

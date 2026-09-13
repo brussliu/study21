@@ -1,0 +1,740 @@
+/* ============================================================================
+ * 学習状況モニター（2.0 study_monitor.jsp / css/study_monitor.css のレイアウトを踏襲）
+ *
+ * 2.0 のページ構成をそのまま使う（ユーザーの指定）:
+ *   ・見出し（eyebrow ＋ タイトル ＋ 説明 ＋ 右に操作）
+ *   ・検索条件のツールバー（表示方法 / 対象日 / 時間帯 / AI分析 / 分析結果）
+ *   ・検索結果の分析集計（4 つの件数 ＋ 分析結果の割合）
+ *   ・2 カラム（左: 動画セグメント / 右: 1 分間隔スナップショット）
+ *
+ * モーダルは 2.1 の共通ダイアログ（`.overlay` / `.dialog`）を使う。
+ * 色は 2.0 の直値ではなく `tokens.css` の変数を使う（暗色テーマも自動で追従する）。
+ * ========================================================================== */
+.monitor-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* ---------- 上部: タブ ＋ 検索条件（タブの右に検索条件を並べる） ---------- */
+.monitor-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: nowrap;
+}
+
+.monitor-head .tabs {
+  flex: 0 0 auto;
+}
+
+/* タブの右に置く検索条件（枠・影は付けず、1 行にそろえる） */
+.monitor-toolbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: var(--sp-3);
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+}
+
+.monitor-filter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.monitor-filter > label {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+.monitor-filter .select,
+.monitor-filter .input {
+  width: auto;
+  min-width: 7rem;
+  height: var(--control-sm);
+}
+
+.monitor-time-range > div {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.monitor-time-range .input {
+  width: 7rem;
+}
+
+.monitor-time-range span {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.toolbar-note {
+  margin: 0;
+  text-align: right;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 検索結果の分析集計 ---------- */
+.snapshot-summary {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.snapshot-summary-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: center;
+}
+
+/* スナップショットから確認するモードでは、左の件数を狭くして割合を広く取る（2.0 と同じ） */
+.monitor-page.is-snapshot-search .snapshot-summary-body {
+  grid-template-columns: minmax(340px, 470px) minmax(0, 1fr);
+}
+
+.snapshot-summary-heading h2 {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.snapshot-summary-heading p {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+.snapshot-summary-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(90px, 1fr));
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.summary-count-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+.summary-count-card span {
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.summary-count-card strong {
+  margin-top: 2px;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  color: var(--color-text-strong);
+}
+
+.summary-count-card small {
+  margin-top: 2px;
+  font-size: var(--fs-2xs);
+  color: var(--color-danger);
+}
+
+.summary-count-card.is-completed strong { color: var(--color-success); }
+.summary-count-card.is-waiting strong { color: var(--color-text-subtle); }
+
+/* 分析結果の割合 */
+.snapshot-result-chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.snapshot-result-chart-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.sm-bar {
+  display: flex;
+  height: 18px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.sm-bar__part {
+  height: 100%;
+  min-width: 2px;
+}
+
+.sm-bar__empty {
+  width: 100%;
+  font-size: var(--fs-2xs);
+  line-height: 18px;
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+.snapshot-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.summary-result-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+.summary-result-item__swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.summary-result-item strong {
+  font-size: var(--fs-xs);
+  color: var(--color-text-strong);
+}
+
+/* ---------- 本体（左: 動画 / 右: スナップショット） ---------- */
+.monitor-main-column {
+  display: grid;
+  grid-template-columns: 420px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: stretch;
+  min-height: 0;
+}
+
+.monitor-page.is-snapshot-search .monitor-main-column {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.monitor-page.is-snapshot-search .segment-section {
+  display: none;
+}
+
+.monitor-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.section-heading h2 {
+  margin: 0 0 2px;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.section-heading p {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+.section-count {
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.snapshot-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.snapshot-display-mode {
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* 表示切替（縮略図 / 一覧）。今どちらで見ているかが分かるように、選択中を塗る */
+.snapshot-display-mode .btn.is-active {
+  border-color: var(--color-primary-strong);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+}
+
+.snapshot-display-mode .btn.is-active:hover:not(:disabled) {
+  background: var(--color-primary-soft);
+  border-color: var(--color-primary-strong);
+  color: var(--color-primary);
+}
+
+/* ---------- 動画セグメントの行 ---------- */
+.segment-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.segment-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.segment-row:hover,
+.segment-row.is-selected {
+  border-left-color: var(--color-primary);
+  background: var(--color-surface-hover);
+}
+
+.segment-name {
+  overflow: hidden;
+  font-family: Consolas, 'Yu Gothic UI', monospace;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.segment-time {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.segment-state {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.segment-state.is-completed { background: var(--color-success-soft); color: var(--color-success); }
+.segment-state.is-waiting { background: var(--color-surface-alt); color: var(--color-text-muted); }
+.segment-state.is-error { background: var(--color-danger-soft); color: var(--color-danger); }
+
+.segment-duration {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: var(--sp-2);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+/* スナップショットの一括操作 */
+.snapshot-bulk-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.snapshot-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.snapshot-bulk-count {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+/* スナップショットのグリッド */
+.snapshot-grid {
+  display: grid;
+  /* 画面の幅いっぱいにカードを並べる（固定幅だと右側に大きな余白ができるため） */
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  justify-content: stretch;
+  align-content: start;
+  gap: var(--sp-1);
+  min-height: 0;
+  padding: var(--sp-2);
+  overflow: auto;
+}
+
+.snapshot-grid.list-view {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.snapshot-card {
+  position: relative;
+  display: flex;
+  /* figure の既定のマージン（1em 40px）を消す。
+     グリッドはこのマージンぶんも列の幅に足して計算するため、
+     カードが列からはみ出し、スナップショット欄に横スクロールバーが出ていた
+     （実測: 7 列のとき +32px はみ出し） */
+  margin: 0;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-self: start;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.snapshot-card:hover,
+.snapshot-card.is-selected {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.snapshot-card.is-bulk-selected {
+  border-color: var(--color-info);
+  box-shadow: 0 0 0 2px var(--color-info-soft);
+}
+
+.snapshot-grid.list-view .snapshot-card {
+  flex-direction: row;
+  align-items: stretch;
+}
+
+.snapshot-select-control {
+  position: absolute;
+  z-index: 2;
+  top: var(--sp-1);
+  left: var(--sp-1);
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* 画像の入れ物。右下の編集アイコンの基準位置にする */
+.snapshot-thumb {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  line-height: 0;
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.snapshot-grid.list-view .snapshot-thumb {
+  flex: 0 0 160px;
+  width: 160px;
+  height: auto;
+}
+
+/* 縦横比は画像ごとに合わせる（DB の 幅/高さ を style で渡す。既定は 16:9）。
+   正方形に見えていたのは 4:3 に切り取っていた（object-fit: cover）ため */
+.snapshot-image {
+  display: block;
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  background: var(--color-surface-alt);
+}
+
+/* 画像が無いときも同じ比率にして、行の高さがそろうようにする */
+.snapshot-thumb__missing {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  padding: var(--sp-2);
+  font-size: var(--fs-2xs);
+  line-height: 1.4;
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+/* 画像の右下の編集アイコン。【詳細】（＝分析結果の修正）はここからだけ開く */
+.snapshot-edit-button {
+  position: absolute;
+  z-index: 2;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.snapshot-card figcaption {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+/* ---------- スナップショットの詳細モーダル ---------- */
+/* 画像をできるだけ大きく見せる（余白で狭めない）。高さを決めて画像に全部渡す */
+.sm-detail-dialog {
+  width: min(1600px, 96vw);
+  max-width: min(1600px, 96vw);
+  height: min(94vh, 1080px);
+}
+
+.sm-detail-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.snapshot-detail-image {
+  display: grid;
+  flex: 1 1 auto;
+  place-items: center;
+  width: 100%;
+  min-height: 12rem;
+  padding: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.snapshot-detail-image .snapshot-image {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.snapshot-detail-image .snapshot-thumb__missing {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+/* 今の判定と修正フォーム（画像の下にまとめる） */
+.sm-detail-info {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-4);
+}
+
+.sm-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.sm-detail-meta__reason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sm-detail-meta__file {
+  font-family: Consolas, 'Yu Gothic UI', monospace;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+.sm-detail-form {
+  margin-left: auto;
+}
+
+.sm-detail-note {
+  margin-left: auto;
+}
+
+.snapshot-empty {
+  grid-column: 1 / -1;
+  padding: var(--sp-5);
+  font-size: var(--fs-xs);
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 時間軸（【時間軸で確認】） ---------- */
+.activity-timeline-wrap {
+  margin-top: var(--sp-3);
+  padding: var(--sp-4) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.activity-timeline {
+  position: relative;
+  height: 46px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.activity-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 3px;
+  border: 0;
+  border-right: 1px solid var(--color-surface);
+}
+
+.activity-timeline-empty {
+  font-size: var(--fs-xs);
+  line-height: 46px;
+  text-align: center;
+  color: var(--color-text-subtle);
+}
+
+.activity-time-scale {
+  position: relative;
+  height: 16px;
+  margin-top: var(--sp-1);
+  font-size: 10px;
+  color: var(--color-text-subtle);
+}
+
+.activity-time-tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.activity-time-tick.is-edge-start { transform: none; }
+.activity-time-tick.is-edge-end { transform: translateX(-100%); }
+
+.activity-timeline-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  margin: var(--sp-3) 0;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-muted);
+}
+
+.activity-timeline-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.activity-timeline-legend i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+}
+
+.activity-timeline-list {
+  max-height: 300px;
+  overflow-y: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.activity-timeline-list > div {
+  display: grid;
+  grid-template-columns: 110px 10px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.activity-timeline-list time {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 狭い画面では 1 列にする（2.0 と同じ） */
+/* 狭い画面ではタブと検索条件を折り返す */
+@media (max-width: 1200px) {
+  .monitor-head,
+  .monitor-toolbar {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 1100px) {
+  .snapshot-summary-body,
+  .monitor-page.is-snapshot-search .snapshot-summary-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .monitor-main-column {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .monitor-page.is-snapshot-search .segment-section {
+    display: flex;
+  }
+}

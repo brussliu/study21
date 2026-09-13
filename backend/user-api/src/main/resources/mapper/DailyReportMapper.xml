@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.dailyreport.DailyReportMapper">
+
+    <resultMap id="ReportMap" type="com.study21.user.dailyreport.DailyReportEntity">
+        <id     property="reportId"      column="日報ID"/>
+        <result property="accountId"     column="アカウントID"/>
+        <result property="legacyUserId"  column="旧ユーザーID"/>
+        <result property="targetDate"    column="対象日"/>
+        <result property="review"        column="全体の振り返り"/>
+        <result property="concentration" column="学習集中度"/>
+        <result property="understanding" column="理解度"/>
+        <result property="studyVolume"   column="学習量"/>
+        <result property="attitude"      column="学習態度"/>
+        <result property="homework"      column="今夜宿題内容"/>
+        <result property="note"          column="備考"/>
+        <result property="submitStatus"  column="提出状態コード"/>
+        <result property="holidayType"   column="休日区分コード"/>
+        <result property="submittedAt"   column="提出日時"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+    </resultMap>
+
+    <!--
+      期間内の記載・提出状況。行がある日 = 記録あり（カレンダーのマスに出す）。
+      提出状態（DRAFT / SUBMITTED）と、その日の教科（色分けチップ用）も返す。
+    -->
+    <select id="findStatus" resultType="com.study21.user.dailyreport.DailyReportModels$DayStatusRow">
+        SELECT r."対象日" AS "date",
+               EXTRACT(ISODOW FROM r."対象日")::int AS "weekday",
+               COUNT(l."日報授業ID")::int AS "lessonCount",
+               AVG(l."掌握度") AS "averageMastery",
+               COUNT(l."日報授業ID") FILTER (WHERE l."ノート記録フラグ")::int AS "noteCount",
+               r."提出状態コード" AS "submitStatus",
+               (r."提出状態コード" = 'SUBMITTED') AS "submitted",
+               r."提出日時" AS "submittedAt",
+               COALESCE(
+                   (SELECT STRING_AGG(sub.subj, ',' ORDER BY sub.first_period)
+                      FROM (SELECT l2."教科名" AS subj, MIN(l2."時限") AS first_period
+                              FROM public."TRN_学習日報授業情報" l2
+                             WHERE l2."日報ID" = r."日報ID"
+                             GROUP BY l2."教科名") sub),
+                   ''
+               ) AS "subjectsCsv",
+               COUNT(l."日報授業ID") FILTER (
+                   WHERE COALESCE(BTRIM(l."授業内容"), '') != '' OR l."掌握度" IS NOT NULL
+               )::int AS "detailedLessonCount",
+               r."休日区分コード" AS "holidayType",
+               r."全体の振り返り" AS "review",
+               r."今夜宿題内容" AS "homework"
+          FROM public."TRN_学習日報情報" r
+          LEFT JOIN public."TRN_学習日報授業情報" l ON l."日報ID" = r."日報ID"
+         WHERE r."アカウントID" = #{accountId}
+           AND r."対象日" BETWEEN #{from} AND #{to}
+         GROUP BY r."日報ID", r."対象日", r."提出状態コード", r."提出日時", r."休日区分コード", r."全体の振り返り",
+                  r."今夜宿題内容"
+         ORDER BY r."対象日"
+    </select>
+
+    <!--
+      曜日×時限ごとの教科。時間割のマスタは無いので、記録から「最も多い教科」を
+      その枠の教科とみなす（appearances / days で確からしさが分かる）。
+    -->
+    <select id="findTimetable" resultType="com.study21.user.dailyreport.DailyReportModels$TimetableCell">
+        SELECT weekday, period, subject, appearances, days
+          FROM (
+                SELECT agg.weekday, agg.period, agg.subject, agg.appearances, agg.days,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY agg.weekday, agg.period
+                           ORDER BY agg.appearances DESC, agg.subject) AS rn
+                  FROM (
+                        SELECT EXTRACT(ISODOW FROM r."対象日")::int AS weekday,
+                               l."時限" AS period,
+                               l."教科名" AS subject,
+                               COUNT(*)::int AS appearances,
+                               COUNT(DISTINCT r."対象日")::int AS days
+                          FROM public."TRN_学習日報情報" r
+                          JOIN public."TRN_学習日報授業情報" l ON l."日報ID" = r."日報ID"
+                         WHERE r."アカウントID" = #{accountId}
+                         GROUP BY 1, 2, 3
+                       ) agg
+               ) ranked
+         WHERE rn = 1
+         ORDER BY weekday, period
+    </select>
+
+    <select id="findReport" resultMap="ReportMap">
+        SELECT "日報ID", "アカウントID", "旧ユーザーID", "対象日", "全体の振り返り",
+               "学習集中度", "理解度", "学習量", "学習態度", "今夜宿題内容", "備考",
+               "提出状態コード", "提出日時", "休日区分コード", "登録日時", "更新日時"
+          FROM public."TRN_学習日報情報"
+         WHERE "アカウントID" = #{accountId} AND "対象日" = #{date}
+    </select>
+
+    <select id="findLessons" resultType="com.study21.user.dailyreport.DailyReportModels$DayLesson">
+        SELECT "時限" AS "period",
+               "教科名" AS "subject",
+               "授業内容" AS "content",
+               "掌握度" AS "mastery",
+               "ノート記録フラグ" AS "noteRecorded",
+               "ノート記載しない理由" AS "noteSkippedReason",
+               "学習集中度" AS "concentration",
+               "学習量" AS "studyVolume",
+               "学習態度" AS "attitude"
+          FROM public."TRN_学習日報授業情報"
+         WHERE "日報ID" = #{reportId}
+         ORDER BY "時限"
+    </select>
+
+    <select id="findSubjects" resultType="com.study21.user.dailyreport.DailyReportModels$DaySubject">
+        SELECT "表示順" AS "order",
+               "教科名" AS "subject",
+               "学習内容" AS "content"
+          FROM public."TRN_学習日報科目情報"
+         WHERE "日報ID" = #{reportId}
+         ORDER BY "表示順"
+    </select>
+    <!-- 期間内の授業（日報の日付つき）。週表示で「その週に何の授業があったか」を出す。 -->
+    <select id="findLessonsBetween" resultType="com.study21.user.dailyreport.DailyReportModels$WeekLessonRow">
+        SELECT r."対象日" AS "date",
+               l."時限" AS "period",
+               l."教科名" AS "subject",
+               l."授業内容" AS "content",
+               l."掌握度" AS "mastery",
+               l."ノート記録フラグ" AS "noteRecorded",
+               l."ノート記載しない理由" AS "noteSkippedReason",
+               l."学習集中度" AS "concentration",
+               l."学習量" AS "studyVolume",
+               l."学習態度" AS "attitude"
+          FROM public."TRN_学習日報情報" r
+          JOIN public."TRN_学習日報授業情報" l ON l."日報ID" = r."日報ID"
+         WHERE r."アカウントID" = #{accountId}
+           AND r."対象日" BETWEEN #{from} AND #{to}
+         ORDER BY r."対象日", l."時限"
+    </select>
+
+    <!-- 日報が無い日に 1 限から入力するとき、空の日報を作る。 -->
+    <insert id="insertReport">
+        INSERT INTO public."TRN_学習日報情報" ("アカウントID", "対象日", "登録元コード")
+        VALUES (#{accountId}, #{date}, 'APP')
+        ON CONFLICT ("アカウントID", "対象日") DO NOTHING
+    </insert>
+
+    <!-- 1 限ぶんの授業（日報ID＋時限で一意）。記録済みなら上書きする。 -->
+    <insert id="upsertLesson">
+        INSERT INTO public."TRN_学習日報授業情報" (
+            "日報ID", "時限", "教科名", "授業内容", "掌握度", "ノート記録フラグ",
+            "ノート記載しない理由", "学習集中度", "学習量", "学習態度", "登録元コード")
+        VALUES (
+            #{reportId}, #{period}, #{subject}, #{content}, #{mastery}, #{noteRecorded},
+            #{noteSkippedReason}, #{concentration}, #{studyVolume}, #{attitude}, 'APP')
+        ON CONFLICT ("日報ID", "時限") DO UPDATE
+           SET "教科名" = EXCLUDED."教科名",
+               "授業内容" = EXCLUDED."授業内容",
+               "掌握度" = EXCLUDED."掌握度",
+               "ノート記録フラグ" = EXCLUDED."ノート記録フラグ",
+               "ノート記載しない理由" = EXCLUDED."ノート記載しない理由",
+               "学習集中度" = EXCLUDED."学習集中度",
+               "学習量" = EXCLUDED."学習量",
+               "学習態度" = EXCLUDED."学習態度",
+               "更新者アカウントID" = #{accountId},
+               "更新日時" = CURRENT_TIMESTAMP
+    </insert>
+
+    <!--
+      1 日のまとめ（日まとめのダイアログから）。日付だけの指定で作ることもあるため、
+      「日報が無ければ作る」→「まとめを更新」の 2 段で使う。
+      休日区分・振り返り・宿題は指定された値で上書きする（null は「変更しない」ではなく
+      「空にする」の意味になるため、画面は常に全部送る）。
+    -->
+    <update id="updateDaySummary">
+        UPDATE public."TRN_学習日報情報"
+           SET "休日区分コード" = #{holidayType},
+               "全体の振り返り" = #{review},
+               "今夜宿題内容" = #{homework},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新元コード" = 'APP',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "日報ID" = #{reportId}
+    </update>
+
+    <!-- その日の授業を全部消す（祝日・休日にしたとき）。 -->
+    <delete id="deleteLessons">
+        DELETE FROM public."TRN_学習日報授業情報" WHERE "日報ID" = #{reportId}
+    </delete>
+
+    <!-- 1 限ぶんだけ消す（消した時限は詰めない＝空いたままにする）。 -->
+    <delete id="deleteLesson">
+        DELETE FROM public."TRN_学習日報授業情報"
+         WHERE "日報ID" = #{reportId} AND "時限" = #{period}
+    </delete>
+
+    <!-- 授業を保存すると「その日は通常」に戻す（祝日・休日の指定より新しい情報のため）。 -->
+    <update id="resetHolidayType">
+        UPDATE public."TRN_学習日報情報"
+           SET "休日区分コード" = 'NORMAL',
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+           AND "対象日" = #{date}
+           AND "休日区分コード" != 'NORMAL'
+    </update>
+    <!-- 期間内の日報ヘッダ（週表示で、その日のまとめと提出状態を出す）。 -->
+    <!-- 教科は画面で色分けチップにするため、授業から集めて返す。 -->
+    <select id="findReportsBetween" resultMap="ReportMap">
+        SELECT "日報ID", "アカウントID", "旧ユーザーID", "対象日", "全体の振り返り",
+               "学習集中度", "理解度", "学習量", "学習態度", "今夜宿題内容", "備考",
+               "提出状態コード", "提出日時", "休日区分コード", "登録日時", "更新日時"
+          FROM public."TRN_学習日報情報"
+         WHERE "アカウントID" = #{accountId}
+           AND "対象日" BETWEEN #{from} AND #{to}
+         ORDER BY "対象日"
+    </select>
+
+    <!-- その日の授業数（記録が無い日は提出できない）。 -->
+    <select id="countLessons" resultType="int">
+        SELECT COUNT(*)::int
+          FROM public."TRN_学習日報情報" r
+          JOIN public."TRN_学習日報授業情報" l ON l."日報ID" = r."日報ID"
+         WHERE r."アカウントID" = #{accountId} AND r."対象日" = #{date}
+    </select>
+
+    <!-- 提出: 提出済にして提出日時を残す。 -->
+    <update id="submit">
+        UPDATE public."TRN_学習日報情報"
+           SET "提出状態コード" = 'SUBMITTED',
+               "提出日時" = CURRENT_TIMESTAMP,
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新元コード" = 'APP',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+           AND "対象日" = #{date}
+           AND "提出状態コード" != 'SUBMITTED'
+    </update>
+
+    <!--
+      提出後に編集したら下書きに戻す（＝再提出待ち）。提出日時は残す
+      （「一度提出した」ことを画面で示せるようにするため）。
+    -->
+    <update id="reopenIfSubmitted">
+        UPDATE public."TRN_学習日報情報"
+           SET "提出状態コード" = 'DRAFT',
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "アカウントID" = #{accountId}
+           AND "対象日" = #{date}
+           AND "提出状態コード" = 'SUBMITTED'
+    </update>
+</mapper>

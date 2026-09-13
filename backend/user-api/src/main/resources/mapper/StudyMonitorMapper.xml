@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.studymonitor.StudyMonitorMapper">
+
+    <!--
+      対象日の動画セグメント。切出枚数と分析済み枚数は、同じ動画の
+      スナップショット（状態='1'・切出済）から数える。
+    -->
+    <select id="searchVideos" resultType="com.study21.user.studymonitor.StudyMonitorModels$VideoRow">
+        SELECT v."動画ID"                    AS "videoId",
+               v."動画ファイル名"            AS "fileName",
+               v."撮影開始日時"              AS "startedAt",
+               v."撮影終了日時"              AS "endedAt",
+               v."動画時間秒"                AS "durationSeconds",
+               v."取込状態コード"            AS "importState",
+               COALESCE(counts."snapshotCount", 0)  AS "snapshotCount",
+               COALESCE(counts."completedCount", 0) AS "completedCount"
+          FROM public."MON_学習モニター動画情報" v
+          LEFT JOIN LATERAL (
+               SELECT COUNT(*) AS "snapshotCount",
+                      COUNT(*) FILTER (WHERE a."分析状態コード" = 'COMPLETED') AS "completedCount"
+                 FROM public."MON_学習モニタースナップショット情報" s
+                 LEFT JOIN public."MON_学習モニター画像分析情報" a
+                   ON a."スナップショットID" = s."スナップショットID"
+                  AND a."最新版フラグ" = '1'
+                WHERE s."動画ID" = v."動画ID"
+                  AND s."状態" = '1'
+                  AND s."切出状態コード" = 'CREATED'
+          ) counts ON TRUE
+         WHERE v."状態" = '1'
+           AND v."撮影終了日時" &gt;= #{from}
+           AND v."撮影開始日時" &lt;= #{to}
+        <if test="videoId != null">
+           AND v."動画ID" = #{videoId}
+        </if>
+         ORDER BY v."撮影開始日時"
+    </select>
+
+    <!--
+      対象日のスナップショット。分析は最新版だけを結合する。
+      画面に出す結果・理由は、手動修正があればそちらを優先する（2.0 と同じ）。
+    -->
+    <select id="searchSnapshots" resultType="com.study21.user.studymonitor.StudyMonitorModels$SnapshotRow">
+        SELECT s."スナップショットID"   AS "snapshotId",
+               s."動画ID"               AS "videoId",
+               v."動画ファイル名"       AS "videoFileName",
+               s."撮影日時"             AS "capturedAt",
+               s."保存パス"             AS "imagePath",
+               s."幅"                   AS "width",
+               s."高さ"                 AS "height",
+               COALESCE(a."分析状態コード", 'WAITING') AS "analysisState",
+               CASE WHEN a."手動修正フラグ" = '1' THEN a."手動修正結果コード" ELSE a."最終分析結果コード" END
+                                        AS "resultCode",
+               COALESCE(a."最終信頼度", a."一次信頼度") AS "confidence",
+               CASE WHEN a."手動修正フラグ" = '1' THEN a."手動修正理由" ELSE a."最終判定理由" END
+                                        AS "reason",
+               (a."手動修正フラグ" = '1') AS "manual",
+               COALESCE(a."バージョン", 1) AS "version"
+          FROM public."MON_学習モニタースナップショット情報" s
+          JOIN public."MON_学習モニター動画情報" v ON v."動画ID" = s."動画ID"
+          LEFT JOIN public."MON_学習モニター画像分析情報" a
+            ON a."スナップショットID" = s."スナップショットID"
+           AND a."最新版フラグ" = '1'
+         WHERE s."状態" = '1'
+           AND s."切出状態コード" = 'CREATED'
+           AND s."撮影日時" &gt;= #{from}
+           AND s."撮影日時" &lt;= #{to}
+        <if test="videoId != null">
+           AND s."動画ID" = #{videoId}
+        </if>
+        <if test="analysisState == 'done'">
+           AND a."分析状態コード" = 'COMPLETED'
+        </if>
+        <if test="analysisState == 'waiting'">
+           AND COALESCE(a."分析状態コード", 'WAITING') IN ('WAITING', 'RUNNING')
+        </if>
+        <if test="analysisState == 'error'">
+           AND a."分析状態コード" = 'ERROR'
+        </if>
+        <if test="resultCode != null">
+           AND CASE WHEN a."手動修正フラグ" = '1' THEN a."手動修正結果コード" ELSE a."最終分析結果コード" END
+               = #{resultCode}
+        </if>
+         ORDER BY s."撮影日時", s."スナップショットID"
+    </select>
+
+    <!-- 1 枚のスナップショット（画像を開くときに使う）。分析は最新版だけ結合する -->
+    <select id="findSnapshot" resultType="com.study21.user.studymonitor.StudyMonitorModels$SnapshotRow">
+        SELECT s."スナップショットID"   AS "snapshotId",
+               s."動画ID"               AS "videoId",
+               v."動画ファイル名"       AS "videoFileName",
+               s."撮影日時"             AS "capturedAt",
+               s."保存パス"             AS "imagePath",
+               s."幅"                   AS "width",
+               s."高さ"                 AS "height",
+               COALESCE(a."分析状態コード", 'WAITING') AS "analysisState",
+               CASE WHEN a."手動修正フラグ" = '1' THEN a."手動修正結果コード" ELSE a."最終分析結果コード" END
+                                        AS "resultCode",
+               COALESCE(a."最終信頼度", a."一次信頼度") AS "confidence",
+               CASE WHEN a."手動修正フラグ" = '1' THEN a."手動修正理由" ELSE a."最終判定理由" END
+                                        AS "reason",
+               (a."手動修正フラグ" = '1') AS "manual",
+               COALESCE(a."バージョン", 1) AS "version"
+          FROM public."MON_学習モニタースナップショット情報" s
+          JOIN public."MON_学習モニター動画情報" v ON v."動画ID" = s."動画ID"
+          LEFT JOIN public."MON_学習モニター画像分析情報" a
+            ON a."スナップショットID" = s."スナップショットID"
+           AND a."最新版フラグ" = '1'
+         WHERE s."スナップショットID" = #{snapshotId}
+    </select>
+
+    <!--
+      手動修正（画面の【分析結果を一括変更】）。最新版の分析行だけを更新し、
+      版が合わなければ 0 件を返す（楽観的ロック）。
+      最終判定理由（AI の理由）は残し、手動修正の理由を別の列に入れる。
+    -->
+    <update id="updateManualAnalysis">
+        UPDATE public."MON_学習モニター画像分析情報"
+           SET "手動修正フラグ" = '1',
+               "手動修正結果コード" = #{resultCode},
+               "手動修正理由" = #{reason},
+               "手動修正日時" = CURRENT_TIMESTAMP,
+               "手動修正者アカウントID" = #{accountId},
+               "最終採用段階コード" = 'MANUAL',
+               "最終分析結果コード" = #{resultCode},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "スナップショットID" = #{snapshotId}
+           AND "最新版フラグ" = '1'
+           AND "バージョン" = #{version}
+    </update>
+</mapper>

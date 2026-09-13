@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.net.NetAccessLogMapper">
+
+    <!-- サイトアクセス履歴（NET_プロキシ通信履歴情報）。端末名称は IP で引く。 -->
+    <resultMap id="AccessLogMap" type="com.study21.user.net.NetAccessLogEntity">
+        <id     property="logId"        column="通信履歴ID"/>
+        <result property="receivedAt"   column="受付日時"/>
+        <result property="clientIp"     column="クライアントIP"/>
+        <result property="terminalName" column="端末名称"/>
+        <result property="httpMethod"   column="HTTPメソッド"/>
+        <result property="host"         column="接続先ホスト"/>
+        <result property="url"          column="要求URL"/>
+        <result property="statusCode"   column="応答状態コード"/>
+        <result property="errorDetail"  column="エラー内容"/>
+    </resultMap>
+
+    <!-- 端末名称は同じ IP の行から 1 件だけ引く（有効な行を優先。無ければ NULL）。 -->
+    <sql id="AccessLogFrom">
+        FROM public."NET_プロキシ通信履歴情報" h
+        LEFT JOIN LATERAL (
+             SELECT "端末名称"
+               FROM public."NET_端末コントロール情報"
+              WHERE "IPアドレス" = h."クライアントIP"
+              ORDER BY CASE WHEN "状態" = '1' THEN 0 ELSE 1 END, "端末ID"
+              LIMIT 1
+        ) t ON TRUE
+    </sql>
+
+    <!-- 絞り込み（接続先ホスト / 端末名称 / 結果）。空の条件は無視する。 -->
+    <sql id="AccessLogWhere">
+        <where>
+            <if test="host != null and host != ''">
+                AND h."接続先ホスト" ILIKE '%' || #{host} || '%'
+            </if>
+            <if test="terminalName != null and terminalName != ''">
+                AND COALESCE(t."端末名称", '') ILIKE '%' || #{terminalName} || '%'
+            </if>
+            <if test="result == 'ALLOW'">
+                AND h."応答状態コード" IS NULL
+            </if>
+            <if test="result == 'DENY'">
+                AND h."応答状態コード" IS NOT NULL
+            </if>
+        </where>
+    </sql>
+
+    <!--
+      時間帯別の集計（2.0 の getRecentUsageHourlySummary 相当）。
+      区分（サイトの 1.通常 / 2.休憩 / 3.ゲーム）で絞るときは、承認済み・有効なサイトの
+      判定方法（末尾一致 / 先頭一致 / 完全一致 / 含める）で接続先ホストを突き合わせる。
+      対象は 2.0 と同じく「通過」した通信だけ（応答状態コードが NULL または 0 以下）。
+    -->
+    <select id="hourlySummary" resultType="com.study21.user.net.NetAccessLogModels$HourlyUsageBucket">
+        SELECT date_trunc('hour', h."受付日時") AS "bucketAt",
+               COUNT(*) AS "requestCount"
+          FROM public."NET_プロキシ通信履歴情報" h
+          LEFT JOIN LATERAL (
+               SELECT "端末名称"
+                 FROM public."NET_端末コントロール情報"
+                WHERE "IPアドレス" = h."クライアントIP"
+                ORDER BY CASE WHEN "状態" = '1' THEN 0 ELSE 1 END, "端末ID"
+                LIMIT 1
+          ) t ON TRUE
+         WHERE h."受付日時" >= #{receivedFrom}
+           AND COALESCE(h."応答状態コード", 0) &lt;= 0
+        <if test="terminalName != null and terminalName != ''">
+           AND COALESCE(t."端末名称", '') = #{terminalName}
+        </if>
+        <if test="kindCode != null and kindCode != ''">
+           AND EXISTS (
+               SELECT 1
+                 FROM public."NET_サイト情報" s
+                WHERE s."区分コード" = #{kindCode}
+                  AND s."承認ステータス" = 'APPROVED'
+                  AND s."状態" = '1'
+                  AND CASE s."判定方法コード"
+                        WHEN 'EXACT' THEN LOWER(COALESCE(h."接続先ホスト", '')) IN
+                                         (LOWER(s."ホスト名"), LOWER('www.' || s."ホスト名"))
+                        WHEN 'PREFIX' THEN LOWER(COALESCE(h."接続先ホスト", '')) LIKE LOWER(s."ホスト名") || '%'
+                        WHEN 'CONTAINS' THEN LOWER(COALESCE(h."接続先ホスト", '')) LIKE '%' || LOWER(s."ホスト名") || '%'
+                        ELSE LOWER(COALESCE(h."接続先ホスト", '')) LIKE '%' || LOWER(s."ホスト名")
+                      END
+           )
+        </if>
+         GROUP BY date_trunc('hour', h."受付日時")
+         ORDER BY 1
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+        <include refid="AccessLogFrom"/>
+        <include refid="AccessLogWhere"/>
+    </select>
+
+    <select id="search" resultMap="AccessLogMap">
+        SELECT h."通信履歴ID", h."受付日時", h."クライアントIP", t."端末名称",
+               h."HTTPメソッド", h."接続先ホスト", h."要求URL", h."応答状態コード", h."エラー内容"
+        <include refid="AccessLogFrom"/>
+        <include refid="AccessLogWhere"/>
+         ORDER BY h."受付日時" DESC, h."通信履歴ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+</mapper>

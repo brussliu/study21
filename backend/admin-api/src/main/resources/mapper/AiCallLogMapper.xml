@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.batch.AiCallLogMapper">
+
+    <!-- AI 呼び出し履歴（BAT_AI呼出履歴情報）。1 行 = 1 呼び出し。 -->
+    <resultMap id="AiCallLogMap" type="com.study21.admin.batch.AiCallLogEntity">
+        <id     property="callId"       column="呼出履歴ID"/>
+        <result property="executionId"  column="実行ID"/>
+        <result property="batchCode"    column="バッチコード"/>
+        <result property="processKey"   column="処理キー"/>
+        <result property="language"     column="言語区分"/>
+        <result property="aiType"       column="AI区分"/>
+        <result property="modelName"    column="モデル名"/>
+        <result property="callUrl"      column="呼出URL"/>
+        <result property="httpStatus"   column="HTTPステータス"/>
+        <result property="startTime"    column="開始日時"/>
+        <result property="endTime"      column="終了日時"/>
+        <result property="durationMs"   column="処理時間ms"/>
+        <result property="result"       column="結果区分"/>
+        <result property="errorCode"    column="エラーコード"/>
+        <result property="errorMessage" column="エラーメッセージ"/>
+        <result property="prompt"       column="プロンプト"/>
+        <result property="response"     column="レスポンス"/>
+        <result property="inputTokens"  column="入力トークン数"/>
+        <result property="outputTokens" column="出力トークン数"/>
+        <result property="totalTokens"  column="合計トークン数"/>
+    </resultMap>
+
+    <!--
+      絞り込み。空の条件は無視する。
+      キーワードは 処理キー / モデル名 / 呼出URL / エラーメッセージ を対象にする。
+      本文（プロンプト・レスポンス）は 1 行が大きく LIKE 検索が重いので対象にしない
+      （本文を見たいときは詳細を開く）。
+    -->
+    <sql id="AiCallLogWhere">
+        <where>
+            <if test="batchCode != null and batchCode != ''">
+                AND a."バッチコード" ILIKE '%' || #{batchCode} || '%'
+            </if>
+            <if test="aiType != null and aiType != ''">
+                AND a."AI区分" = #{aiType}
+            </if>
+            <if test="result != null and result != ''">
+                AND a."結果区分" = #{result}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (COALESCE(a."処理キー", '') ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(a."モデル名", '') ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(a."呼出URL", '') ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(a."エラーメッセージ", '') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="startFrom != null and startFrom != ''">
+                AND a."開始日時" &gt;= #{startFrom}::timestamp
+            </if>
+            <if test="startTo != null and startTo != ''">
+                AND a."開始日時" &lt;= #{startTo}::timestamp
+            </if>
+        </where>
+    </sql>
+
+    <select id="countCalls" resultType="long">
+        SELECT count(*)
+          FROM public."BAT_AI呼出履歴情報" a
+        <include refid="AiCallLogWhere"/>
+    </select>
+
+    <!-- 一覧では本文（プロンプト・レスポンス）を読まない。 -->
+    <select id="searchCalls" resultMap="AiCallLogMap">
+        SELECT a."呼出履歴ID", a."実行ID", a."バッチコード", a."処理キー", a."言語区分",
+               a."AI区分", a."モデル名", a."呼出URL", a."HTTPステータス",
+               a."開始日時", a."終了日時", a."処理時間ms", a."結果区分",
+               a."エラーコード", a."エラーメッセージ",
+               a."入力トークン数", a."出力トークン数", a."合計トークン数"
+          FROM public."BAT_AI呼出履歴情報" a
+        <include refid="AiCallLogWhere"/>
+         ORDER BY a."開始日時" DESC, a."呼出履歴ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findById" resultMap="AiCallLogMap">
+        SELECT a."呼出履歴ID", a."実行ID", a."バッチコード", a."処理キー", a."言語区分",
+               a."AI区分", a."モデル名", a."呼出URL", a."HTTPステータス",
+               a."開始日時", a."終了日時", a."処理時間ms", a."結果区分",
+               a."エラーコード", a."エラーメッセージ", a."プロンプト", a."レスポンス",
+               a."入力トークン数", a."出力トークン数", a."合計トークン数"
+          FROM public."BAT_AI呼出履歴情報" a
+         WHERE a."呼出履歴ID" = #{callId}
+    </select>
+
+    <select id="findDistinctAiTypes" resultType="string">
+        SELECT DISTINCT a."AI区分" FROM public."BAT_AI呼出履歴情報" a
+         WHERE a."AI区分" IS NOT NULL ORDER BY 1
+    </select>
+
+    <select id="findDistinctBatchCodes" resultType="string">
+        SELECT DISTINCT a."バッチコード" FROM public."BAT_AI呼出履歴情報" a ORDER BY 1
+    </select>
+
+    <select id="findDistinctModels" resultType="string">
+        SELECT DISTINCT a."モデル名" FROM public."BAT_AI呼出履歴情報" a
+         WHERE a."モデル名" IS NOT NULL ORDER BY 1
+    </select>
+</mapper>

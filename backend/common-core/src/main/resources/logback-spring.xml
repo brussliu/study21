@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Study 2.1 — バックエンドのログ出力設計（admin-api / user-api 共通）
+
+  出力先：${study21.log.dir}/backend/（既定 logs/、コンテナ内は /app/logs/backend/）
+    - <service>-app.log    … 通常のアプリケーションログ（SQL と ERROR を除く）
+    - <service>-sql.log    … すべての DB 操作（SqlLoggingInterceptor が記録）
+    - <service>-error.log  … 例外・ERROR（スタックトレース付き）
+
+  ローテーション：日次 + 単一ファイル ${study21.log.max-file-size}（既定 100MB）、
+  過去ファイルは gzip 圧縮で ${study21.log.retention-days} 日分（既定 90 日）保持する。
+  archive/ サブフォルダに退避するため、稼働中のファイルと混ざらない。
+
+  ログ本体はここだけで定義する（application.yml の logging.pattern.* は使わない）。
+  ファイルが書けない環境でもアプリは落ちない（コンソール出力のみになる）。
+-->
+<configuration>
+
+    <springProperty scope="context" name="serviceName" source="spring.application.name" defaultValue="study21-api"/>
+    <springProperty scope="context" name="logRoot" source="study21.log.dir" defaultValue="logs"/>
+    <springProperty scope="context" name="appLevel" source="study21.log.level" defaultValue="INFO"/>
+    <springProperty scope="context" name="sqlLevel" source="study21.log.sql-level" defaultValue="INFO"/>
+    <springProperty scope="context" name="retentionDays" source="study21.log.retention-days" defaultValue="90"/>
+    <springProperty scope="context" name="maxFileSize" source="study21.log.max-file-size" defaultValue="100MB"/>
+
+    <property name="BACKEND_LOG_DIR" value="${logRoot}/backend"/>
+    <property name="ARCHIVE_DIR" value="${logRoot}/backend/archive"/>
+    <property name="LOG_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] %logger{40} - %msg%n"/>
+    <!-- SQL ログは 1 操作 = 1 行。メッセージ側に mapper・SQL・パラメータを詰める。 -->
+    <property name="SQL_PATTERN"
+              value="%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{traceId:-}] - %msg%n"/>
+
+    <!-- 通常ログ（ERROR は error.log に分けるので除外する） -->
+    <appender name="APP_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${BACKEND_LOG_DIR}/${serviceName}-app.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${ARCHIVE_DIR}/${serviceName}-app.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${maxFileSize}</maxFileSize>
+            <maxHistory>${retentionDays}</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.LevelFilter">
+            <level>ERROR</level>
+            <onMatch>DENY</onMatch>
+            <onMismatch>ACCEPT</onMismatch>
+        </filter>
+    </appender>
+
+    <!-- SQL ログ（SqlLoggingInterceptor → logger 名 STUDY21_SQL のみ） -->
+    <appender name="SQL_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${BACKEND_LOG_DIR}/${serviceName}-sql.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${ARCHIVE_DIR}/${serviceName}-sql.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${maxFileSize}</maxFileSize>
+            <maxHistory>${retentionDays}</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${SQL_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- 例外・ERROR（スタックトレース付き） -->
+    <appender name="ERROR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${BACKEND_LOG_DIR}/${serviceName}-error.log</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${ARCHIVE_DIR}/${serviceName}-error.%d{yyyy-MM-dd}.%i.log.gz</fileNamePattern>
+            <maxFileSize>${maxFileSize}</maxFileSize>
+            <maxHistory>${retentionDays}</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+        <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
+            <level>ERROR</level>
+        </filter>
+    </appender>
+
+    <!-- コンテナの標準出力（docker logs 用）。SQL は出さない。 -->
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>${LOG_PATTERN}</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <!-- DB 操作ログは専用ファイルだけに出す（app.log / コンソールには出さない） -->
+    <logger name="STUDY21_SQL" level="${sqlLevel}" additivity="false">
+        <appender-ref ref="SQL_FILE"/>
+    </logger>
+
+    <root level="${appLevel}">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="APP_FILE"/>
+        <appender-ref ref="ERROR_FILE"/>
+    </root>
+
+</configuration>

@@ -1,0 +1,196 @@
+/* ============================================================================
+ * ゲームの対戦（五子棋・黑白棋で共用）
+ * 色は tokens.css の変数のみ。一人で遊ぶ / 対戦 の切替と、招待・対戦一覧の見た目。
+ * ========================================================================== */
+.gm-match__modes {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.gm-match__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.gm-match__invite {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.gm-match__sync {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--color-success);
+}
+
+.gm-match__current {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.gm-match__current-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.gm-match__current-title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.gm-match__turn {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.gm-match__turn.is-my-turn {
+  font-weight: var(--fw-semibold);
+  color: var(--color-primary);
+}
+
+.gm-match__result {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.gm-match__current-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.gm-match__empty {
+  margin: 0;
+  padding: var(--sp-4);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.gm-match__note {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+/* 対戦中は「相手の手番」を盤面の上にも出す */
+.gm-match-board__turn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.gm-match-board__turn strong {
+  color: var(--color-text-strong);
+}
+
+/* 直前の手・返した石・勝ちの並びの強調 */
+.gm-gomoku-cell.is-match-last,
+.gm-rev-cell.is-match-last {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.gm-gomoku-cell.is-match-line,
+.gm-rev-cell.is-match-line {
+  background: var(--color-success-soft);
+}
+
+.gm-rev-cell.is-match-flipped .gm-rev-disc {
+  box-shadow: 0 0 0 2px var(--color-warning);
+}
+
+/* ============================================================================
+ * 申し込みの小窓・応戦ダイアログ（2人対戦の流れ）
+ *   「2人対戦」で【新しい対局】→ 小窓で 相手・先手/後手 → 申し込む（小窓は閉じない）
+ *   相手がオフラインなら小窓にその旨、応戦されたら小窓が閉じて対戦が始まる。
+ * ========================================================================== */
+.gm-challenge__game {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-sm);
+  color: var(--color-text-strong);
+}
+
+.gm-challenge__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.gm-challenge__note {
+  margin: 0;
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+  color: var(--color-text-subtle);
+}
+
+/* 返事待ち（この小窓は閉じない） */
+.gm-challenge__waiting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.gm-challenge__waiting-text {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.gm-challenge__waiting .cell-muted {
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+}
+
+/* ============================================================================
+ * ステータス内の相手の状態（対戦中だけ出す）
+ *   相手がゲーム画面を閉じた（= 接続が切れた）ときは赤で示し、【終了】で抜けられる。
+ * ========================================================================== */
+.gm-opponent {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-muted);
+}
+
+/* 相手が不在。赤で示す（対局を続けられないため） */
+.gm-opponent.is-offline {
+  color: var(--color-danger);
+}
+
+.gm-match-actions {
+  margin-top: var(--sp-3);
+}

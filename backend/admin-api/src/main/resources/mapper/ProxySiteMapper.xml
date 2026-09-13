@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.proxy.ProxySiteMapper">
+
+    <!-- 許可判定に使う列だけを読む（2.1 の判定は サイト名称 を使わない）。 -->
+    <resultMap id="ApprovedSiteMap" type="com.study21.admin.proxy.ProxySiteMapper$ApprovedSite">
+        <result property="siteUrl"         column="サイトURL"/>
+        <result property="hostName"        column="ホスト名"/>
+        <result property="judgeMethodCode" column="判定方法コード"/>
+        <result property="kindCode"        column="区分コード"/>
+    </resultMap>
+
+    <!--
+      承認済み（APPROVED）かつ有効（状態='1'）のサイト。判定方法コードの 4 種は SQL では
+      表現しにくいため、プロキシ（アプリ側）が全件を読み込んで照合する。
+      部分索引 idx_net_site_approved_active が効く。
+    -->
+    <select id="findApprovedActiveSites" resultMap="ApprovedSiteMap">
+        SELECT "サイトURL",
+               "ホスト名",
+               "判定方法コード",
+               "区分コード"
+          FROM public."NET_サイト情報"
+         WHERE "承認ステータス" = 'APPROVED'
+           AND "状態" = '1'
+    </select>
+</mapper>

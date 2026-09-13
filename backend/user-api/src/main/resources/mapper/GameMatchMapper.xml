@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.game.GameMatchMapper">
+
+    <resultMap id="GameMatchMap" type="com.study21.user.game.GameMatchEntity">
+        <id     property="matchId"             column="対戦ID"/>
+        <result property="gameType"            column="ゲーム種別コード"/>
+        <result property="challengerAccountId" column="挑戦者アカウントID"/>
+        <result property="opponentAccountId"   column="相手アカウントID"/>
+        <result property="turnAccountId"       column="手番アカウントID"/>
+        <result property="status"              column="状態コード"/>
+        <result property="challengerStone"     column="挑戦者石コード"/>
+        <result property="board"               column="盤面"/>
+        <result property="moveCount"           column="手数"/>
+        <result property="winnerAccountId"     column="勝者アカウントID"/>
+        <result property="resultCode"          column="結果コード"/>
+        <result property="startedAt"           column="開始日時"/>
+        <result property="finishedAt"          column="終了日時"/>
+        <result property="version"             column="バージョン"/>
+        <result property="createdByAccountId"  column="登録者アカウントID"/>
+        <result property="updatedByAccountId"  column="更新者アカウントID"/>
+        <result property="createdByCode"       column="登録元コード"/>
+        <result property="updatedByCode"       column="更新元コード"/>
+        <result property="createdAt"           column="登録日時"/>
+        <result property="updatedAt"           column="更新日時"/>
+        <result property="opponentName"        column="相手の名前"/>
+    </resultMap>
+
+    <!-- 盤面は JSONB。JDBC からは文字列として受け渡す -->
+    <sql id="MatchColumns">
+        m."対戦ID", m."ゲーム種別コード", m."挑戦者アカウントID", m."相手アカウントID", m."手番アカウントID",
+        m."状態コード", m."挑戦者石コード", m."盤面"::text AS "盤面", m."手数", m."勝者アカウントID",
+        m."結果コード", m."開始日時", m."終了日時", m."バージョン",
+        m."登録者アカウントID", m."更新者アカウントID", m."登録元コード", m."更新元コード",
+        m."登録日時", m."更新日時",
+        NULLIF(BTRIM(COALESCE(p."姓", '') || ' ' || COALESCE(p."名", '')), '') AS "相手の名前"
+    </sql>
+
+    <insert id="insertMatch" parameterType="com.study21.user.game.GameMatchEntity"
+            useGeneratedKeys="true" keyProperty="matchId" keyColumn="対戦ID">
+        INSERT INTO public."GAM_対戦情報" (
+            "ゲーム種別コード", "挑戦者アカウントID", "相手アカウントID", "手番アカウントID", "状態コード",
+            "挑戦者石コード", "盤面", "手数", "バージョン",
+            "登録者アカウントID", "更新者アカウントID", "登録元コード")
+        VALUES (
+            #{gameType}, #{challengerAccountId}, #{opponentAccountId}, #{turnAccountId}, #{status},
+            #{challengerStone}, #{board}::jsonb, #{moveCount}, 1,
+            #{createdByAccountId}, #{updatedByAccountId}, 'APP')
+    </insert>
+
+    <select id="findMatchById" resultMap="GameMatchMap">
+        SELECT <include refid="MatchColumns"/>
+          FROM public."GAM_対戦情報" m
+          LEFT JOIN public."ACC_アカウント" p
+            ON p."アカウントID" = CASE WHEN m."挑戦者アカウントID" = #{viewerAccountId}
+                                      THEN m."相手アカウントID" ELSE m."挑戦者アカウントID" END
+         WHERE m."対戦ID" = #{matchId}
+    </select>
+
+    <select id="listMyMatches" resultMap="GameMatchMap">
+        SELECT <include refid="MatchColumns"/>
+          FROM public."GAM_対戦情報" m
+          LEFT JOIN public."ACC_アカウント" p
+            ON p."アカウントID" = CASE WHEN m."挑戦者アカウントID" = #{accountId}
+                                      THEN m."相手アカウントID" ELSE m."挑戦者アカウントID" END
+         WHERE m."挑戦者アカウントID" = #{accountId} OR m."相手アカウントID" = #{accountId}
+         ORDER BY m."更新日時" DESC, m."対戦ID" DESC
+    </select>
+
+    <!-- 承諾。最初の手番は「黒（先手）を持つ人」＝挑戦者が先手なら挑戦者、後手なら相手 -->
+    <update id="acceptMatch">
+        UPDATE public."GAM_対戦情報"
+           SET "状態コード" = 'PLAYING',
+               "手番アカウントID" = CASE
+                   WHEN COALESCE("挑戦者石コード", 'BLACK') = 'BLACK' THEN "挑戦者アカウントID"
+                   ELSE "相手アカウントID"
+               END,
+               "開始日時" = COALESCE("開始日時", CURRENT_TIMESTAMP),
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{opponentAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND "相手アカウントID" = #{opponentAccountId}
+           AND "状態コード" = 'WAITING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="declineMatch">
+        UPDATE public."GAM_対戦情報"
+           SET "状態コード" = 'DECLINED',
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{opponentAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND "相手アカウントID" = #{opponentAccountId}
+           AND "状態コード" = 'WAITING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="cancelMatch">
+        UPDATE public."GAM_対戦情報"
+           SET "状態コード" = 'CANCELLED',
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{challengerAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND "挑戦者アカウントID" = #{challengerAccountId}
+           AND "状態コード" = 'WAITING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- 投了: 投げた人の相手が勝者。終了日時と結果を入れる -->
+    <!-- 相手が不在のときの終了。残った側の勝ち（結果コード = TIMEOUT） -->
+    <update id="timeoutMatch">
+        UPDATE public."GAM_対戦情報"
+           SET "状態コード" = 'FINISHED',
+               "勝者アカウントID" = #{winnerAccountId},
+               "結果コード" = 'TIMEOUT',
+               "手番アカウントID" = #{winnerAccountId},
+               "終了日時" = CURRENT_TIMESTAMP,
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND ("挑戦者アカウントID" = #{accountId} OR "相手アカウントID" = #{accountId})
+           AND "状態コード" = 'PLAYING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="resignMatch">
+        UPDATE public."GAM_対戦情報"
+           SET "状態コード" = 'FINISHED',
+               "勝者アカウントID" = #{winnerAccountId},
+               "結果コード" = 'RESIGN',
+               "終了日時" = CURRENT_TIMESTAMP,
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND ("挑戦者アカウントID" = #{accountId} OR "相手アカウントID" = #{accountId})
+           AND "状態コード" = 'PLAYING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateAfterMove">
+        UPDATE public."GAM_対戦情報"
+           SET "盤面" = #{board}::jsonb,
+               "手数" = #{moveCount},
+               "手番アカウントID" = #{turnAccountId},
+               "状態コード" = #{status},
+               "勝者アカウントID" = #{winnerAccountId},
+               "結果コード" = #{resultCode},
+               "終了日時" = #{finishedAt},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "対戦ID" = #{matchId}
+           AND "状態コード" = 'PLAYING'
+           AND "バージョン" = #{version}
+    </update>
+
+    <insert id="insertMove" parameterType="com.study21.user.game.GameMoveEntity"
+            useGeneratedKeys="true" keyProperty="moveId" keyColumn="対戦手ID">
+        INSERT INTO public."GAM_対戦手情報" (
+            "対戦ID", "手数", "アカウントID", "石コード", "行", "列", "パスフラグ", "返した石", "成立ライン")
+        VALUES (
+            #{matchId}, #{moveNumber}, #{accountId}, #{stone}, #{rowIndex}, #{colIndex}, #{passFlag},
+            #{flipped}::jsonb, #{line}::jsonb)
+    </insert>
+
+    <select id="listMoves" resultType="com.study21.user.game.GameMoveEntity">
+        SELECT "対戦手ID"     AS "moveId",
+               "対戦ID"       AS "matchId",
+               "手数"         AS "moveNumber",
+               "アカウントID" AS "accountId",
+               "石コード"     AS "stone",
+               "行"           AS "rowIndex",
+               "列"           AS "colIndex",
+               "パスフラグ"   AS "passFlag",
+               "返した石"::text AS "flipped",
+               "成立ライン"::text AS "line",
+               "登録日時"     AS "createdAt"
+          FROM public."GAM_対戦手情報"
+         WHERE "対戦ID" = #{matchId}
+         ORDER BY "手数"
+    </select>
+</mapper>

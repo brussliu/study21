@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.proxy.ProxyAccessLogMapper">
+
+    <!--
+      NET_プロキシ通信履歴情報 への追記（1 リクエスト = 1 行。許可・拒否の両方を残す）。
+
+      * 受付日時 … プロキシが要求を受け付けた時刻（2.1 は NOT NULL のため必ず入れる）
+      * 要求日時 … 要求側が記録した時刻。取得できた場合だけ入れる項目なので NULL のままとする
+      * 応答状態コード … NULL=許可 / 403=拒否。拒否のときは エラー内容 に理由が入る
+        （CHECK 制約 CK_NET_プロキシ履歴_拒否理由 を満たす）
+      * 登録者／更新者アカウントID … プロキシは人が操作しないため NULL
+      * 登録元コード … 'PROXY'（記録元の識別子）
+    -->
+    <insert id="insertRequestLog">
+        INSERT INTO public."NET_プロキシ通信履歴情報" (
+            "受付日時", "要求日時", "クライアントIP", "クライアントポート", "HTTPメソッド",
+            "接続先ホスト", "接続先ポート", "要求URL", "要求パス", "クエリ文字列",
+            "プロトコル種別", "ユーザーエージェント", "参照元URL",
+            "応答状態コード", "エラー内容",
+            "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+            "登録日時", "更新日時"
+        ) VALUES (
+            #{receivedAt}::timestamp, NULL,
+            #{clientIp}, #{clientPort,jdbcType=INTEGER}, #{httpMethod},
+            #{host}, #{hostPort,jdbcType=INTEGER}, #{requestUrl}, #{requestPath}, #{queryString},
+            #{protocolType}, #{userAgent}, #{referer},
+            #{responseStatusCode,jdbcType=INTEGER}, #{errorContent},
+            NULL, NULL, 'PROXY', NULL,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+        )
+    </insert>
+</mapper>

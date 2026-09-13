@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.net.WebBrowsingLogMapper">
+
+    <!-- Web閲覧履歴（NET_Web閲覧履歴情報）。ブラウザ拡張が記録した 1 イベント = 1 行。 -->
+    <resultMap id="BrowsingLogMap" type="com.study21.user.net.WebBrowsingLogEntity">
+        <id     property="logId"        column="閲覧履歴ID"/>
+        <result property="accessedAt"   column="アクセス日時"/>
+        <result property="terminalId"   column="端末識別子"/>
+        <result property="terminalName" column="端末名称"/>
+        <result property="eventType"    column="イベント種別"/>
+        <result property="domain"       column="ドメイン"/>
+        <result property="url"          column="URL"/>
+        <result property="pageTitle"    column="ページタイトル"/>
+        <result property="activeFlag"   column="アクティブフラグ"/>
+        <result property="staySeconds"  column="滞在秒数"/>
+        <result property="viewCount"    column="閲覧回数"/>
+        <result property="ownerUserId"  column="旧ユーザーID"/>
+        <result property="jsonDetail"   column="JSON詳細"/>
+    </resultMap>
+
+    <!-- 絞り込み。空の条件は無視する。日付は アクセス日時 の範囲（From は 00:00 から、To は翌日 00:00 未満）。 -->
+    <sql id="BrowsingLogWhere">
+        <where>
+            <if test="terminalId != null and terminalId != ''">
+                AND h."端末識別子" ILIKE '%' || #{terminalId} || '%'
+            </if>
+            <if test="terminalName != null and terminalName != ''">
+                AND COALESCE(h."端末名称", '') ILIKE '%' || #{terminalName} || '%'
+            </if>
+            <if test="domain != null and domain != ''">
+                AND COALESCE(h."ドメイン", '') ILIKE '%' || #{domain} || '%'
+            </if>
+            <if test="eventType != null and eventType != ''">
+                AND h."イベント種別" = #{eventType}
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (COALESCE(h."URL", '') ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(h."ページタイトル", '') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="dateFrom != null and dateFrom != ''">
+                AND h."アクセス日時" &gt;= #{dateFrom}::date
+            </if>
+            <if test="dateTo != null and dateTo != ''">
+                AND h."アクセス日時" &lt; (#{dateTo}::date + INTERVAL '1 day')
+            </if>
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."NET_Web閲覧履歴情報" h
+        <include refid="BrowsingLogWhere"/>
+    </select>
+
+    <select id="search" resultMap="BrowsingLogMap">
+        SELECT h."閲覧履歴ID", h."アクセス日時", h."端末識別子", h."端末名称", h."イベント種別",
+               h."ドメイン", h."URL", h."ページタイトル", h."アクティブフラグ",
+               h."滞在秒数", h."閲覧回数", h."旧ユーザーID", NULL AS "JSON詳細"
+          FROM public."NET_Web閲覧履歴情報" h
+        <include refid="BrowsingLogWhere"/>
+         ORDER BY h."アクセス日時" DESC, h."閲覧履歴ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+</mapper>

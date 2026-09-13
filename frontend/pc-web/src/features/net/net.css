@@ -1,0 +1,66 @@
+/* =============================================================
+   サイト管理 / 端末コントロール
+   assets/prototype/*.css（デザインシステム）を土台にした追加ルールのみ。
+   色は tokens.css の変数だけを使う。
+   ============================================================= */
+
+.net-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.net-page__loading,
+.net-page__empty {
+  margin: 0;
+  padding: var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* 並び替えできる列見出し（見た目は通常の th のまま、押せることだけ示す）。 */
+.net-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.net-sort:hover {
+  color: var(--color-primary);
+}
+
+.net-required {
+  margin-left: var(--sp-1);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-regular);
+  color: var(--color-danger);
+}
+
+/* 端末一覧のカードヘッダに置く一括切替の並び。 */
+.net-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+
+/* 一括適用で使う端末ステータスの選択（中身に合わせて縮める）。 */
+.net-toolbar__mode {
+  width: auto;
+  min-width: 9rem;
+}
+
+/* 検索条件の中のボタン群が縦に潰れないようにする。 */
+.net-page .filter-item .btn + .btn {
+  margin-left: var(--sp-2);
+}

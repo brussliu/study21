@@ -1,0 +1,612 @@
+/* ホーム（2.0 の english.jsp の内容をまとめた画面）。色は tokens.css の変数のみ。 */
+
+.home-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* あいさつ */
+.home-hello {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.home-hello__name {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+}
+
+.home-hello__date {
+  color: var(--color-text-muted);
+}
+
+.home-hello__spacer {
+  margin-left: auto;
+}
+
+/* KPI カード */
+.home-kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.home-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.home-kpi__label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-kpi__value {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.home-kpi__sub {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.home-kpi--primary { border-left: 3px solid var(--color-primary); }
+.home-kpi--info { border-left: 3px solid var(--color-info); }
+.home-kpi--success { border-left: 3px solid var(--color-success); }
+.home-kpi--warning { border-left: 3px solid var(--color-warning); }
+
+/* チャートと一覧の 2 カラム */
+.home-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+@media (max-width: 1100px) {
+  .home-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.home-radars {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.home-radar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.home-radar__caption {
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+/* レーダーチャートの凡例 */
+.home-legend {
+  display: flex;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-legend__swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.home-legend__swatch--value { background: var(--color-primary); }
+.home-legend__swatch--target { background: var(--color-text-subtle); }
+
+/* 学習状況の一覧 */
+.home-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--sp-3);
+}
+
+.home-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.home-item__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.home-item__main {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+}
+
+.home-item__sub {
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.home-bar {
+  height: 6px;
+  margin-top: var(--sp-1);
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.home-bar__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+}
+
+.home-note {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+/* 学習サマリ（components/home/StudyOverview.vue）。生徒ホームと保護者ホームで共用する。 */
+.home-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* ============================================================================
+ * 学習・休憩・ゲームタイマー（2.0 home.jsp のタイマーカード）
+ * ========================================================================== */
+.home-timers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-4);
+}
+
+.home-timer {
+  border-left: 3px solid var(--color-border-strong);
+}
+
+.home-timer--study { border-left-color: var(--color-primary); }
+.home-timer--break { border-left-color: var(--color-warning); }
+.home-timer--game { border-left-color: var(--color-info); }
+
+.home-timer__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.home-timer__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+.home-timer__label {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.home-timer__clock {
+  margin: var(--sp-2) 0 var(--sp-1);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  color: var(--color-text-strong);
+}
+
+/* 動いている間は数字を赤くする（2.0 と同じ） */
+.home-timer.is-running .home-timer__clock {
+  color: var(--color-danger);
+}
+
+.home-timer__bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+}
+
+.home-timer__bar-fill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+  transition: width var(--duration-fast) linear;
+}
+
+.home-timer--break .home-timer__bar-fill { background: var(--color-warning); }
+.home-timer--game .home-timer__bar-fill { background: var(--color-info); }
+
+.home-timer__actions {
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.home-timer__setting {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.home-timer__setting-label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-timer__setting .select {
+  width: auto;
+  min-width: 8rem;
+}
+
+.home-timer__custom {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.home-timer__custom .input {
+  width: 5rem;
+}
+
+/* ============================================================================
+ * 最近3日 上網状況（時間帯別）（2.0 home.jsp の net-usage-card）
+ * ========================================================================== */
+.home-net-usage__head {
+  align-items: flex-end;
+  gap: var(--sp-3);
+}
+
+.home-net-usage__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.home-net-usage__filters .select {
+  width: auto;
+  min-width: 8rem;
+}
+
+.home-net-usage__legend {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin: var(--sp-2) 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-net-usage__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.home-net-usage__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+}
+
+.home-net-usage__dot--0 { background: var(--color-primary); }
+.home-net-usage__dot--1 { background: var(--color-info); }
+.home-net-usage__dot--2 { background: var(--color-text-subtle); }
+
+/* 24 時間ぶんの列。棒は 3 日ぶんを横に並べる。 */
+.home-net-usage__chart {
+  display: grid;
+  grid-template-columns: repeat(24, minmax(0, 1fr));
+  align-items: end;
+  gap: 2px;
+  height: 180px;
+  padding-top: var(--sp-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.home-net-usage__column {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 100%;
+  gap: 2px;
+}
+
+.home-net-usage__bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+  height: 100%;
+}
+
+.home-net-usage__bar {
+  width: 33%;
+  min-height: 0;
+  border-radius: 2px 2px 0 0;
+  background: var(--color-primary);
+}
+
+.home-net-usage__bar--0 { background: var(--color-primary); }
+.home-net-usage__bar--1 { background: var(--color-info); }
+.home-net-usage__bar--2 { background: var(--color-text-subtle); }
+
+.home-net-usage__hour {
+  text-align: center;
+  font-size: 9px;
+  color: var(--color-text-subtle);
+}
+
+/* ============================================================================
+ * 行動タイムライン（2.0 home.jsp の home-monitor-card）
+ * ========================================================================== */
+.home-timeline__head {
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.home-timeline__lead {
+  margin: 2px 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-timeline__filters {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.home-timeline__time {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.home-timeline__time em {
+  font-style: normal;
+  color: var(--color-text-subtle);
+}
+
+/* 時間軸の帯。区間は % の絶対配置で置く（2.0 と同じ）。 */
+.home-timeline__track {
+  position: relative;
+  height: 42px;
+  margin-top: var(--sp-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.home-timeline__segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border-radius: 2px;
+}
+
+.home-timeline__segment--study { background: var(--color-primary); }
+.home-timeline__segment--break { background: var(--color-info); }
+.home-timeline__segment--game { background: var(--color-warning); }
+.home-timeline__segment--away { background: var(--color-text-subtle); }
+.home-timeline__segment--unknown { background: var(--color-danger); }
+.home-timeline__segment--unanalysed { background: var(--color-border-strong); }
+
+.home-timeline__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.home-timeline__scale {
+  position: relative;
+  height: 18px;
+  margin-top: 2px;
+}
+
+.home-timeline__tick {
+  position: absolute;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.home-timeline__tick.is-edge-start { transform: none; }
+.home-timeline__tick.is-edge-end { transform: translateX(-100%); }
+
+.home-timeline__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.home-timeline__legend {
+  display: flex;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-timeline__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.home-timeline__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.home-timeline__status {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-timeline__note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin: var(--sp-3) 0 0;
+  padding-top: var(--sp-2);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--fs-2xs);
+  color: var(--color-text-subtle);
+}
+
+.home-timeline__note-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ============================================================================
+ * 直近単語テスト情報統計（2.0 english.jsp の複合グラフ）
+ * ========================================================================== */
+.home-word-test__legend {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-word-test__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.home-word-test__swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.home-word-test__swatch--weekday { background: var(--color-primary); }
+.home-word-test__swatch--weekend { background: var(--color-text-subtle); }
+.home-word-test__swatch--line { height: 2px; border-radius: 0; background: var(--color-info); }
+.home-word-test__swatch--bubble { border-radius: var(--radius-pill); background: var(--color-warning); }
+.home-word-test__swatch--minimum { height: 2px; border-radius: 0; background: var(--color-danger); }
+
+.home-word-test__chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.home-word-test__grid line {
+  stroke: var(--color-border);
+  stroke-width: 1;
+}
+
+.home-word-test__minimum {
+  stroke: var(--color-danger);
+  stroke-width: 2;
+  stroke-dasharray: 8 6;
+}
+
+.home-word-test__bar {
+  fill: var(--color-primary);
+  opacity: 0.75;
+}
+
+.home-word-test__bar.is-weekend {
+  fill: var(--color-text-subtle);
+}
+
+.home-word-test__line {
+  fill: none;
+  stroke: var(--color-info);
+  stroke-width: 2;
+  stroke-dasharray: 5 5;
+}
+
+.home-word-test__point {
+  fill: var(--color-info);
+}
+
+.home-word-test__bubble {
+  fill: var(--color-warning);
+  opacity: 0.45;
+}
+
+.home-word-test__axis text {
+  font-size: 10px;
+  fill: var(--color-text-subtle);
+}
+
+.home-word-test__axis text.is-weekend {
+  fill: var(--color-danger);
+}
+
+.home-word-test__summary {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin-top: var(--sp-2);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.home-word-test__summary strong {
+  color: var(--color-text-strong);
+}

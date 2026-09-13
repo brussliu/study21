@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Study 2.1">
+  <!-- Study 2.1 システムアイコン。
+       サイドバーのロゴマーク（AppSidebar.vue の .logo-mark）と同じ図形・同じ配色を使う。
+       本ファイルが正（マスター）。PNG は scripts/generate-app-icons.mjs で生成する。 -->
+  <defs>
+    <linearGradient id="study21-icon-grad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2a8a72" />
+      <stop offset="1" stop-color="#4cb39a" />
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="64" height="64" rx="16" fill="url(#study21-icon-grad)" />
+  <!-- 開いた本（左ページ・右ページ） -->
+  <path d="M16 24 L32 30 L32 48 L16 42 Z" fill="#bce4d8" />
+  <path d="M48 24 L32 30 L32 48 L48 42 Z" fill="#e6f4ef" />
+  <!-- 学ぶ人（頭） -->
+  <circle cx="32" cy="22.5" r="5.2" fill="#ffffff" />
+</svg>

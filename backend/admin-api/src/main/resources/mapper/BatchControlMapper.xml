@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.batch.BatchControlMapper">
+
+    <resultMap id="ControlMap" type="com.study21.admin.batch.BatchControlEntity">
+        <id     property="batchCode"            column="バッチコード"/>
+        <result property="status"               column="状態"/>
+        <result property="lastRunAt"            column="最終実行日時"/>
+        <result property="note"                 column="備考"/>
+        <result property="version"              column="バージョン"/>
+        <result property="createdByAccountId"   column="登録者アカウントID"/>
+        <result property="updatedByAccountId"   column="更新者アカウントID"/>
+        <result property="createdByCode"        column="登録元コード"/>
+        <result property="updatedByCode"        column="更新元コード"/>
+        <result property="createdAt"            column="登録日時"/>
+        <result property="updatedAt"            column="更新日時"/>
+    </resultMap>
+
+    <sql id="ControlColumns">
+        "バッチコード", "状態", "最終実行日時", "備考", "バージョン",
+        "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+        "登録日時", "更新日時"
+    </sql>
+
+    <!-- 定義にあるバッチの行を用意する（既存行は触らない＝画面での設定を保持する）。 -->
+    <insert id="insertIfAbsent">
+        INSERT INTO public."BAT_バッチコントロール情報"
+            ("バッチコード", "状態", "備考", "登録元コード", "更新元コード")
+        VALUES
+            (#{batchCode}, #{status}, #{note}, #{createdByCode}, #{updatedByCode})
+        ON CONFLICT ("バッチコード") DO NOTHING
+    </insert>
+
+    <select id="findByBatchCode" resultMap="ControlMap">
+        SELECT <include refid="ControlColumns"/>
+          FROM public."BAT_バッチコントロール情報"
+         WHERE "バッチコード" = #{batchCode}
+    </select>
+
+    <select id="findAll" resultMap="ControlMap">
+        SELECT <include refid="ControlColumns"/>
+          FROM public."BAT_バッチコントロール情報"
+         ORDER BY "バッチコード"
+    </select>
+
+    <update id="updateStatus">
+        UPDATE public."BAT_バッチコントロール情報"
+           SET "状態" = #{status},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新元コード" = #{updatedByCode},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "バッチコード" = #{batchCode}
+        <if test="version != null">
+           AND "バージョン" = #{version}
+        </if>
+    </update>
+
+    <update id="touchLastRunAt">
+        UPDATE public."BAT_バッチコントロール情報"
+           SET "最終実行日時" = CURRENT_TIMESTAMP,
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "バッチコード" = #{batchCode}
+    </update>
+</mapper>

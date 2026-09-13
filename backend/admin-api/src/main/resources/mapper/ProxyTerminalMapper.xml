@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.proxy.ProxyTerminalMapper">
+
+    <!--
+      プロキシの許可判定に使う端末モードの取得。
+      2.0 は 端末ステータス 列と ステータス='有効' だったが、2.1 は 端末モード 列と 状態='1'（有効）。
+      同じ IP の有効な行は 1 件だけ（uq_net_terminal_ip_active）なので LIMIT 1 で足りる。
+    -->
+    <select id="findTerminalModeByIp" resultType="java.lang.String">
+        SELECT "端末モード"
+          FROM public."NET_端末コントロール情報"
+         WHERE "IPアドレス" = #{ip}
+           AND "状態" = '1'
+         LIMIT 1
+    </select>
+</mapper>

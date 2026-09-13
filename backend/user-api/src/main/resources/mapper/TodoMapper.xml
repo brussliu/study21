@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.todo.TodoMapper">
+
+    <resultMap id="TodoMap" type="com.study21.user.todo.TodoEntity">
+        <id     property="todoId"             column="TODOID"/>
+        <result property="accountId"          column="アカウントID"/>
+        <result property="createdByAccountId" column="作成者アカウントID"/>
+        <result property="parentTodoId"       column="親TODOID"/>
+        <result property="order"              column="表示順"/>
+        <result property="title"              column="タイトル"/>
+        <result property="memo"               column="メモ"/>
+        <result property="status"             column="状態コード"/>
+        <result property="priority"           column="優先度コード"/>
+        <result property="dueDate"            column="期限日"/>
+        <result property="startedAt"          column="実施開始日時"/>
+        <result property="completedAt"        column="実施完了日時"/>
+        <result property="version"            column="バージョン"/>
+    </resultMap>
+
+    <sql id="TodoColumns">
+        "TODOID", "アカウントID", "作成者アカウントID", "親TODOID", "表示順", "タイトル", "メモ",
+        "状態コード", "優先度コード", "期限日", "実施開始日時", "実施完了日時", "バージョン"
+    </sql>
+
+    <!-- 一覧の絞り込み（親タスクだけを対象にする）。 -->
+    <sql id="TodoWhere">
+        WHERE t."アカウントID" = #{accountId}
+          AND t."親TODOID" IS NULL
+        <if test="keyword != null and keyword != ''">
+            AND (t."タイトル" ILIKE '%' || #{keyword} || '%' OR COALESCE(t."メモ", '') ILIKE '%' || #{keyword} || '%')
+        </if>
+        <if test="status != null and status != ''">
+            AND t."状態コード" = #{status}
+        </if>
+        <if test="priority != null and priority != ''">
+            AND t."優先度コード" = #{priority}
+        </if>
+        <if test="!includeDone">
+            AND t."状態コード" &lt;&gt; 'DONE'
+        </if>
+        <if test="dueFrom != null">
+            AND t."期限日" &gt;= #{dueFrom}
+        </if>
+        <if test="dueTo != null">
+            AND t."期限日" &lt;= #{dueTo}
+        </if>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*) FROM public."COM_TODO情報" t
+        <include refid="TodoWhere"/>
+    </select>
+
+    <select id="search" resultMap="TodoMap">
+        SELECT <include refid="TodoColumns"/>
+          FROM public."COM_TODO情報" t
+        <include refid="TodoWhere"/>
+         ORDER BY (t."状態コード" = 'DONE') ASC,
+                  CASE t."優先度コード" WHEN 'HIGH' THEN 1 WHEN 'NORMAL' THEN 2 ELSE 3 END,
+                  t."期限日" ASC NULLS LAST,
+                  t."表示順" ASC, t."TODOID" ASC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findChildren" resultMap="TodoMap">
+        SELECT <include refid="TodoColumns"/>
+          FROM public."COM_TODO情報"
+         WHERE "親TODOID" IN
+        <foreach collection="parentIds" item="parentId" open="(" separator="," close=")">
+            #{parentId}
+        </foreach>
+         ORDER BY "表示順" ASC, "TODOID" ASC
+    </select>
+
+    <select id="findById" resultMap="TodoMap">
+        SELECT <include refid="TodoColumns"/>
+          FROM public."COM_TODO情報"
+         WHERE "TODOID" = #{todoId}
+    </select>
+
+    <select id="countByStatus" resultType="long">
+        SELECT count(*)
+          FROM public."COM_TODO情報"
+         WHERE "アカウントID" = #{accountId} AND "親TODOID" IS NULL AND "状態コード" = #{status}
+    </select>
+
+    <select id="countByDueDate" resultType="com.study21.user.todo.TodoModels$CalendarCell">
+        SELECT "期限日" AS "dueDate",
+               COUNT(*) FILTER (WHERE "状態コード" &lt;&gt; 'DONE')::int AS "openCount",
+               COUNT(*) FILTER (WHERE "状態コード" = 'DONE')::int AS "doneCount"
+          FROM public."COM_TODO情報"
+         WHERE "アカウントID" = #{accountId}
+           AND "期限日" BETWEEN #{from} AND #{to}
+         GROUP BY "期限日"
+         ORDER BY "期限日"
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="todoId" keyColumn="TODOID">
+        INSERT INTO public."COM_TODO情報" (
+            "アカウントID", "作成者アカウントID", "親TODOID", "表示順", "タイトル", "メモ",
+            "状態コード", "優先度コード", "期限日", "登録元コード")
+        VALUES (
+            #{accountId}, #{createdByAccountId}, #{parentTodoId}, #{order}, #{title}, #{memo},
+            #{status}, #{priority}, #{dueDate}, 'APP')
+    </insert>
+
+    <update id="update">
+        UPDATE public."COM_TODO情報"
+           SET "タイトル" = #{title},
+               "メモ" = #{memo},
+               "優先度コード" = #{priority},
+               "期限日" = #{dueDate},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "TODOID" = #{todoId}
+        <if test="version != null">
+           AND "バージョン" = #{version}
+        </if>
+    </update>
+
+    <update id="updateStatus">
+        UPDATE public."COM_TODO情報"
+           SET "状態コード" = #{status},
+               "実施開始日時" = #{startedAt},
+               "実施完了日時" = #{completedAt},
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "TODOID" = #{todoId}
+        <if test="version != null">
+           AND "バージョン" = #{version}
+        </if>
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."COM_TODO情報" WHERE "TODOID" = #{todoId}
+    </delete>
+
+    <delete id="deleteChildren">
+        DELETE FROM public."COM_TODO情報" WHERE "親TODOID" = #{parentTodoId}
+    </delete>
+</mapper>

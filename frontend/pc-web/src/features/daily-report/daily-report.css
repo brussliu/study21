@@ -1,0 +1,1166 @@
+/* 学習日報（月カレンダー・週の時間割・1 日の詳細）。色は tokens.css の変数のみ。 */
+
+.dr-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* 上部のツールバー（月の移動と提出状況） */
+.dr-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/*
+ * 年月は「前の月」「次の月」のボタンの**あいだの中央**に置く。
+ * 幅を固定して中央寄せにするので、月が変わって文字数が増えても（9月 → 10月）
+ * ボタンの位置が動かない。
+ */
+.dr-toolbar__month {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  min-width: 9rem;
+  text-align: center;
+}
+
+.dr-toolbar__spacer {
+  margin-left: auto;
+}
+
+.dr-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.dr-summary__sub {
+  margin-left: var(--sp-2);
+  color: var(--color-text-subtle);
+}
+
+.dr-summary__rate {
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+/* カレンダーと時間割の 2 カラム（狭い画面では縦に積む） */
+.dr-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+@media (max-width: 1100px) {
+  .dr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/*
+ * 月〜土は同じ幅、日曜だけ狭くする（日曜は授業が無いため）。
+ * 空いた幅は他の 6 日に回る（fr なので自動で配分される）。
+ * 当月に日曜の授業があるときは `.dr-calendar--all-equal` を付けて 7 日とも同じ幅にする。
+ */
+.dr-calendar__head,
+.dr-calendar__week {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr)) minmax(0, 0.34fr);
+  gap: var(--sp-1);
+}
+
+.dr-calendar--all-equal .dr-calendar__head,
+.dr-calendar--all-equal .dr-calendar__week {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+.dr-calendar__head span {
+  padding: var(--sp-1) 0;
+  text-align: center;
+  font-size: var(--fs-sm);
+  color: var(--color-text-muted);
+}
+
+.dr-calendar__week + .dr-calendar__week {
+  margin-top: var(--sp-1);
+}
+
+/*
+ * 1 日 1 マス。未展開でもその日の様子が分かるように、
+ * 提出状態（緑=提出済 / 黄=記載あり / グレー=未提出）＋時限数・掌握度・教科チップを出す。
+ */
+.dr-day {
+  /* このマスを基準に、細い列（日曜）だけボタンの見せ方を変える */
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 10.5rem;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.dr-day:hover {
+  border-color: var(--color-primary);
+}
+
+/* 提出済（緑） */
+.dr-day--submitted {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+/* 記載あり・再提出待ち（黄） */
+.dr-day--draft,
+.dr-day--reopened {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+/* 未提出（グレー。平日で記録が無い日） */
+.dr-day--missing {
+  background: var(--color-surface-alt);
+}
+
+/* 祝日・休日（授業が無い日。未提出とは区別する） */
+.dr-day--rest {
+  border-style: dashed;
+  background: transparent;
+  color: var(--color-text-muted);
+}
+
+/*
+ * 祝日・休日を提出した日は、**淡い赤**にする（ユーザーの指定）。
+ * 平日の提出済みは緑なので、祝日は日そのものが分かる色（赤系）のまま
+ * 「提出した」ことも示す。破線の枠は祝日・休日のまま。
+ */
+.dr-day--rest[data-submitted='true'] {
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+.dr-day--rest .dr-day__num {
+  color: var(--color-text-subtle);
+}
+
+.dr-day__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+}
+
+.dr-day__state {
+  margin-left: auto;
+  font-size: var(--fs-2xs);
+}
+
+/* 今日のマスは暗い赤で囲む（選択中の緑と区別する） */
+.dr-day--today {
+  outline: 2px solid var(--danger-600);
+  outline-offset: -2px;
+}
+
+.dr-day--selected {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.dr-day--empty {
+  border-style: dashed;
+  background: transparent;
+  cursor: default;
+  opacity: 0.45;
+}
+
+.dr-day__num {
+  font-weight: 700;
+  font-size: var(--fs-md);
+}
+
+.dr-day__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+  line-height: 1.3;
+}
+
+/* 記録が無い日の「推定」印（カードの「推定」と同じ淡さにする） */
+.dr-day__metric--inferred {
+  color: var(--color-text-subtle);
+}
+
+.dr-day__metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.dr-day__metric--note {
+  color: var(--color-info);
+}
+
+/* マスの中の教科チップ（未展開のとき） */
+/* 記録が無い日と揃えるため、行の間隔は「限数・掌握度 → 教科 → まとめ」で少し広めに取る
+   （ユーザーの指定。以前は 2px だった） */
+.dr-day__subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 6px;
+}
+
+/* 教科チップ。記録した教科は全部出すので、折り返して並べる（はみ出さない）。 */
+.dr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+/*
+ * 教科ごとの色（tokens.css の変数のみ。英語・国語・数学は専用の変数）。
+ * **どの教科にも色を付ける**（ユーザーの指定）。使い方は 2 つ:
+ *   * `--dr-subject-tone` … 授業カードの左帯と教科名（本文は通常の色のまま）
+ *   * `color`             … チップの文字と枠（`border: 1px solid currentColor`）
+ */
+.dr-subject--english {
+  --dr-subject-tone: var(--subject-english);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--subject-english) 14%, var(--color-surface));
+  color: var(--subject-english);
+}
+.dr-subject--japanese {
+  --dr-subject-tone: var(--subject-japanese);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--subject-japanese) 14%, var(--color-surface));
+  color: var(--subject-japanese);
+}
+.dr-subject--math {
+  --dr-subject-tone: var(--subject-math);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--subject-math) 14%, var(--color-surface));
+  color: var(--subject-math);
+}
+.dr-subject--science {
+  --dr-subject-tone: var(--subject-science);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--subject-science) 14%, var(--color-surface));
+  color: var(--subject-science);
+}
+.dr-subject--social {
+  --dr-subject-tone: var(--warning-600);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--warning-600) 14%, var(--color-surface));
+  color: var(--warning-600);
+}
+.dr-subject--music {
+  --dr-subject-tone: var(--primary-600);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--primary-600) 14%, var(--color-surface));
+  color: var(--primary-600);
+}
+.dr-subject--art {
+  --dr-subject-tone: var(--danger-600);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--danger-600) 14%, var(--color-surface));
+  color: var(--danger-600);
+}
+.dr-subject--pe {
+  --dr-subject-tone: var(--accent-500);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--accent-500) 14%, var(--color-surface));
+  color: var(--accent-500);
+}
+.dr-subject--tech {
+  --dr-subject-tone: var(--info-600);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--info-600) 14%, var(--color-surface));
+  color: var(--info-600);
+}
+.dr-subject--other {
+  --dr-subject-tone: var(--neutral-500);
+  /* 主科の下地に使う薄い色（設計システムの subject badge と同じ 10%） */
+  --dr-subject-soft: color-mix(in srgb, var(--neutral-500) 14%, var(--color-surface));
+  color: var(--neutral-500);
+}
+
+/*
+ * 授業カードの 4 つの見せ方（ユーザーの指定で作り直した）。
+ * 「確定しているか（記録済み / 推定）」と「主科か副科か」を **別の手がかり**で示す:
+ *
+ *   主科・記録済み … 教科色の下地 ＋ 太い実線の左帯 ＋ 教科色の太字
+ *   副科・記録済み … 白地 ＋ 細い実線の左帯（色は帯だけ。下地は敷かない）
+ *   推定（未記録） … 斜線の下地 ＋ 灰色の破線 ＋ 灰色の教科名（＋「推定」の印）
+ *   空き（削除後） … 下地なし ＋ 左帯なし ＋ 破線の枠（薄い文字）
+ *
+ * つまり「下地の有無」＝主科かどうか、「線が実線か破線か」＝記録済みかどうか。
+ */
+.dr-lesson-card:not(.dr-lesson-card--inferred):not(.dr-lesson-card--blank):not(.dr-subject--minor) {
+  background: var(--dr-subject-soft, var(--color-surface));
+  border-left-width: 4px;
+  border-left-style: solid;
+}
+
+.dr-lesson-card:not(.dr-lesson-card--inferred):not(.dr-lesson-card--blank).dr-subject--minor {
+  background: var(--color-surface);
+  border-left-width: 3px;
+  border-left-style: solid;
+}
+
+/*
+ * チップ（未展開のマス・凡例・ダイアログ）は主科と副科で見せ方を分ける:
+ *   主科 … 教科色の文字＋薄い下地
+ *   副科 … **灰色の文字＋灰色の破線**（下地なし。マスが狭いので目立たせない。ユーザーの指定）
+ * 展開したカードは副科も教科色の帯を使う（詳細を見るときは見分けたいため）。
+ */
+.dr-chip:not(.dr-subject--minor) {
+  background: var(--dr-subject-soft, transparent);
+}
+
+.dr-chip.dr-subject--minor {
+  border-style: dashed;
+  border-color: var(--neutral-300);
+  background: transparent;
+  color: var(--neutral-400);
+  font-weight: 400;
+}
+
+/*
+ * 未展開のマスに出す、その日の振り返り。
+ * 長いときは 2 行で切って「…」にする（マスの高さを揃えるため）。
+ */
+/*
+ * 未展開のマスに出す「振り返り」と「今夜の勉強」。項目名は文字ではなくアイコンで示す
+ * （読み上げ用の文字は .visually-hidden で残している）。
+ */
+.dr-day__review {
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+  margin: 3px 0 0;
+  font-size: var(--fs-2xs);
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+/* 教科チップ（または限数・掌握度）の下に来る最初のまとめ行は間隔を広げる */
+.dr-day__subjects + .dr-day__review,
+.dr-day__meta + .dr-day__review {
+  margin-top: 6px;
+}
+
+/* アイコンは 1 行目の高さに合わせ、本文だけを省略する */
+.dr-day__review-icon {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--color-text-subtle);
+}
+
+.dr-day__review-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* 今夜の勉強内容は 1 行だけ（振り返りより下に出す） */
+.dr-day__review--homework {
+  color: var(--color-text-subtle);
+}
+
+.dr-day__review--homework .dr-day__review-text {
+  -webkit-line-clamp: 1;
+}
+
+.dr-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.dr-legend__swatch {
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+}
+
+.dr-legend__swatch--submitted { background: var(--color-success-soft); border-color: var(--color-success); }
+.dr-legend__swatch--draft { background: var(--color-warning-soft); border-color: var(--color-warning); }
+.dr-legend__swatch--missing { background: var(--color-surface-alt); }
+.dr-legend__swatch--rest { background: var(--danger-50); border-color: var(--danger-600); }
+
+/* 授業カードの 4 つの見せ方の凡例（主科・副科・推定・空き） */
+.dr-card-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-card-legend__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* カードと同じ手がかり（下地・線の太さ・線の種類）で小さく見せる */
+.dr-card-legend__swatch {
+  width: 1.5rem;
+  height: 0.9rem;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--dr-subject-tone, var(--color-border-strong));
+  border-radius: 3px;
+}
+
+.dr-card-legend__swatch--main {
+  background: var(--dr-subject-soft, var(--color-surface));
+  border-left-width: 4px;
+}
+
+.dr-card-legend__swatch--minor {
+  background: var(--color-surface);
+}
+
+.dr-card-legend__swatch--inferred {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-text-subtle) 9%, transparent) 0 4px,
+      transparent 4px 8px
+    ),
+    var(--color-surface);
+  border-style: dashed;
+  border-left-color: var(--color-border-strong);
+}
+
+.dr-card-legend__swatch--blank {
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  border-left-width: 1px;
+}
+
+/* 教科の色の凡例 */
+.dr-subject-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin: var(--sp-2) 0 0;
+}
+
+.dr-subject-legend__title {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/* 週の時間割 */
+.dr-timetable th,
+.dr-timetable td {
+  text-align: center;
+}
+
+.dr-timetable__subject {
+  display: block;
+  font-weight: 600;
+}
+
+.dr-timetable__count {
+  display: block;
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.dr-timetable__cell--off {
+  color: var(--color-text-subtle);
+}
+
+/* 曜日ヘッダの提出マーク */
+.dr-weekday {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.dr-weekday__mark {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.dr-weekday__mark--done {
+  color: var(--color-success);
+}
+
+.dr-weekday__mark--missing {
+  color: var(--color-danger);
+}
+
+/* 1 日の詳細 */
+.dr-detail__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.dr-detail__ratings {
+  display: flex;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  margin: var(--sp-3) 0 0;
+}
+
+.dr-rating {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.dr-rating__value {
+  font-weight: 700;
+  font-size: var(--fs-lg);
+}
+
+.dr-lessons {
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.dr-lesson {
+  display: grid;
+  grid-template-columns: 3.5rem 6rem minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: baseline;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.dr-lesson__period {
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+
+.dr-lesson__subject {
+  font-weight: 600;
+}
+
+.dr-lesson__content {
+  color: var(--color-text-muted);
+}
+
+.dr-text-block {
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  white-space: pre-wrap;
+}
+
+.dr-text-block__label {
+  display: block;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-empty {
+  padding: var(--sp-5);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+/* 展開した週の課表（カレンダーの行の下に出る） */
+.dr-week-panel {
+  margin: var(--sp-2) 0 var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.dr-week-table th,
+.dr-week-table td {
+  text-align: center;
+  vertical-align: top;
+}
+
+/* 授業のマス（押すと日報の入力が開く） */
+.dr-lesson-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.dr-lesson-cell:hover {
+  border-color: var(--color-primary);
+}
+
+.dr-lesson-cell__subject {
+  font-weight: 600;
+}
+
+.dr-lesson-cell__meta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/* 推定（まだ記録が無い）マスは破線にして、記録済みと区別する */
+.dr-lesson-cell--inferred {
+  border-style: dashed;
+  color: var(--color-text-muted);
+}
+
+.dr-lesson-cell--blank {
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-subtle);
+  border-style: dashed;
+}
+
+/* 開いている週の日 */
+.dr-day--open {
+  border-color: var(--color-primary);
+}
+
+/* 展開した週は、マスを縦に伸ばして授業の詳細とその日のまとめを並べる */
+.dr-day--expanded {
+  min-height: 16rem;
+  cursor: pointer;
+}
+
+/* 展開したマスの日付とバッジは読みやすくする */
+.dr-day--expanded .dr-day__num {
+  font-size: var(--fs-lg);
+}
+
+.dr-day__lessons {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: var(--sp-1) 0 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+
+/*
+ * マスの中の 1 授業（押すと日報の入力が開く）。
+ * 教科の色は左の帯と見出しの色で示す（背景は塗らない: 暗色テーマでも読めるように）。
+ */
+/*
+ * 授業カード。記録済み（提出済）と推定（未提出）で **高さを完全に揃える**。
+ * 高さを固定し、中身は 1 行ずつ省略表示にする（長い授業内容や推定の案内で
+ * カードの高さが変わらないようにするため）。
+ */
+.dr-lesson-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  height: 4.5rem;
+  overflow: hidden;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--dr-subject-tone, var(--color-border-strong));
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.dr-lesson-card:hover,
+.dr-lesson-card:focus-visible {
+  border-color: var(--color-primary);
+  border-left-color: var(--dr-subject-tone, var(--color-primary));
+  outline: none;
+}
+
+.dr-lesson-card:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.dr-lesson-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  width: 100%;
+}
+
+.dr-lesson-card__period {
+  color: var(--color-text-subtle);
+}
+
+.dr-lesson-card__subject {
+  /* 教科名は教科色（本文は通常の色のまま） */
+  color: var(--dr-subject-tone, var(--color-text));
+  font-weight: 700;
+}
+
+.dr-lesson-card__mark {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.dr-lesson-card__mark--inferred {
+  color: var(--color-text-subtle);
+}
+
+/*
+ * 授業を消したあとの「空き」の枠。
+ * 高さは他のカードと同じにして、**下のカードが上に詰まらない**ようにする。
+ */
+.dr-lesson-card--blank {
+  border-style: dashed;
+  /* 左帯は付けない（推定の破線の帯とも区別する） */
+  border-left-width: 1px;
+  border-left-color: var(--color-border);
+  padding-left: calc(var(--sp-2) + 2px);
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: default;
+}
+
+.dr-lesson-card--blank:hover {
+  border-color: var(--color-border);
+  border-left-color: var(--color-border);
+}
+
+/* 授業カードの削除（× ではなくゴミ箱。赤はアイコンだけ） */
+.dr-lesson-card__delete {
+  margin-left: var(--sp-1);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.dr-lesson-card__delete:hover {
+  color: var(--color-danger);
+}
+
+.dr-lesson-card__delete:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.dr-lesson-card__content {
+  display: block;
+  color: var(--color-text-muted);
+  line-height: 1.35;
+  /* 1 行に収める（はみ出す分は「…」で省略。高さを揃えるため） */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dr-lesson-card__content--inferred {
+  font-style: italic;
+}
+
+.dr-lesson-card__note {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--color-info);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ノートの情報が無いカードでも 3 行ぶんの高さを保つ（推定のカードと揃える） */
+.dr-lesson-card__note--placeholder {
+  visibility: hidden;
+}
+
+/* 推定（まだ記録が無い）授業は破線で区別する */
+/*
+ * 推定（まだ記録していない時限）。記録済みとは **斜線の下地＋灰色の破線** で区別する。
+ * 教科の色は使わない（まだ確定していないため）。
+ */
+.dr-lesson-card--inferred {
+  background:
+    repeating-linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--color-text-subtle) 9%, transparent) 0 5px,
+      transparent 5px 11px
+    ),
+    var(--color-surface);
+  border-style: dashed;
+  border-left-width: 3px;
+  border-left-color: var(--color-border-strong);
+  color: var(--color-text-muted);
+}
+
+/* 推定は主科でも破線のまま（記録済みと見分けが付かなくなるため） */
+.dr-lesson-card--inferred:not(.dr-subject--minor) {
+  border-left-style: dashed;
+}
+
+.dr-lesson-card--inferred .dr-lesson-card__subject {
+  color: var(--color-text-muted);
+}
+
+/* その日のまとめ（4 観点・振り返り・宿題） */
+.dr-day__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--sp-1) 0 0;
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--color-border);
+  font-size: var(--fs-2xs);
+}
+
+.dr-day__summary-row {
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+  margin: 0;
+}
+
+.dr-day__summary-row dt {
+  color: var(--color-text-subtle);
+}
+
+/* 項目名はアイコン（振り返り＝ペン / 今夜の勉強＝月）。本文の 1 行目に合わせる */
+.dr-day__summary-label {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-subtle);
+}
+
+.dr-day__summary-row dd {
+  margin: 0 var(--sp-1) 0 0;
+  font-weight: 600;
+}
+
+/*
+ * 文章の行（振り返り・今夜の勉強）は、アイコンの右に本文を続けて出す。
+ * 折り返してもアイコンは 1 行目に残る（未展開のマスの見せ方と揃える）。
+ */
+.dr-day__summary-row--text {
+  align-items: flex-start;
+  flex-wrap: nowrap;
+  gap: 3px;
+}
+
+.dr-day__summary-row--text dd {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+/* 展開したマスの中の操作（授業追加・当日まとめ・提出） */
+.dr-day__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: auto;
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--color-border);
+}
+
+.dr-day__actions .btn {
+  justify-content: center;
+}
+
+/* 上の 2 つ（授業追加・当日まとめ）は文字数が違っても同じ幅で 1 行に並べる */
+.dr-day__actions .btn--sm {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* 提出は 1 行まるごと（押しやすいように） */
+.dr-day__actions .btn--primary {
+  flex: 1 1 100%;
+}
+
+/*
+ * 細い列（日曜）のときだけ、ボタンを **1 つずつ縦に並べる**（ユーザーの指定）。
+ * 幅が足りないまま 1 行に押し込むと、文字が切れてどちらのボタンか分からなくなるため。
+ * 列の幅で切り替えるので、7 日とも同じ幅の月（日曜に授業がある月）では今までどおり 1 行。
+ */
+@container (max-width: 130px) {
+  .dr-day__actions {
+    flex-direction: column;
+  }
+
+  /* 縦並びでは flex-basis が高さになるので、伸縮を切り替える */
+  .dr-day__actions .btn,
+  .dr-day__actions .btn--sm,
+  .dr-day__actions .btn--primary {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+
+  /*
+   * ラベルは折り返して全部見せる（文字を切らない）。
+   * アイコンは隠して、その幅をラベルに回す。
+   */
+  .dr-day__actions .btn {
+    height: auto;
+    min-height: var(--control-sm);
+    padding: 2px 2px;
+    /* 1 文字ぶんでも多く入るように、細い列だけ文字を小さくする */
+    font-size: var(--fs-2xs);
+    line-height: 1.25;
+    white-space: normal;
+    text-align: center;
+  }
+
+  .dr-day__actions .btn .icon {
+    display: none;
+  }
+}
+
+/* 掌握度の星 */
+.dr-stars {
+  color: var(--color-warning);
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.dr-stars--lg {
+  font-size: var(--fs-lg);
+}
+
+.dr-lesson-card__note--muted {
+  color: var(--color-text-subtle);
+}
+
+/* 授業編集・日まとめダイアログのフォーム（項目ごとに区切って並べる） */
+.dr-form__section {
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dr-form__section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.dr-form__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.dr-form__hint {
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+  color: var(--color-text-muted);
+}
+
+.dr-form__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin-bottom: var(--sp-2);
+}
+
+.dr-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-2);
+}
+
+.dr-form__grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+@media (max-width: 720px) {
+  .dr-form__grid,
+  .dr-form__grid--three {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.dr-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.dr-field--wide {
+  grid-column: span 1;
+}
+
+.dr-field--block {
+  grid-column: 1 / -1;
+}
+
+.dr-field__label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+/* 押すと入力できるチップ（よく使う教科・理由の候補） */
+.dr-chip--button {
+  background: transparent;
+  font: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dr-chip--button:hover {
+  background: var(--color-surface-alt);
+}
+
+/* 提出の確認ダイアログの一覧 */
+.dr-submit-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dr-submit-list li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.dr-submit-list__period {
+  color: var(--color-text-subtle);
+  flex: 0 0 auto;
+}
+
+.dr-submit-list__content {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-muted);
+  overflow-wrap: anywhere;
+}
+
+.dr-submit-list__mark {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+/* カレンダーの下の操作（記録の追加・提出） */
+.dr-actions {
+  margin-top: var(--sp-3);
+}
+
+.dr-actions__body {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.dr-actions__target {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.dr-actions__label {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-actions__date {
+  font-weight: 700;
+}
+
+.dr-actions__meta {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.dr-actions__spacer {
+  margin-left: auto;
+}
+
+.dr-actions__note {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+/* 旧・行の下に出すパネルと大きな授業マスは使わない */
+.dr-week-panel,
+.dr-lesson-cell {
+  display: none;
+}
