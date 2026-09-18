@@ -43,18 +43,20 @@ describe('バッチのタブ分け', () => {
     ])
   })
 
-  it('AI生図のバッチは batC51（AI 生成）と batC52（AI 画図助手）が「図形管理」に入る', () => {
-    for (const taskCode of ['batC51', 'batC52']) {
+  it('AI生図のバッチは batC51-A〜D（AI 生成）と batC52（AI 画図助手）が「図形管理」に入る', () => {
+    for (const taskCode of ['batC51-A', 'batC51-B', 'batC51-C', 'batC51-D', 'batC52']) {
       expect(groupTitleOf(row({ taskCode, pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
     }
     // 設定ページからの推定も効く（タスクコード表に無い将来のバッチの保険）
     expect(groupTitleOf(row({ taskCode: 'batC59', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
   })
 
-  it('廃止した batC53 はタスク表に無い（構成変更: AI を呼ぶ batC51 だけがバッチ）', () => {
-    // batC51（AI 生成）と batC52（AI 画図助手）は表にある（batC52 は番号を再利用。消さない）
-    expect(groupTitleOf(row({ taskCode: 'batC51', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
+  it('廃止した batC53 と裸の batC51 はタスク表に無い（構成変更: AI 生成はモード別の 4 バッチ）', () => {
+    // batC51-A〜D（AI 生成）と batC52（AI 画図助手）は表にある（batC52 は番号を再利用。消さない）
+    expect(groupTitleOf(row({ taskCode: 'batC51-A', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
     expect(groupTitleOf(row({ taskCode: 'batC52', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
+    // モードが無い時代の裸の batC51 は 2026-09-19 に削除した（表からも外す）
+    expect(groupTitleOf(row({ taskCode: 'batC51', pageCode: null }))).toBe('その他')
     // 表から外した batC53 も、設定ページが分かれば「図形管理」に落ちる＝「その他」に行かない
     expect(groupTitleOf(row({ taskCode: 'batC53', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
     // 設定ページが無い古い行でも落ちない（「その他」に入れて表示する）
@@ -65,17 +67,17 @@ describe('バッチのタブ分け', () => {
 
   it('古い実行履歴（batC53）が混ざっていてもタブ分けが落ちない', () => {
     const tabs = buildBatchTabs([
-      row({ taskCode: 'batC51', pageCode: 'GEOMETRY_AI' }),
+      row({ taskCode: 'batC51-A', pageCode: 'GEOMETRY_AI' }),
       row({ taskCode: 'batC52', pageCode: 'GEOMETRY_AI' }),
       row({ taskCode: 'batC53', pageCode: null })
     ])
 
     // 「すべて」に 3 件そのまま出る（コードは画面がそのまま表示する）
     expect(tabs.find((tab) => tab.key === 'all')?.rows.map((item) => item.taskCode))
-      .toEqual(['batC51', 'batC52', 'batC53'])
+      .toEqual(['batC51-A', 'batC52', 'batC53'])
     // 「図形管理」タブに 2 件、「その他」に 1 件（設定ページが分からない古い batC53）
     expect(tabs.find((tab) => tab.key === '図形管理')?.rows.map((item) => item.taskCode))
-      .toEqual(['batC51', 'batC52'])
+      .toEqual(['batC51-A', 'batC52'])
     expect(tabs.find((tab) => tab.key === 'その他')?.rows.map((item) => item.taskCode)).toEqual(['batC53'])
   })
 

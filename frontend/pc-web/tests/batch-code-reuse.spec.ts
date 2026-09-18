@@ -11,10 +11,11 @@ import type { BatchExecutionRow, BatchTaskRow } from '@/api/batch'
  * バッチコードの再利用（batC52）と、廃止した batC53 が混ざった実行履歴。
  *
  * 2026-09 の構成変更で AI 生図のパイプラインは
- *   ・**batC51**＝AI 生成（旧 batC52 の改名）
+ *   ・**batC51-A〜D**＝AI 生成（**作図モードごとに 1 バッチ**）
  *   ・**batC52**＝AI 画図助手（空いた番号を**再利用**）
  *   ・画像の取込・前処理／コマンドの検証・確定は**バッチではない**（batC53 は廃止）
- * となった。`BAT_バッチ実行履歴情報` には**古い履歴（旧 batC52＝AI 生成、batC53＝検証）が残っており**、
+ * となった。モードが無い時代の**裸の batC51 は 2026-09-19 に削除**したが、
+ * `BAT_バッチ実行履歴情報` には**古い履歴（裸の batC51＝当時の AI 生成、batC53＝検証）が残っており**、
  * 同じ `batC52` に「旧・AI 生図の履歴」と「新・AI 画図助手の履歴」が同居する
  * （見分けは `要求内容` の `aiRequestId`／`assistId`。過去の行は消さない）。
  *
@@ -49,7 +50,7 @@ function executionRow(overrides: Partial<BatchExecutionRow> = {}): BatchExecutio
 
 function taskRow(overrides: Partial<BatchTaskRow> = {}): BatchTaskRow {
   return {
-    taskCode: 'batC51', taskType: 'C', description: 'AI 生図（AI 生成）', active: true, activeVersion: 1,
+    taskCode: 'batC51-A', taskType: 'C', description: 'AI 生図 画像をもとに再現', active: true, activeVersion: 1,
     lastRunAt: null, canToggleActive: false, canManualRerun: false, canRerun: true, runsOnStartup: false, loopEveryMinutes: null,
     minuteOfHour: null, pageCode: 'GEOMETRY_AI', requiredSettings: [], settingsComplete: true,
     missingSettings: [], latestStatus: null, latestStartTime: null, latestEndTime: null,
@@ -89,8 +90,10 @@ beforeEach(() => {
 })
 
 describe('バッチコード batC52 の再利用（AI 生図 → AI 画図助手）', () => {
-  it('batC51 と batC52 は「図形管理」、廃止した batC53 は表に無い（設定ページから推定）', () => {
-    expect(groupTitleOf(taskRow({ taskCode: 'batC51', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
+  it('batC51-A〜D と batC52 は「図形管理」、廃止した batC53 は表に無い（設定ページから推定）', () => {
+    for (const taskCode of ['batC51-A', 'batC51-B', 'batC51-C', 'batC51-D']) {
+      expect(groupTitleOf(taskRow({ taskCode, pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
+    }
     // batC52 は空いた番号を AI 画図助手に再利用（消さない）
     expect(groupTitleOf(taskRow({ taskCode: 'batC52', pageCode: 'GEOMETRY_AI' }))).toBe('図形管理')
     // batC53 はバッチではなくなった（表から外した）。設定ページが分かれば「図形管理」に落ちる
@@ -100,14 +103,14 @@ describe('バッチコード batC52 の再利用（AI 生図 → AI 画図助手
     expect(groupTitleOf(taskRow({ taskCode: 'batC54', pageCode: null }))).toBe('その他')
   })
 
-  it('旧 batC52（AI 生図）と新 batC52（AI 画図助手）が同じタブにまとまる', () => {
+  it('モード別の AI 生成と AI 画図助手が同じタブにまとまる', () => {
     const tabs = buildBatchTabs([
-      taskRow({ taskCode: 'batC51', pageCode: 'GEOMETRY_AI' }),
+      taskRow({ taskCode: 'batC51-A', pageCode: 'GEOMETRY_AI' }),
       taskRow({ taskCode: 'batC52', pageCode: 'GEOMETRY_AI' })
     ])
 
     const group = tabs.find((tab) => tab.key === '図形管理')
-    expect(group?.rows.map((row) => row.taskCode)).toEqual(['batC51', 'batC52'])
+    expect(group?.rows.map((row) => row.taskCode)).toEqual(['batC51-A', 'batC52'])
   })
 
   it('実行履歴の「対象」列: 種別ごとの表示と、分からない行は「—」', () => {
@@ -133,6 +136,23 @@ describe('バッチコード batC52 の再利用（AI 生図 → AI 画図助手
     expect(batchTargetLabel({ requestPayload: '{"assistId":12}' })).toBe('画図助手 #12')
     expect(batchTargetLabel({ requestPayload: '{"noteId":89}' })).toBe('授業ノート #89')
     expect(batchTargetLabel({ requestPayload: '{}' })).toBe('—')
+  })
+
+  it('削除した裸の batC51 の履歴は今までどおり出る（定義が無くてもコードをそのまま表示する）', async () => {
+    // 裸の batC51（モードが無い時代の AI 生成）は 2026-09-19 にバッチごと削除したが、
+    // BAT_バッチ実行履歴情報 には当時の行が残っている（消さない）。履歴画面はタスク定義に
+    // 依存せず**コードをそのまま**表示し、絞り込みの候補も履歴の実データから作る
+    const { wrapper } = await setup({
+      executions: [executionRow({ batchCode: 'batC51', message: 'AI がコマンドを 5 件生成しました。' })]
+    })
+
+    const rows = wrapper.findAll('[data-execution-id]')
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.findAll('td')[1]?.text()).toBe('batC51')
+    expect(wrapper.text()).toContain('AI がコマンドを 5 件生成しました。')
+    const options = wrapper.findAll('select[aria-label="バッチコード"] option')
+      .map((option) => option.attributes('value'))
+    expect(options).toContain('batC51')
   })
 
   it('同じ batC52 に旧形式と新形式の履歴が混ざっても実行履歴の一覧が壊れない', async () => {

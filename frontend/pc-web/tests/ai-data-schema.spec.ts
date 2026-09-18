@@ -3,7 +3,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import AiDataSchemaPanel from '@/features/system-settings/AiDataSchemaPanel.vue'
 
 /**
- * 設定ページの **Data TAB**（AI 出力データ構造の表示。batC51 / batC52 で共用）。
+ * 設定ページの **Data TAB**（AI 出力データ構造の表示。batC51-A〜D / batC52 で共用）。
  *
  * DTO が唯一の定義なので、画面はサーバーが DTO から生成した JSON Schema を出すだけ。
  * ここでは
@@ -55,10 +55,10 @@ function setup(options: { fail?: boolean } = {}): { wrapper: VueWrapper; urls: s
         })
       )
     }
-    return Promise.resolve(jsonResponse({ taskCode: 'batC51', dto: 'BatC51ResultDto', schema: SCHEMA }))
+    return Promise.resolve(jsonResponse({ taskCode: 'batC51-A', dto: 'BatC51AResultDto', schema: SCHEMA }))
   })
   vi.stubGlobal('fetch', fetchMock)
-  const wrapper = mount(AiDataSchemaPanel, { props: { task: 'batC51' } })
+  const wrapper = mount(AiDataSchemaPanel, { props: { task: 'batC51-A' } })
   return { wrapper, urls }
 }
 
@@ -85,7 +85,7 @@ describe('設定ページ：Data TAB（AI 出力スキーマ）', () => {
     await flushPromises()
 
     expect(context.urls[0]).toContain('/api/admin/setting/ai-response-schema')
-    expect(context.urls[0]).toContain('task=batC51')
+    expect(context.urls[0]).toContain('task=batC51-A')
   })
 
   it('項目構造に フィールド名・型・説明・必須 を出す', async () => {

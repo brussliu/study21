@@ -12,8 +12,6 @@ import {
   deleteJpnWord,
   fetchJpnWord,
   searchJpnWords,
-  setJpnWordFavorite,
-  setJpnWordLearned,
   updateJpnWord,
   type JpnCollection,
   type JpnWord,
@@ -31,17 +29,22 @@ import '@/features/japanese/japanese.css'
  * 2.0 の `japanese_word.jsp`（＋ `js/japanese_word.js`）を 2.1 のデザインで作り直した画面。
  * データは移行済みの `JPN_*` テーブル（約 9,847 語）を API で読み書きする。
  *
- * ・検索条件（キーワード・JLPT レベル・品詞・書籍・分類（From／To））
+ * ・検索条件（キーワード・JLPT レベル・品詞・書籍・分類（From ～ To）を 1 行にまとめる）
  * ・単語一覧（操作 / JLPTレベル / 単語ID / 書籍 / 分類 / 単語 / 読み方 / 品詞 / 中国語訳 /
  *   取得状態（A・B，C，D，E）。操作はアイコンボタンだけを左端に置く。1 ページ 20/50/100 件）
- * ・単語の登録・修正・削除、お気に入り／習得済の切り替え
- * ・単語の詳細（収録・語義・例文・発音・コロケーション・関連語・使用注意・問題）
+ *   JLPTレベル・単語ID・書籍・取得状態は幅を詰め、空いた幅を中国語訳に回す
+ * ・単語の登録・修正・削除（お気に入り・習得済の切り替えは一覧のアイコンを外したので、
+ *   いまは画面から操作できない。API と単語のデータには残っている）
+ * ・単語の詳細（収録・基本情報・語義・例文・発音・コロケーション・関連語・使用注意・問題を
+ *   タブで切り替える。2.0 の詳細の項目をすべて出す）
  *
  * 右上の A〜E 取得（詳細情報・読み問題・文脈問題・漢字問題）は、**取得用の API がまだ無い**
  * ため無効のボタンとして置く（押せない理由は title に出す）。
  *
  * 一覧 API が持っていない情報は、画面側で次のように補っている。
  * ・書籍・分類の選択肢 … 選択肢一覧を返す API が無いので、読み込んだ単語の値から作る
+ * ・品詞の選択肢 … `品詞` は `[名・他サ]` のような組み合わせのラベルで 65 種類あるため、
+ *   代表の区分だけを並べる（絞り込みは部分一致なので「名」「サ」で複合ラベルにも当たる）
  * ・分類（To）… API は `category` を 1 つしか受け取らないため、送るのは From だけ
  * ・中国語訳・取得状態（A・B／C／D／E）… 一覧 API に項目が無いので「—」「未取得」を出す
  */
@@ -66,6 +69,18 @@ const CATEGORY_TO_TITLE = '分類（To）は API が未対応のため、絞り�
 
 /** JLPT レベルの選択肢（2.0 の日本語単語のレベル区分）。 */
 const JLPT_OPTIONS = ['N1', 'N2', 'N3', 'N4', 'N5']
+
+/**
+ * 品詞の選択肢（2.0 の教材が使う日本語の文法区分）。
+ *
+ * `JPN_単語情報.品詞` の実データは `[名]` / `[名・他サ]` のような**組み合わせ**のラベルで
+ * 65 種類あるため、全部を並べずに**代表の区分**だけを選べるようにする。
+ * 絞り込みは API の部分一致（`ILIKE '%…%'`）なので「名」「サ」で複合ラベルにも当たる。
+ */
+const PART_OPTIONS = [
+  '名', '代', '副', '形', '形動', '連体', '接', '感', '助', '接頭', '接尾',
+  '五段', '下一段', '上一段', 'サ変'
+]
 
 /** 単語の状態（`stateCode`）。 */
 type WordState = 'ACTIVE' | 'INACTIVE'
@@ -192,35 +207,7 @@ function changeSize(): void {
   void loadWords()
 }
 
-/* ---------- お気に入り・習得済 ---------- */
 
-async function toggleFavorite(row: JpnWord): Promise<void> {
-  if (busy.value) return
-  busy.value = true
-  try {
-    const response = await setJpnWordFavorite(row.wordId, !row.favorite)
-    toast.success(response.data.message)
-    await loadWords()
-  } catch (caught) {
-    toast.danger(messageOf(caught, 'お気に入りを更新できませんでした。'))
-  } finally {
-    busy.value = false
-  }
-}
-
-async function toggleLearned(row: JpnWord): Promise<void> {
-  if (busy.value) return
-  busy.value = true
-  try {
-    const response = await setJpnWordLearned(row.wordId, !row.learned)
-    toast.success(response.data.message)
-    await loadWords()
-  } catch (caught) {
-    toast.danger(messageOf(caught, '習得済を更新できませんでした。'))
-  } finally {
-    busy.value = false
-  }
-}
 
 /** 単語を削除する（語義・例文・問題などは DB の CASCADE で一緒に消える）。 */
 async function removeWord(row: JpnWord): Promise<void> {
@@ -697,56 +684,57 @@ onMounted(() => {
         </div>
       </div>
       <div class="filters">
-        <div class="filters__row">
-          <span class="filter-item filter-item--grow">
+        <!-- 条件は 1 行にまとめる（狭い画面では折り返して縦に積む）。
+             伸びるのはキーワードだけにして、ほかの条件は内容ぶんの幅にする -->
+        <div class="filters__row jp-filters__row">
+          <span class="filter-item filter-item--grow jp-filters__keyword">
             <span class="filter-item__label">キーワード：</span>
             <input
               v-model="filters.keyword" class="input" type="search" data-jp-filter="keyword"
               placeholder="見出し語の一部" @keyup.enter="search"
             >
           </span>
-          <span class="filter-item">
-            <span class="filter-item__label">JLPTレベル：</span>
+          <span class="filter-item jp-filters__jlpt">
+            <span class="filter-item__label">JLPT：</span>
             <select v-model="filters.jlpt" class="select" data-jp-filter="jlpt" aria-label="JLPTレベル">
               <option value="">すべて</option>
               <option v-for="option in JLPT_OPTIONS" :key="option" :value="option">{{ option }}</option>
             </select>
           </span>
-          <span class="filter-item">
+          <span class="filter-item jp-filters__part">
             <span class="filter-item__label">品詞：</span>
-            <input
-              v-model="filters.part" class="input" type="search" data-jp-filter="part"
-              placeholder="例: 名詞" @keyup.enter="search"
-            >
+            <select v-model="filters.part" class="select" data-jp-filter="part" aria-label="品詞">
+              <option value="">（すべて）</option>
+              <option v-for="option in PART_OPTIONS" :key="option" :value="option">{{ option }}</option>
+            </select>
           </span>
-        </div>
-        <div class="filters__row">
-          <span class="filter-item">
+          <span class="filter-item jp-filters__book">
             <span class="filter-item__label">書籍：</span>
             <select v-model="filters.book" class="select" data-jp-filter="book" aria-label="書籍">
               <option value="">（すべて）</option>
               <option v-for="option in bookOptions" :key="option" :value="option">{{ option }}</option>
             </select>
           </span>
-          <span class="filter-item">
-            <span class="filter-item__label">分類（From）：</span>
-            <select
-              v-model="filters.categoryFrom" class="select" data-jp-filter="categoryFrom"
-              aria-label="分類（From）"
-            >
-              <option value="">（すべて）</option>
-              <option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option>
-            </select>
-          </span>
-          <span class="filter-item">
-            <span class="filter-item__label">分類（To）：</span>
-            <select
-              v-model="filters.categoryTo" class="select" data-jp-filter="categoryTo"
-              aria-label="分類（To）" :title="CATEGORY_TO_TITLE"
-            >
-              <option value="">（すべて）</option>
-              <option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option>
-            </select>
+          <!-- 分類の範囲は 1 つのまとまりにして、間を「～」で示す -->
+          <span class="filter-item" data-jp-filter-range>
+            <span class="filter-item__label">分類：</span>
+            <span class="range-input">
+              <select
+                v-model="filters.categoryFrom" class="select" data-jp-filter="categoryFrom"
+                aria-label="分類（From）"
+              >
+                <option value="">（すべて）</option>
+                <option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option>
+              </select>
+              <span class="range-input__sep" aria-hidden="true">～</span>
+              <select
+                v-model="filters.categoryTo" class="select" data-jp-filter="categoryTo"
+                aria-label="分類（To）" :title="CATEGORY_TO_TITLE"
+              >
+                <option value="">（すべて）</option>
+                <option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option>
+              </select>
+            </span>
           </span>
         </div>
       </div>
@@ -779,15 +767,16 @@ onMounted(() => {
           <thead>
             <tr>
               <th class="col-actions">操作</th>
-              <th>JLPTレベル</th>
-              <th>単語ID</th>
-              <th>書籍</th>
-              <th>分類</th>
-              <th>単語</th>
-              <th>読み方</th>
-              <th>品詞</th>
-              <th>中国語訳</th>
-              <th>取得状態（A・B，C，D，E）</th>
+              <th class="col-jp-jlpt">JLPTレベル</th>
+              <th class="col-jp-word-id">単語ID</th>
+              <th class="col-jp-book">書籍</th>
+              <th class="col-jp-category">分類</th>
+              <th class="col-jp-word">単語</th>
+              <th class="col-jp-reading">読み方</th>
+              <th class="col-jp-part">品詞</th>
+              <!-- 中国語訳は幅を取って読みやすくする（ほかの列を詰めて空きを作る） -->
+              <th class="col-jp-chinese">中国語訳</th>
+              <th class="col-jp-acquire">取得状態（A・B，C，D，E）</th>
             </tr>
           </thead>
           <tbody>
@@ -805,24 +794,6 @@ onMounted(() => {
                   data-jp-edit @click="openEdit(row)"
                 >
                   <AppIcon name="edit" size="sm" class="icon--edit" />
-                </button>
-                <button
-                  type="button" class="btn btn--icon btn--sm" :class="{ 'is-favorite': row.favorite }"
-                  :disabled="busy"
-                  :title="row.favorite ? 'お気に入りを解除' : 'お気に入りに登録'"
-                  :aria-label="row.favorite ? 'お気に入りを解除' : 'お気に入りに登録'"
-                  data-jp-favorite @click="toggleFavorite(row)"
-                >
-                  <AppIcon name="bookmark" size="sm" />
-                </button>
-                <button
-                  type="button" class="btn btn--icon btn--sm" :class="{ 'is-learned': row.learned }"
-                  :disabled="busy"
-                  :title="row.learned ? '習得済を解除' : '習得済にする'"
-                  :aria-label="row.learned ? '習得済を解除' : '習得済にする'"
-                  data-jp-learned @click="toggleLearned(row)"
-                >
-                  <AppIcon name="check-circle" size="sm" />
                 </button>
                 <button
                   type="button" class="btn btn--icon btn--sm is-danger" :disabled="busy"

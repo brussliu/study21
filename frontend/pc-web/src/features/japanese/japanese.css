@@ -76,32 +76,117 @@
   gap: var(--sp-1);
 }
 
+/* ---------- 単語情報管理の検索条件（1 行にまとめる） ---------- */
+
+/* 設計システムの .filter-item は中の .input に min-width: 150px を当てるので、
+   条件を 1 行に収めるために、ここで詰める列だけ上書きする */
+.jp-filters__row {
+  flex-wrap: wrap;
+  gap: var(--sp-3) var(--sp-4);
+}
+
+/* 伸びるのはキーワードだけ（ほかの条件は内容ぶんの幅のまま） */
+.jp-filters__keyword {
+  flex: 1 1 12rem;
+}
+
+.jp-filters__keyword .input {
+  width: 100%;
+}
+
+.jp-filters__jlpt .select {
+  min-width: 5.5rem;
+}
+
+.jp-filters__part .select {
+  min-width: 6rem;
+}
+
+.jp-filters__book .select {
+  min-width: 10rem;
+  max-width: 16rem;
+}
+
+/* 分類の範囲（From ～ To）は 2 つで 1 組。区切りの「～」の左右は詰める */
+.jp-filters__row .range-input {
+  gap: var(--sp-1);
+}
+
+.jp-filters__row .range-input .select {
+  min-width: 7rem;
+  max-width: 9rem;
+}
+
+/* 狭い画面では 1 行に潰さず、条件ごとに縦へ積む。
+   設計システムが検索条件を縦に積む幅（1024px）に合わせる。
+   これより広い幅では、一覧の表（--table-min: 960px）が本文を広げるため、
+   条件を横並びのままにするとキーワードが横へ伸びてしまう */
+@media (max-width: 1024px) {
+  .jp-filters__row > .filter-item {
+    flex: 1 1 100%;
+  }
+
+  .jp-filters__row .filter-item__label {
+    flex: 0 0 auto;
+  }
+
+  .jp-filters__row .select,
+  .jp-filters__row .range-input .select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
 /* ---------- 単語情報管理の一覧（操作はアイコンだけ） ---------- */
 
-/* 操作列は左端に置き、アイコンボタン 5 つぶんの幅を確保する
-   （設計システムの .col-actions は 120px で、アイコン 5 つには足りない） */
+/* 操作列は 詳細・修正・削除 の 3 つぶんの幅で足りる
+   （設計システムの .col-actions は 120px。アイコンを 2 つ外したぶん詰める） */
 .jp-words-table .col-actions {
-  width: 12rem;
+  width: 7.5rem;
 }
 
-/* お気に入り中・習得済みのアイコンボタンは色で示す
-   （お気に入りは黄色系、習得済みは緑。赤（is-danger）は削除専用） */
-.btn--icon.is-favorite {
-  color: var(--color-warning);
+/* 中国語訳の幅を稼ぐため、意味を持たない列は詰める。
+   `width` だけだと中身に押し広げられる（table-layout: auto）ので、min-width も同じ値にする */
+.jp-words-table .col-jp-jlpt {
+  width: 5.5rem;
+  min-width: 5.5rem;
 }
 
-.btn--icon.is-favorite:hover:not(:disabled) {
-  background: var(--color-warning-soft);
-  color: var(--color-warning);
+.jp-words-table .col-jp-word-id {
+  width: 5rem;
+  min-width: 5rem;
 }
 
-.btn--icon.is-learned {
-  color: var(--color-success);
+.jp-words-table .col-jp-book {
+  width: 11rem;
+  min-width: 11rem;
 }
 
-.btn--icon.is-learned:hover:not(:disabled) {
-  background: var(--color-success-soft);
-  color: var(--color-success);
+.jp-words-table .col-jp-category {
+  width: 6rem;
+  min-width: 6rem;
+}
+
+/* 見出しが長いので折り返して詰める。ただし詰めすぎると
+   A・B／C／D／E の 4 つが縦に積まれて行が高くなるので、
+   2 つ並ぶ幅（タグ 2 行ぶん）で止める */
+.jp-words-table .col-jp-acquire {
+  width: 10rem;
+  min-width: 10rem;
+  white-space: normal;
+}
+
+/* 空いた幅は中国語訳へ回す（表の残り幅をこの列が取る） */
+.jp-words-table .col-jp-chinese {
+  width: auto;
+  min-width: 14rem;
+}
+
+/* 中国語訳は長いので折り返して見せる（列幅をはみ出さない） */
+.jp-words-table [data-jp-chinese] {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 取得状態（A・B／C／D／E）。一覧 API が取得状態を返さない間は「未取得」を並べる */
@@ -112,6 +197,14 @@
   gap: var(--sp-2);
   color: var(--color-text-subtle);
   font-size: var(--fs-xs);
+  /* 4 つのタグで列を押し広げない（狭い列では折り返す） */
+  min-width: 0;
+}
+
+/* 折り返してよい（min-content を 1 文字ぶんまで下げて、列幅を押し広げない） */
+.jp-acquire__item {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .jp-acquire__item {

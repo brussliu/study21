@@ -15,9 +15,9 @@ export interface SettingFieldsResult {
 
 /** AI 出力データ構造（DTO）の JSON Schema（設定ページの Data TAB 用）。 */
 export interface AiResponseSchemaResult {
-  /** バッチコード（batC51 / batC52 など）。 */
+  /** バッチコード（batC51-A〜D / batC52 など）。 */
   taskCode: string
-  /** DTO のクラス名（例: BatC51ResultDto）。 */
+  /** DTO のクラス名（例: BatC51AResultDto）。 */
   dto: string
   /** DTO から生成された JSON Schema（サーバーが生成。画面に固定の定義は持たない）。 */
   schema: Record<string, unknown>

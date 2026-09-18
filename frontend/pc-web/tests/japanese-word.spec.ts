@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -438,7 +440,7 @@ describe('日本語勉強【単語情報管理】', () => {
 
     await wrapper.get('[data-jp-filter="keyword"]').setValue('勉強')
     await wrapper.get('[data-jp-filter="jlpt"]').setValue('N4')
-    await wrapper.get('[data-jp-filter="part"]').setValue('名詞')
+    await wrapper.get('[data-jp-filter="part"]').setValue('名')
     await wrapper.get('[data-jp-filter="book"]').setValue('日本語単語帳①')
     await wrapper.get('[data-jp-filter="categoryFrom"]').setValue('Unit001')
     await wrapper.get('[data-jp-filter="categoryTo"]').setValue('Unit001')
@@ -450,7 +452,7 @@ describe('日本語勉強【単語情報管理】', () => {
     expect(call?.url).toContain('/api/user/japanese/words?')
     expect(call?.url).toContain(`keyword=${encodeURIComponent('勉強')}`)
     expect(call?.url).toContain('jlpt=N4')
-    expect(call?.url).toContain(`part=${encodeURIComponent('名詞')}`)
+    expect(call?.url).toContain(`part=${encodeURIComponent('名')}`)
     expect(call?.url).toContain(`book=${encodeURIComponent('日本語単語帳①')}`)
     // API が受け取る分類は 1 つだけなので、送るのは From（To は送らない）
     expect(call?.url).toContain('category=Unit001')
@@ -475,6 +477,63 @@ describe('日本語勉強【単語情報管理】', () => {
     expect((wrapper.get('[data-jp-filter="categoryFrom"]').element as HTMLSelectElement).value).toBe('')
     expect((wrapper.get('[data-jp-filter="categoryTo"]').element as HTMLSelectElement).value).toBe('')
     expect(wrapper.find('[data-jp-filtered-count]').exists()).toBe(false)
+  })
+
+  it('品詞は選択式で、選ぶと部分一致の条件として送る', async () => {
+    const { wrapper, fetchMock } = await setup()
+
+    const part = wrapper.get('[data-jp-filter="part"]')
+    expect(part.element.tagName).toBe('SELECT')
+    // 2.0 の教材の品詞ラベルを選べる（先頭は絞り込みなし）
+    expect(part.findAll('option').map((option) => option.text())).toEqual([
+      '（すべて）', '名', '代', '副', '形', '形動', '連体', '接', '感', '助', '接頭', '接尾',
+      '五段', '下一段', '上一段', 'サ変'
+    ])
+
+    // 「名」は名詞の複合ラベル（[名・他サ] など）にも当たる部分一致として送る
+    await part.setValue('名')
+    await wrapper.get('[data-jp-search]').trigger('click')
+    await flushPromises()
+
+    const call = recorded(fetchMock).at(-1)
+    expect(call?.url).toContain(`part=${encodeURIComponent('名')}`)
+  })
+
+  it('検索条件は 1 行にまとめ、分類の範囲は「～」で挟む', async () => {
+    const { wrapper } = await setup()
+
+    // キーワードは 1 行目に収まる長さにする（伸びるのはキーワードだけ）
+    const filters = wrapper.get('.filters')
+    expect(filters.findAll('.filters__row').length).toBe(1)
+    expect(filters.find('.filter-item--grow [data-jp-filter="keyword"]').exists()).toBe(true)
+
+    // 分類（From ～ To）は 1 つのまとまりにして、間を「～」で示す
+    const range = wrapper.get('[data-jp-filter-range]')
+    const controls = range.findAll('[data-jp-filter]')
+    expect(controls.map((control) => control.attributes('data-jp-filter'))).toEqual(['categoryFrom', 'categoryTo'])
+    expect(range.get('.range-input__sep').text()).toBe('～')
+    expect(controls[0]?.attributes('aria-label')).toBe('分類（From）')
+    expect(controls[1]?.attributes('aria-label')).toBe('分類（To）')
+    // 「分類（From）：」という長い見出しは置かない
+    expect(filters.text()).not.toContain('分類（From）：')
+  })
+
+  it('検索条件は 1 行に 5 つ並び、狭い画面の見え方は CSS 側で切り替える', async () => {
+    const { wrapper } = await setup()
+
+    // 並びはテンプレート側で決まる（キーワード・JLPT・品詞・書籍・分類）
+    const items = wrapper.findAll('.jp-filters__row > .filter-item')
+    expect(items.length).toBe(5)
+    expect(items[0]?.classes()).toContain('jp-filters__keyword')
+    expect(items[4]?.attributes('data-jp-filter-range')).toBeDefined()
+
+    // 折り返して縦に積む規則は、jsdom にレイアウトが無いので CSS の規則そのものを確かめる。
+    // 実際の寸法は Chrome の実測（tmp/tools/check-jpn-word-detail.mjs）で見る。
+    const css = readFileSync(resolve(process.cwd(), 'src/features/japanese/japanese.css'), 'utf8')
+    const rule = css.slice(css.indexOf('@media (max-width: 1024px)'))
+    expect(rule).toContain('.jp-filters__row > .filter-item')
+    expect(rule).toContain('flex: 1 1 100%')
+    expect(rule).toContain('max-width: 100%')
   })
 
   it('書籍と分類の選択肢は、読み込んだ一覧の値から作る（（すべて）つき）', async () => {
@@ -525,7 +584,7 @@ describe('日本語勉強【単語情報管理】', () => {
     expect(wrapper.find('[data-jp-word-dialog]').exists()).toBe(true)
   })
 
-  it('操作列は左端のアイコンボタンで、状態は色で示す', async () => {
+  it('操作列は左端のアイコンボタン（詳細・修正・削除）', async () => {
     const { wrapper } = await setup()
 
     const row = wrapper.get('[data-jp-word-row="101"]')
@@ -533,8 +592,7 @@ describe('日本語勉強【単語情報管理】', () => {
     const actionCell = row.get('td')
     expect(actionCell.classes()).toContain('row-actions')
     const buttons = actionCell.findAll('button')
-    expect(buttons.map((button) => button.attributes('title')))
-      .toEqual(['詳細', '修正', 'お気に入りに登録', '習得済にする', '削除'])
+    expect(buttons.map((button) => button.attributes('title'))).toEqual(['詳細', '修正', '削除'])
     for (const button of buttons) {
       // アイコンだけ（文字を持たない）が、意味は aria-label で伝える
       expect(button.text()).toBe('')
@@ -542,12 +600,12 @@ describe('日本語勉強【単語情報管理】', () => {
       expect(button.attributes('aria-label')).toBeTruthy()
     }
 
-    // お気に入り中・習得済みは色（is-favorite / is-learned）で示す
-    const favoriteRow = wrapper.get('[data-jp-word-row="102"]')
-    expect(favoriteRow.get('[data-jp-favorite]').classes()).toContain('is-favorite')
-    expect(favoriteRow.get('[data-jp-favorite]').attributes('title')).toBe('お気に入りを解除')
-    expect(favoriteRow.get('[data-jp-learned]').classes()).toContain('is-learned')
-    expect(favoriteRow.get('[data-jp-learned]').attributes('title')).toBe('習得済を解除')
+    // お気に入り・習得済のアイコンは一覧から外した（操作は詳細・修正・削除の 3 つ）
+    expect(wrapper.findAll('[data-jp-words] tbody [data-jp-favorite]').length).toBe(0)
+    expect(wrapper.findAll('[data-jp-words] tbody [data-jp-learned]').length).toBe(0)
+    expect(wrapper.findAll('[data-jp-words] tbody [data-jp-detail]').length).toBe(2)
+    expect(wrapper.findAll('[data-jp-words] tbody [data-jp-edit]').length).toBe(2)
+    expect(wrapper.findAll('[data-jp-words] tbody [data-jp-delete]').length).toBe(2)
   })
 
   it('該当がなければその案内を出す', async () => {
@@ -673,38 +731,7 @@ describe('日本語勉強【単語情報管理】', () => {
     confirmSpy.mockRestore()
   })
 
-  it('お気に入りは PATCH で切り替える', async () => {
-    const { wrapper, fetchMock } = await setup()
 
-    await wrapper.get('[data-jp-word-row="101"] [data-jp-favorite]').trigger('click')
-    await flushPromises()
-
-    const patch = recorded(fetchMock).find(
-      (entry) => entry.method === 'PATCH' && entry.url.endsWith('/favorite')
-    )
-    expect(patch?.url).toBe('/api/user/japanese/words/101/favorite')
-    expect(patch?.body).toEqual({ favorite: true })
-    expect(toastMessages()).toContain('お気に入りに登録しました。')
-  })
-
-  it('習得済は PATCH で切り替える', async () => {
-    const { wrapper, fetchMock } = await setup()
-
-    // 未習得の単語は「習得済にする」
-    expect(wrapper.get('[data-jp-word-row="101"] [data-jp-learned]').attributes('title')).toBe('習得済にする')
-    // 習得済みの単語は「習得済を解除」
-    expect(wrapper.get('[data-jp-word-row="102"] [data-jp-learned]').attributes('title')).toBe('習得済を解除')
-
-    await wrapper.get('[data-jp-word-row="101"] [data-jp-learned]').trigger('click')
-    await flushPromises()
-
-    const patch = recorded(fetchMock).find(
-      (entry) => entry.method === 'PATCH' && entry.url.endsWith('/learned')
-    )
-    expect(patch?.url).toBe('/api/user/japanese/words/101/learned')
-    expect(patch?.body).toEqual({ learned: true })
-    expect(toastMessages()).toContain('習得済にしました。')
-  })
 
   it('詳細ダイアログに収録・語義・例文・問題を出す', async () => {
     const { wrapper, fetchMock } = await setup()
