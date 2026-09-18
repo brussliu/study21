@@ -29,6 +29,36 @@ function gameRoutes(area: AppArea): RouteRecordRaw[] {
   ]
 }
 
+/**
+ * 授業録音 / AI 授業記録（3 エリアで同じ画面を使う）。
+ * 「1 機能 = 1 ルート」で、一覧 → 録音中 → 詳細 を別ルートにする。
+ * **新しい授業は一覧の dialog**（ページ遷移しない。利用者の指示）なので、専用のルートは置かない。
+ * すべてフロントエンドだけで動作し、バックエンド（録音・STT・AI）はまだ無い。
+ */
+function classroomRoutes(area: AppArea): RouteRecordRaw[] {
+  const layout = area === 'admin' ? 'admin' : 'user'
+  return [
+    {
+      path: 'classroom',
+      name: `${area}-classroom`,
+      component: () => import('@/views/classroom/ClassroomListView.vue'),
+      meta: { title: '授業録音', layout }
+    },
+    {
+      path: 'classroom/:id/live',
+      name: `${area}-classroom-live`,
+      component: () => import('@/views/classroom/ClassroomLiveView.vue'),
+      meta: { title: '録音中', layout }
+    },
+    {
+      path: 'classroom/:id',
+      name: `${area}-classroom-detail`,
+      component: () => import('@/views/classroom/ClassroomDetailView.vue'),
+      meta: { title: '授業詳細', layout }
+    }
+  ]
+}
+
 export const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/login' },
   {
@@ -102,6 +132,7 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'admin' }
       },
       ...gameRoutes('admin'),
+      ...classroomRoutes('admin'),
       {
         path: 'site',
         name: 'admin-site',
@@ -155,6 +186,58 @@ export const routes: RouteRecordRaw[] = [
         name: 'admin-study-monitor',
         component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
         meta: { title: '学習状況モニター', layout: 'admin' }
+      },
+      // 読書管理（親メニュー）。2.0 の英語読書を 書籍管理 / 書籍閲覧 に分けた
+      {
+        path: 'reading-books',
+        name: 'admin-reading-books',
+        component: () => import('@/views/reading/BookManagementView.vue'),
+        meta: { title: '書籍管理', layout: 'admin' }
+      },
+      {
+        path: 'reading-reader',
+        name: 'admin-reading-reader',
+        component: () => import('@/views/reading/BookReaderView.vue'),
+        meta: { title: '書籍閲覧', layout: 'admin' }
+      },
+      // 日本語勉強（単語情報管理・単語テスト・単語勉強状況）
+      {
+        path: 'japanese-word',
+        name: 'admin-japanese-word',
+        component: () => import('@/views/japanese/JapaneseWordView.vue'),
+        meta: { title: '単語情報管理', layout: 'admin' }
+      },
+      {
+        path: 'japanese-test',
+        name: 'admin-japanese-test',
+        component: () => import('@/views/japanese/JapaneseTestView.vue'),
+        meta: { title: '単語テスト', layout: 'admin' }
+      },
+      {
+        path: 'japanese-word-status',
+        name: 'admin-japanese-word-status',
+        component: () => import('@/views/japanese/JapaneseWordStatusView.vue'),
+        meta: { title: '単語勉強状況', layout: 'admin' }
+      },
+      // 数学勉強（図形管理・図形作成・AI 生図）。2.0 の geometry.jsp / geometry_draw.jsp
+      {
+        path: 'geometry',
+        name: 'admin-geometry',
+        component: () => import('@/views/geometry/GeometryView.vue'),
+        meta: { title: '図形管理', layout: 'admin' }
+      },
+      {
+        path: 'geometry-draw',
+        name: 'admin-geometry-draw',
+        component: () => import('@/views/geometry/GeometryDrawView.vue'),
+        meta: { title: '図形作成', layout: 'admin' }
+      },
+      {
+        // AI 生図（画像から作図）。画面（流れ）だけで処理は未実装
+        path: 'geometry-ai',
+        name: 'admin-geometry-ai',
+        component: () => import('@/views/geometry/GeometryAiView.vue'),
+        meta: { title: 'AI 生図', layout: 'admin' }
       },
       {
         path: ':screen',
@@ -211,6 +294,7 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('student'),
+      ...classroomRoutes('student'),
       {
         path: 'site',
         name: 'student-site',
@@ -264,6 +348,58 @@ export const routes: RouteRecordRaw[] = [
         name: 'student-study-monitor',
         component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
         meta: { title: '学習状況モニター', layout: 'user' }
+      },
+      // 読書管理（親メニュー）。2.0 の英語読書を 書籍管理 / 書籍閲覧 に分けた
+      {
+        path: 'reading-books',
+        name: 'student-reading-books',
+        component: () => import('@/views/reading/BookManagementView.vue'),
+        meta: { title: '書籍管理', layout: 'user' }
+      },
+      {
+        path: 'reading-reader',
+        name: 'student-reading-reader',
+        component: () => import('@/views/reading/BookReaderView.vue'),
+        meta: { title: '書籍閲覧', layout: 'user' }
+      },
+      // 日本語勉強（単語情報管理・単語テスト・単語勉強状況）
+      {
+        path: 'japanese-word',
+        name: 'student-japanese-word',
+        component: () => import('@/views/japanese/JapaneseWordView.vue'),
+        meta: { title: '単語情報管理', layout: 'user' }
+      },
+      {
+        path: 'japanese-test',
+        name: 'student-japanese-test',
+        component: () => import('@/views/japanese/JapaneseTestView.vue'),
+        meta: { title: '単語テスト', layout: 'user' }
+      },
+      {
+        path: 'japanese-word-status',
+        name: 'student-japanese-word-status',
+        component: () => import('@/views/japanese/JapaneseWordStatusView.vue'),
+        meta: { title: '単語勉強状況', layout: 'user' }
+      },
+      // 数学勉強（図形管理・図形作成・AI 生図）。2.0 の geometry.jsp / geometry_draw.jsp
+      {
+        path: 'geometry',
+        name: 'student-geometry',
+        component: () => import('@/views/geometry/GeometryView.vue'),
+        meta: { title: '図形管理', layout: 'user' }
+      },
+      {
+        path: 'geometry-draw',
+        name: 'student-geometry-draw',
+        component: () => import('@/views/geometry/GeometryDrawView.vue'),
+        meta: { title: '図形作成', layout: 'user' }
+      },
+      {
+        // AI 生図（画像から作図）。画面（流れ）だけで処理は未実装
+        path: 'geometry-ai',
+        name: 'student-geometry-ai',
+        component: () => import('@/views/geometry/GeometryAiView.vue'),
+        meta: { title: 'AI 生図', layout: 'user' }
       },
       {
         path: ':screen',
@@ -320,6 +456,7 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('parent'),
+      ...classroomRoutes('parent'),
       {
         path: 'site',
         name: 'parent-site',
@@ -374,6 +511,58 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/study-monitor/StudyMonitorView.vue'),
         meta: { title: '学習状況モニター', layout: 'user' }
       },
+      // 読書管理（親メニュー）。2.0 の英語読書を 書籍管理 / 書籍閲覧 に分けた
+      {
+        path: 'reading-books',
+        name: 'parent-reading-books',
+        component: () => import('@/views/reading/BookManagementView.vue'),
+        meta: { title: '書籍管理', layout: 'user' }
+      },
+      {
+        path: 'reading-reader',
+        name: 'parent-reading-reader',
+        component: () => import('@/views/reading/BookReaderView.vue'),
+        meta: { title: '書籍閲覧', layout: 'user' }
+      },
+      // 日本語勉強（単語情報管理・単語テスト・単語勉強状況）
+      {
+        path: 'japanese-word',
+        name: 'parent-japanese-word',
+        component: () => import('@/views/japanese/JapaneseWordView.vue'),
+        meta: { title: '単語情報管理', layout: 'user' }
+      },
+      {
+        path: 'japanese-test',
+        name: 'parent-japanese-test',
+        component: () => import('@/views/japanese/JapaneseTestView.vue'),
+        meta: { title: '単語テスト', layout: 'user' }
+      },
+      {
+        path: 'japanese-word-status',
+        name: 'parent-japanese-word-status',
+        component: () => import('@/views/japanese/JapaneseWordStatusView.vue'),
+        meta: { title: '単語勉強状況', layout: 'user' }
+      },
+      // 数学勉強（図形管理・図形作成・AI 生図）。2.0 の geometry.jsp / geometry_draw.jsp
+      {
+        path: 'geometry',
+        name: 'parent-geometry',
+        component: () => import('@/views/geometry/GeometryView.vue'),
+        meta: { title: '図形管理', layout: 'user' }
+      },
+      {
+        path: 'geometry-draw',
+        name: 'parent-geometry-draw',
+        component: () => import('@/views/geometry/GeometryDrawView.vue'),
+        meta: { title: '図形作成', layout: 'user' }
+      },
+      {
+        // AI 生図（画像から作図）。画面（流れ）だけで処理は未実装
+        path: 'geometry-ai',
+        name: 'parent-geometry-ai',
+        component: () => import('@/views/geometry/GeometryAiView.vue'),
+        meta: { title: 'AI 生図', layout: 'user' }
+      },
       {
         path: ':screen',
         name: 'parent-screen',
@@ -403,6 +592,49 @@ export const routes: RouteRecordRaw[] = [
   { path: '/:pathMatch(.*)*', redirect: '/404' }
 ]
 
+/**
+ * 分割して読み込む画面（遅延読み込み）の取得に失敗したか。
+ *
+ * <p>配備で画面のファイル名（ハッシュ）が変わると、**開いたままのタブ**は古い名前を取りに行き、
+ * nginx が index.html を返す（＝MIME が違うので読み込めない）。実測: 授業の詳細へ進めず
+ * 「Failed to fetch dynamically imported module」が出て、そのまま操作できなくなった。</p>
+ */
+export function isChunkLoadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  return message.includes('Failed to fetch dynamically imported module')
+    || message.includes('Importing a module script failed')
+    || message.includes('error loading dynamically imported module')
+}
+
+/** 読み込み直しを 1 回だけに抑える印（配備直後に繰り返し読み込み直さない）。 */
+export const CHUNK_RELOAD_KEY = 'study21.chunkReload'
+
+/**
+ * 画面の読み込みに失敗したところから復帰する: **ページ全体を読み込み直して**新しいビルドを取りに行く。
+ *
+ * <p>アプリの中（クライアント側の遷移）では、消えたファイルを取りに行けない。
+ * 2 回続けて失敗したときは何もしない（壊れた状態で無限に再読み込みしない）。</p>
+ *
+ * @param navigate 読み込み直す方法（テストから差し替えられる）
+ * @returns 読み込み直したか
+ */
+export function recoverFromChunkLoadError(
+  error: unknown,
+  fullPath: string,
+  navigate: (path: string) => void = (path) => { window.location.assign(path) }
+): boolean {
+  if (!isChunkLoadError(error)) return false
+  try {
+    if (window.sessionStorage.getItem(CHUNK_RELOAD_KEY) === '1') return false
+    window.sessionStorage.setItem(CHUNK_RELOAD_KEY, '1')
+  } catch {
+    // sessionStorage が使えない環境では読み込み直さない（今までどおりエラー表示）
+    return false
+  }
+  navigate(fullPath)
+  return true
+}
+
 export function createAppRouter() {
   const router = createRouter({
     history: createWebHistory(),
@@ -421,6 +653,25 @@ export function createAppRouter() {
       return '/student/home'
     }
     return true
+  })
+
+  /*
+   * 画面の読み込みに失敗したら、**ページ全体を読み込み直す**（アプリの中だけでは新しい
+   * ファイルを取りに行けない）。配備の直後に開いたままのタブがこれで自動的に復帰する。
+   * 2 回続けて失敗したときは読み込み直さない（壊れた状態で無限に再読み込みしない）。
+   */
+  router.onError((error, to) => {
+    if (to === undefined) return
+    recoverFromChunkLoadError(error, to.fullPath)
+  })
+
+  // どこかへ進めたら印を消す（次の配備でもまた自動で復帰できるように）
+  router.afterEach(() => {
+    try {
+      window.sessionStorage.removeItem(CHUNK_RELOAD_KEY)
+    } catch {
+      // 使えない環境では何もしない
+    }
   })
 
   return router

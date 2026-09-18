@@ -260,7 +260,7 @@ function openBulk(): void {
 
 /**
  * 分析結果の修正を API に送る（一括変更と 1 枚の詳細で共通）。
- * 2.0 と同じく修正理由は必須で、理由が無ければ送らない。
+ * 修正理由は任意（詳細画面。ユーザーの指定）。必須にするかは呼び出し側が決める。
  * @returns 保存できたら true（呼び出し側がモーダルを閉じる）
  */
 async function submitCorrection(
@@ -268,10 +268,6 @@ async function submitCorrection(
   result: AnalysisResultCode,
   reason: string
 ): Promise<boolean> {
-  if (reason.trim() === '') {
-    toast.warning('修正理由を入力してください。')
-    return false
-  }
   try {
     const response = await correctStudyMonitorSnapshots(
       targets.map((snapshot) => ({ snapshotId: snapshot.snapshotId, version: snapshot.version })),
@@ -287,8 +283,12 @@ async function submitCorrection(
   }
 }
 
-/** 一括変更を適用する（2.0 と同じく修正理由は必須）。 */
+/** 一括変更を適用する（2.0 と同じく修正理由は必須。詳細画面は任意）。 */
 async function applyBulk(): Promise<void> {
+  if (bulkReason.value.trim() === '') {
+    toast.warning('修正理由を入力してください。')
+    return
+  }
   const targets = visibleSnapshots.value.filter((snapshot) => selectedIds.value.includes(snapshot.snapshotId))
   if (!await submitCorrection(targets, bulkResult.value, bulkReason.value)) return
   bulkOpen.value = false
@@ -510,7 +510,7 @@ onMounted(() => {
         <section class="monitor-section segment-section">
           <div class="section-heading">
             <div>
-              <h2>動画</h2>
+              <h2><AppIcon name="list" size="sm" /> 動画一覧</h2>
               <p>フォルダー内のファイル名から開始・終了時刻を表示</p>
             </div>
             <span class="section-count">{{ visibleVideos.length }} 本</span>
@@ -540,11 +540,11 @@ onMounted(() => {
           </div>
         </section>
 
-        <!-- スナップショット -->
+        <!-- スナップショット（動画から確認・スナップショットから確認の両方で使う） -->
         <section class="monitor-section snapshot-section">
           <div class="section-heading">
             <div>
-              <h2>スナップショット</h2>
+              <h2><AppIcon name="list" size="sm" /> スナップショット一覧</h2>
               <p>{{ selectedVideo ? selectedVideo.fileName : '動画を選ぶと切り出した画像を表示します' }}</p>
             </div>
             <div class="snapshot-tools">
@@ -732,10 +732,10 @@ onMounted(() => {
               </div>
               <div class="filters__row">
                 <span class="filter-item filter-item--grow">
-                  <span class="filter-item__label">修正理由<span class="net-required">必須</span>：</span>
+                  <span class="filter-item__label">修正理由（任意）：</span>
                   <textarea
                     v-model="detailReason" class="input" rows="2" maxlength="2000"
-                    aria-label="詳細の修正理由" placeholder="この画像に保存する修正理由"
+                    aria-label="詳細の修正理由" placeholder="この画像に保存する修正理由（空でも保存できます）"
                   />
                 </span>
               </div>

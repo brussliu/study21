@@ -76,4 +76,33 @@ describe('操作ボタンの見た目（ソース側の番人）', () => {
       expect(button).not.toContain('btn--sm')
     }
   })
+
+  /**
+   * 「一覧」の見出しアイコン（`#i-list`）。
+   *
+   * 一覧を出す見出しは、どの画面でも左手前に同じ一覧アイコンを置く
+   * （基準は【図形一覧】。既に付けている図形一覧・ファイル一覧・端末コントロール一覧・
+   * 単語一覧・誤答一覧は、それぞれの画面のテストで確認する）。
+   * 見出しの文言まで書くのは、別の見出しと取り違えないようにするため。
+   */
+  const LIST_TITLE_VIEWS: { view: string; title: string }[] = [
+    { view: 'views/batch/AiCallHistoryView.vue', title: 'AI呼出履歴' },
+    { view: 'views/batch/BatchHistoryView.vue', title: '実行履歴' },
+    { view: 'views/batch/BatchListView.vue', title: 'バッチ一覧（' },
+    { view: 'views/document/DocumentListView.vue', title: '資料一覧' },
+    { view: 'views/japanese/JapaneseTestView.vue', title: 'テストの履歴' },
+    { view: 'views/japanese/JapaneseWordStatusView.vue', title: '語別の学習状況' },
+    { view: 'views/japanese/JapaneseWordStatusView.vue', title: '技能別の習得' },
+    { view: 'views/linkclip/LinkClipView.vue', title: '保存リンク一覧' },
+    { view: 'views/net/SiteManagementView.vue', title: 'サイト一覧' },
+    { view: 'views/network/InternetUsageHistoryView.vue', title: 'サイトアクセス履歴' },
+    { view: 'views/network/InternetUsageHistoryView.vue', title: 'Web閲覧履歴' },
+    { view: 'views/testinfo/TestInfoView.vue', title: 'テスト一覧' },
+    { view: 'views/todo/TodoView.vue', title: 'TODO一覧' },
+    { view: 'components/home/ActionTimeline.vue', title: '行動タイムライン' }
+  ]
+
+  it.each(LIST_TITLE_VIEWS)('%s の「$title」見出しは一覧アイコン付き', ({ view, title }) => {
+    expect(read(view)).toContain(`<AppIcon name="list" size="sm" /> ${title}`)
+  })
 })

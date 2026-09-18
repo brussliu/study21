@@ -196,6 +196,11 @@ export function updateTerminal(
   return http.put<TerminalMutationResult>(`/net-terminals/${terminalId}`, { body })
 }
 
+/** 端末を削除する（物理削除。一覧から消える）。 */
+export function deleteTerminal(terminalId: number): Promise<ApiResponse<TerminalMutationResult>> {
+  return http.delete<TerminalMutationResult>(`/net-terminals/${terminalId}`)
+}
+
 /** 1 台のモードを変更する。 */
 export function changeTerminalMode(
   terminalId: number,

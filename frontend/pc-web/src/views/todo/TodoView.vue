@@ -10,6 +10,7 @@ import {
   searchTodos,
   updateTodo,
   type TodoPriorityCode,
+  type TodoCalendarTask,
   type TodoRow,
   type TodoSaveRequest,
   type TodoStatusCode
@@ -77,7 +78,8 @@ function toggleAllRows(): void {
 
 /** カレンダー */
 const calCursor = ref(new Date())
-const calCells = ref<Map<string, { openCount: number; doneCount: number }>>(new Map())
+/** 日付 → その日の件数と TODO（API のカレンダー結果）。 */
+const calCells = ref<Map<string, { openCount: number; doneCount: number; tasks: TodoCalendarTask[] }>>(new Map())
 
 /* ---------- ダイアログ ---------- */
 const dialogOpen = ref(false)
@@ -566,9 +568,9 @@ function goto(next: number): void {
 async function loadCalendar(): Promise<void> {
   try {
     const response = await fetchTodoCalendar(calCursor.value.getFullYear(), calCursor.value.getMonth() + 1)
-    const map = new Map<string, { openCount: number; doneCount: number }>()
+    const map = new Map<string, { openCount: number; doneCount: number; tasks: TodoCalendarTask[] }>()
     for (const cell of response.data.cells) {
-      map.set(cell.dueDate, { openCount: cell.openCount, doneCount: cell.doneCount })
+      map.set(cell.dueDate, { openCount: cell.openCount, doneCount: cell.doneCount, tasks: cell.tasks ?? [] })
     }
     calCells.value = map
   } catch (caught) {
@@ -576,11 +578,15 @@ async function loadCalendar(): Promise<void> {
   }
 }
 
+/** カレンダーのマスに並べる TODO の上限（これを超えたぶんは「他 N 件」にまとめる）。 */
+const CALENDAR_TASK_LIMIT = 5
+
 interface CalendarCell {
   ymd: string | null
   dayOfMonth: number | null
   openCount: number
   doneCount: number
+  tasks: TodoCalendarTask[]
 }
 
 const calendarWeeks = computed<CalendarCell[][]>(() => {
@@ -601,7 +607,8 @@ const calendarWeeks = computed<CalendarCell[][]>(() => {
         ymd,
         dayOfMonth: inMonth ? date.getDate() : null,
         openCount: cell?.openCount ?? 0,
-        doneCount: cell?.doneCount ?? 0
+        doneCount: cell?.doneCount ?? 0,
+        tasks: cell?.tasks ?? []
       })
     }
     weeks.push(cells)
@@ -615,6 +622,11 @@ const calendarLabel = computed(() =>
 function moveCalendar(offset: number): void {
   calCursor.value = new Date(calCursor.value.getFullYear(), calCursor.value.getMonth() + offset, 1)
   void loadCalendar()
+}
+
+/** マスに出す TODO（上限まで。残りは「他 N 件」で示す）。 */
+function visibleCalendarTasks(cell: CalendarCell): TodoCalendarTask[] {
+  return cell.tasks.slice(0, CALENDAR_TASK_LIMIT)
 }
 
 function switchView(next: 'list' | 'calendar'): void {
@@ -951,7 +963,7 @@ onMounted(load)
     <!-- 一覧 -->
     <div v-if="view === 'list'" class="card table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">TODO一覧</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> TODO一覧</h3>
         <span class="table-section__meta">全 {{ totalElements }} 件</span>
 
         <!--
@@ -1147,10 +1159,24 @@ onMounted(load)
             type="button" class="todo-day" :class="{ 'todo-day--today': cell.ymd === todayYmd() }"
             :data-due-date="cell.ymd" @click="createOn(cell.ymd)"
           >
-            <span class="todo-day__num">{{ cell.dayOfMonth }}</span>
-            <span class="todo-day__badges">
-              <span v-if="cell.openCount > 0" class="badge badge--warning">{{ cell.openCount }}</span>
-              <span v-if="cell.doneCount > 0" class="badge badge--success">{{ cell.doneCount }}</span>
+            <span class="todo-day__head">
+              <span class="todo-day__num">{{ cell.dayOfMonth }}</span>
+              <span class="todo-day__badges">
+                <span v-if="cell.openCount > 0" class="badge badge--warning">{{ cell.openCount }}</span>
+                <span v-if="cell.doneCount > 0" class="badge badge--success">{{ cell.doneCount }}</span>
+              </span>
+            </span>
+            <!-- その日が期限の TODO を並べる（上限まで。「他 N 件」で残りを示す） -->
+            <span v-if="cell.tasks.length > 0" class="todo-day__tasks">
+              <span
+                v-for="task in visibleCalendarTasks(cell)" :key="task.todoId"
+                class="todo-day__task"
+                :class="{ 'is-done': task.status === 'DONE', 'is-high': task.priority === 'HIGH', 'is-child': task.child }"
+                :data-calendar-task="task.todoId" :title="task.title"
+              >{{ task.title }}</span>
+              <span v-if="cell.tasks.length > CALENDAR_TASK_LIMIT" class="todo-day__more">
+                他 {{ cell.tasks.length - CALENDAR_TASK_LIMIT }} 件
+              </span>
             </span>
           </button>
           <span v-else class="todo-day todo-day--empty" />

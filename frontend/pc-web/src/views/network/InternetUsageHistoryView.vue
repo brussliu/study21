@@ -4,6 +4,7 @@ import { ApiError, formatIsoDateTime } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { searchAccessLogs, type AccessLogPage, type AccessLogRow } from '@/api/netAccessLogs'
 import { searchTerminals } from '@/api/net'
+import BrowserExtensionCodeDialog from '@/features/browserext/BrowserExtensionCodeDialog.vue'
 import {
   EVENT_TYPE_LABELS,
   searchBrowsingLogs,
@@ -12,6 +13,7 @@ import {
 } from '@/api/webBrowsingLogs'
 import { paginationItems } from '@/features/pagination/pagination'
 import '@/features/batch/batch.css'
+import '@/features/browserext/browserext.css'
 
 /**
  * インターネット利用履歴（メニュー「ネットワーク制御」＞「インターネット利用履歴」）。
@@ -21,6 +23,10 @@ import '@/features/batch/batch.css'
  *   * Web閲覧履歴（= ブラウザ閲覧履歴）… ブラウザ拡張の閲覧イベント（`NET_Web閲覧履歴情報`）
  *
  * どちらも 2.0 から移行した実データを読む。バッチ実行履歴・AI呼出履歴は「バッチ管理」側に分けた。
+ * Web閲覧履歴タブには接続コードの入口（ボタン）だけを置く。コードの発行・再発行は
+ * ダイアログ（BrowserExtensionCodeDialog）で行い、接続してきた端末の一覧は
+ * 端末コントロールの「ブラウザ端末」タブに置く。拡張のダウンロードは画面右上の
+ * プラグインメニュー（AppTopbar の BrowserPluginMenu）。
  */
 const activeTab = ref<'access' | 'browsing'>('access')
 
@@ -177,6 +183,14 @@ function eventLabel(row: BrowsingLogRow): string {
   return EVENT_TYPE_LABELS[row.eventType] ?? row.eventType
 }
 
+/* ---------- 接続コード（ブラウザ拡張に設定するコード）---------- */
+/**
+ * 接続コードの発行・再発行は専用のダイアログで行う。
+ * 画面には入口のボタンだけを置き、接続してきた端末の一覧は
+ * 端末コントロール（「ブラウザ端末」タブ）に置く。
+ */
+const codeDialogOpen = ref(false)
+
 /** タブを開いたときだけ読む（2.0 と同じ「そのタブの検索条件で検索」）。 */
 function switchTab(tab: 'access' | 'browsing'): void {
   activeTab.value = tab
@@ -271,7 +285,7 @@ onMounted(() => {
 
       <div class="card table-section">
         <div class="table-section__head">
-          <h3 class="table-section__title">サイトアクセス履歴</h3>
+          <h3 class="table-section__title"><AppIcon name="list" size="sm" /> サイトアクセス履歴</h3>
           <span class="table-section__meta">全 {{ totalElements }} 件</span>
         </div>
 
@@ -397,8 +411,17 @@ onMounted(() => {
 
       <div class="card table-section">
         <div class="table-section__head">
-          <h3 class="table-section__title">Web閲覧履歴</h3>
-          <span class="table-section__meta">全 {{ browsingTotalElements }} 件</span>
+          <h3 class="table-section__title"><AppIcon name="list" size="sm" /> Web閲覧履歴</h3>
+          <!-- 接続コード（拡張の設定に入れる値）はダイアログで発行・再発行する -->
+          <div class="bx-head-actions">
+            <span class="table-section__meta">全 {{ browsingTotalElements }} 件</span>
+            <button
+              type="button" class="btn btn--secondary btn--sm"
+              data-ext-code @click="codeDialogOpen = true"
+            >
+              <AppIcon name="key" size="sm" /> 接続コード
+            </button>
+          </div>
         </div>
 
         <p v-if="browsingError" class="alert alert--danger">{{ browsingError }}</p>
@@ -475,5 +498,8 @@ onMounted(() => {
         </div>
       </div>
     </template>
+
+    <!-- 接続コードの発行・再発行・確認 -->
+    <BrowserExtensionCodeDialog :open="codeDialogOpen" @close="codeDialogOpen = false" />
   </div>
 </template>

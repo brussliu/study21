@@ -1,0 +1,215 @@
+/* ブラウザ拡張（右上のプラグインメニュー / 接続コードのダイアログ / ブラウザ端末の一覧）。
+   色は tokens.css の変数のみを使う。 */
+
+/* ---------- 右上のプラグインメニュー ---------- */
+
+.bx-anchor {
+  position: relative;
+  display: inline-flex;
+}
+
+/* トップバーのユーザーメニュー（.up-user）と同じ見た目に揃える。 */
+.bx-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--control-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.bx-button:hover,
+.bx-button.is-open {
+  background: var(--color-surface-hover);
+  border-color: var(--color-border);
+}
+
+.bx-menu {
+  position: absolute;
+  top: calc(100% + var(--sp-2));
+  right: 0;
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  width: 380px;
+  max-width: calc(100vw - var(--sp-6));
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+  animation: bx-menu-in var(--duration-fast) var(--ease-standard);
+}
+
+@keyframes bx-menu-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bx-menu__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.bx-menu__note {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 1 プラグイン分の箱。 */
+.bx-plugin {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.bx-plugin__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+/* 名前と（版 / サイズ）は縦に積む。横に並べると折り返しが汚くなるため。 */
+.bx-plugin__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.bx-plugin__name {
+  font-weight: var(--fw-semibold);
+}
+
+.bx-plugin__meta {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.bx-plugin__description {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.bx-plugin__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* インストール手順（既定は畳んでおく）。 */
+.bx-steps {
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.bx-steps__summary {
+  cursor: pointer;
+  color: var(--color-primary);
+}
+
+.bx-steps__list {
+  margin: var(--sp-2) 0 0;
+  padding-left: var(--sp-4);
+  line-height: 1.7;
+}
+
+/* ---------- 接続コードのダイアログ ---------- */
+
+.bx-code {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.bx-code__lead {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+.bx-code__box {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.bx-code__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-sm);
+  letter-spacing: 0.05em;
+  word-break: break-all;
+  user-select: all;
+}
+
+.bx-code__status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.bx-code__hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ---------- ブラウザ端末（端末コントロールのタブ） ---------- */
+
+.bx-device-name {
+  font-weight: var(--fw-semibold);
+}
+
+.bx-device-id {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+.bx-device-note {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ---------- 一覧カードの見出しに置くボタン ---------- */
+
+.bx-head-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}

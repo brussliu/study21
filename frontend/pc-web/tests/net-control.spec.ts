@@ -124,6 +124,8 @@ describe('サイト管理', () => {
     expect(text).toContain('英会話')
     expect(text).not.toContain('OTHER')
     expect(text).toContain('全 2 件')
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
   })
 
   it('検索条件をクエリで送る', async () => {
@@ -394,6 +396,34 @@ describe('端末コントロール', () => {
     expect(text).toContain('来客用')
   })
 
+  it('削除は確認してから DELETE を呼び、一覧を取り直す', async () => {
+    const { wrapper, fetchMock } = await setup()
+    const confirmMock = vi.fn(() => true)
+    vi.stubGlobal('confirm', confirmMock)
+
+    await wrapper.get('[data-delete-terminal="1"]').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalled()
+    const call = fetchMock.mock.calls.find((entry) => ((entry[1] ?? {}) as RequestInit).method === 'DELETE')
+    expect(String(call?.[0])).toBe('/api/user/net-terminals/1')
+    // 削除後に一覧を取り直す（GET が 2 回目）
+    expect(fetchMock.mock.calls.filter((entry) => {
+      const method = ((entry[1] ?? {}) as RequestInit).method ?? 'GET'
+      return method === 'GET' && String(entry[0]).startsWith('/api/user/net-terminals')
+    }).length).toBe(2)
+  })
+
+  it('確認をキャンセルしたら削除しない', async () => {
+    const { wrapper, fetchMock } = await setup()
+    vi.stubGlobal('confirm', vi.fn(() => false))
+
+    await wrapper.get('[data-delete-terminal="1"]').trigger('click')
+    await flushPromises()
+
+    expect(fetchMock.mock.calls.some((entry) => ((entry[1] ?? {}) as RequestInit).method === 'DELETE')).toBe(false)
+  })
+
   it('保護者以外はサーバーの 403 をそのまま画面に出す', async () => {
     const { wrapper } = await setup((url, method) =>
       method === 'GET' && url.startsWith('/api/user/net-terminals')
@@ -429,13 +459,16 @@ describe('端末コントロール', () => {
     expect(inactiveStatus.classes()).toContain('badge--danger')
   })
 
-  it('操作列は編集アイコンだけで、行ごとのモード切替は置かない', async () => {
+  it('操作列は編集と削除のアイコンを置く（行ごとのモード切替は置かない）', async () => {
     const { wrapper } = await setup()
 
     const firstRow = wrapper.get('tbody tr:first-child')
-    // 編集アイコンだけ
+    // 編集アイコンと削除アイコン
     expect(firstRow.find('[data-edit-terminal]').exists()).toBe(true)
-    expect(firstRow.findAll('.row-actions .btn').length).toBe(1)
+    const remove = firstRow.get('[data-delete-terminal="1"]')
+    expect(remove.find('.icon--danger').exists()).toBe(true)
+    expect(remove.attributes('title')).toBe('削除')
+    expect(firstRow.findAll('.row-actions .btn').length).toBe(2)
     // 行の中にモードの選択も切替ボタンも無い（切替は右上の【一括適用】だけ）
     expect(firstRow.find('.net-mode-select').exists()).toBe(false)
     expect(firstRow.find('select').exists()).toBe(false)
@@ -535,5 +568,119 @@ describe('端末コントロール', () => {
 
     expect(toastMessages()).toContain('更新対象の端末を選択してください。')
     expect(recorded(fetchMock).some((entry) => entry.url === '/api/user/net-terminals/mode')).toBe(false)
+  })
+})
+
+/**
+ * 端末コントロールの 2 つ目のタブ「ブラウザ端末」。
+ *
+ * IP で管理する端末（プロキシが使う `NET_端末コントロール情報`）とは別に、
+ * ブラウザ拡張が接続コードで登録した端末（`NET_ブラウザ端末情報`）を並べる。
+ * 接続コードの発行・再発行はインターネット利用履歴の「Web閲覧履歴」側に置いてある。
+ */
+describe('端末コントロール（ブラウザ端末タブ）', () => {
+  function browserDevice(overrides: Record<string, unknown> = {}) {
+    return {
+      registrationId: 1,
+      deviceId: 'chrome-1789301529492-quwe0vj',
+      deviceName: 'LIU-PC',
+      osType: 'Windows',
+      browserType: 'Chrome',
+      browserVersion: '153.0.0.0',
+      extensionVersion: '2.1.0',
+      profileId: 'Default',
+      status: 'ACTIVE',
+      online: true,
+      lastStartedAt: '2026-09-13T20:00:00',
+      lastSentAt: '2026-09-13T21:14:09',
+      lastHeartbeatAt: '2026-09-13T21:15:00',
+      createdAt: '2026-09-13T20:00:00',
+      ...overrides
+    }
+  }
+
+  async function setup(devices: unknown[] = [
+    browserDevice(),
+    browserDevice({
+      registrationId: 2, deviceId: 'chrome-1719480000-abcd1234', deviceName: '勉強用PC',
+      browserType: 'Edge', browserVersion: '130.0.0.0', extensionVersion: '2.0.0',
+      online: false, lastSentAt: null, lastHeartbeatAt: null
+    })
+  ]) {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes('/browser-extension/registration')) {
+        return ok({
+          issued: true, token: 'a'.repeat(64), deviceCount: devices.length,
+          onlineCount: devices.filter((device) => (device as { online?: boolean }).online === true).length,
+          devices, message: null
+        })
+      }
+      if (String(url).startsWith('/api/user/net-terminals')) {
+        return ok({ items: [terminalRow()], page: 1, size: 50, totalElements: 1, totalPages: 1 })
+      }
+      return ok({})
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const wrapper = mount(TerminalControlView, { global: { plugins: [pinia] } })
+    await flushPromises()
+    return { wrapper, fetchMock }
+  }
+
+  it('タブを 2 つ持ち、既定は端末コントロール', async () => {
+    const { wrapper } = await setup()
+
+    const tabs = wrapper.findAll('.tabs__tab').map((tab) => tab.text())
+    expect(tabs).toEqual(['端末コントロール', 'ブラウザ端末'])
+    expect(wrapper.get('.tabs__tab.is-active').text()).toBe('端末コントロール')
+    // 既定のタブは IP で管理する端末の一覧
+    expect(wrapper.text()).toContain('端末コントロール一覧')
+    expect(wrapper.find('[data-browser-devices]').exists()).toBe(false)
+  })
+
+  it('ブラウザ端末タブを開いたときにだけ一覧を読む', async () => {
+    const { wrapper, fetchMock } = await setup()
+
+    expect(recorded(fetchMock).some((call) => call.url.includes('/browser-extension/registration'))).toBe(false)
+
+    await wrapper.get('.tabs__tab[data-tab="browser"]').trigger('click')
+    await flushPromises()
+
+    expect(recorded(fetchMock).filter((call) => call.url.includes('/browser-extension/registration')).length).toBe(1)
+    expect(wrapper.find('[data-terminal-id]').exists()).toBe(false)
+  })
+
+  it('ブラウザ拡張が登録した端末を表示する（接続中・オフライン）', async () => {
+    const { wrapper } = await setup()
+
+    await wrapper.get('.tabs__tab[data-tab="browser"]').trigger('click')
+    await flushPromises()
+
+    const online = wrapper.get('[data-browser-device="chrome-1789301529492-quwe0vj"]')
+    expect(online.text()).toContain('LIU-PC')
+    expect(online.text()).toContain('chrome-1789301529492-quwe0vj')
+    expect(online.text()).toContain('Chrome 153.0.0.0')
+    expect(online.text()).toContain('2.1.0')
+    expect(online.text()).toContain('接続中')
+
+    const offline = wrapper.get('[data-browser-device="chrome-1719480000-abcd1234"]')
+    expect(offline.text()).toContain('勉強用PC')
+    expect(offline.text()).toContain('Edge 130.0.0.0')
+    expect(offline.text()).toContain('オフライン')
+
+    // 見出しの列（IP で管理する端末の表とは別物）
+    expect(wrapper.get('[data-browser-devices] thead').text())
+      .toContain('最終心拍')
+  })
+
+  it('接続している端末が無いときは案内を出す', async () => {
+    const { wrapper } = await setup([])
+
+    await wrapper.get('.tabs__tab[data-tab="browser"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-browser-devices]').text()).toContain('接続している端末はありません')
+    expect(wrapper.findAll('[data-browser-device]').length).toBe(0)
   })
 })

@@ -1,0 +1,817 @@
+/* 授業録音 / AI 授業記録 — 画面（一覧・新規・録音中・詳細）と設定のレイアウト。
+   色は tokens.css の変数のみを使う（assets/prototype/*.css は変更しない）。
+   「まずページを見てフィードバックをもらう」段階なので、未実装の箇所は
+   「準備中」の案内を目立たせる見た目（破線の枠・説明文）を多く使う。 */
+
+/* ---------- 共通 ---------- */
+
+.cr-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.cr-page__loading,
+.cr-empty {
+  margin: 0;
+  padding: var(--sp-8) var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.cr-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.cr-empty .icon {
+  color: var(--color-text-subtle);
+}
+
+.cr-empty__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.cr-empty__note {
+  margin: 0;
+  max-width: 36rem;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+}
+
+/* 「この画面は流れだけ」の案内（目立たせるが警告色は使わない） */
+.cr-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-md);
+  background: var(--color-info-soft);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
+.cr-notice .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-info);
+}
+
+.cr-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 見出し行（カードのタイトルと操作ボタンを左右に並べる） */
+.cr-list-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.cr-list-head__spacer {
+  margin-left: auto;
+}
+
+/* ---------- 授業一覧 ---------- */
+
+.cr-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.cr-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.cr-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.cr-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+
+.cr-card__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  word-break: break-word;
+}
+
+.cr-card__meta {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+}
+
+.cr-card__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.cr-card__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.cr-card__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.cr-card__mark .icon {
+  color: var(--color-success);
+}
+
+.cr-card__mark.is-empty .icon {
+  color: var(--color-text-subtle);
+}
+
+/* ---------- 入力欄（設定ページの前置詞フォーム。授業の dialog は cr-dialog__field を使う） ---------- */
+
+.cr-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+/* ---------- 録音中 ---------- */
+
+.cr-live__top {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cr-live__status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.cr-recording-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-text-subtle);
+}
+
+.cr-recording-dot.is-recording {
+  background: var(--color-danger);
+  animation: cr-pulse 1.2s var(--ease-standard) infinite;
+}
+
+@keyframes cr-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.cr-live__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.cr-live__meta-label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.cr-live__meta-value {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.cr-timer {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-live__columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+  align-items: start;
+}
+
+.cr-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 320px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.cr-column__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cr-column__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.cr-column__title .icon {
+  color: var(--color-primary);
+}
+
+.cr-column__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  overflow: auto;
+}
+
+/* 書き起こし・ノートの「準備中」の枠（等幅で空の状態を見せる） */
+.cr-column__placeholder {
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cr-transcript__line {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-1) 0;
+  border-bottom: 1px dashed var(--color-border);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.cr-transcript__time {
+  flex: none;
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono, monospace);
+  font-variant-numeric: tabular-nums;
+}
+
+.cr-transcript__speaker {
+  flex: none;
+  color: var(--color-primary-strong);
+  font-weight: var(--fw-semibold);
+}
+
+/* 話者（音源で決まる）の色分け。先生＝青系／学生＝緑系／講義（マイクのみ）＝灰色 */
+.cr-transcript__line--teacher {
+  border-left: 3px solid var(--color-primary);
+  padding-left: var(--sp-2);
+}
+
+.cr-transcript__line--student {
+  border-left: 3px solid var(--color-success, var(--color-primary));
+  padding-left: var(--sp-2);
+}
+
+.cr-transcript__line--lecture {
+  border-left: 3px solid var(--color-border);
+  padding-left: var(--sp-2);
+}
+
+.cr-transcript__line--teacher .cr-transcript__speaker {
+  color: var(--color-primary);
+  font-weight: var(--fw-medium);
+}
+
+.cr-transcript__line--student .cr-transcript__speaker {
+  color: var(--color-success, var(--color-primary));
+  font-weight: var(--fw-medium);
+}
+
+.cr-transcript__text {
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+/* AI ノートの段落（段階更新の見出し） */
+.cr-note__section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) 0;
+}
+
+.cr-note__section-title {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.cr-note__section-body {
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.cr-live__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ---------- 授業詳細 ---------- */
+
+.cr-detail__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+.cr-detail__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-3);
+}
+
+.cr-detail__block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.cr-detail__block-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.cr-detail__block-title .icon {
+  color: var(--color-primary);
+}
+
+.cr-detail__block-body {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 元音声（プレーヤー占位） */
+.cr-audio {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.cr-audio__icon {
+  flex: none;
+  color: var(--color-text-subtle);
+}
+
+.cr-audio__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.cr-audio__title {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.cr-audio__note {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.cr-audio__player {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.cr-audio__bar {
+  flex: 1;
+  height: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border-strong);
+}
+
+.cr-audio__time {
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- システム設定「AI 授業記録」 ---------- */
+
+.cr-set {
+  margin-top: var(--sp-4);
+}
+
+.cr-set__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+.cr-set__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.cr-set__field--wide {
+  grid-column: 1 / -1;
+}
+
+.cr-set__label {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.cr-set__help {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.cr-set__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.cr-set__switch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.cr-set__switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* 言語モード → STT 設定の対応表 */
+.cr-set__mapping {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.cr-set__mapping-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.cr-set__mapping-label {
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+}
+
+/* トリガーキーワード・前置詞プリセットのリスト */
+.cr-set__chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.cr-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+}
+
+.cr-chip__remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-hover);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.cr-chip__remove:hover {
+  color: var(--color-danger);
+}
+
+.cr-set__add {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+.cr-set__presets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.cr-preset-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.cr-preset-row__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cr-preset-row__name {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.cr-preset-row__desc {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.cr-preset-row__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  flex: none;
+}
+
+.cr-set__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+}
+
+@media (max-width: 1100px) {
+  .cr-live__columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 削除の確認（一覧のカードごと） */
+.cr-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(15 23 42 / 45%);
+}
+
+.cr-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: var(--sp-4);
+}
+
+.cr-dialog__title {
+  margin: 0 0 var(--sp-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+}
+
+.cr-dialog__body {
+  margin: 0 0 var(--sp-4);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
+.cr-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+/* 音源の選択と音量表示（オンライン授業で先生の声も録るため） */
+.cr-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+/* 音源の確認（録音中だけ。選択そのものは【新しい授業】の dialog にある） */
+.cr-source__label {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.cr-levels {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--color-text-subtle);
+}
+
+.cr-levels__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1, 4px);
+}
+
+.cr-levels__bar {
+  display: inline-block;
+  width: 96px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.cr-levels__bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--color-primary);
+  transition: width 120ms linear;
+}
+
+.cr-levels__bar i.is-remote {
+  background: var(--color-success, var(--color-primary));
+}
+
+/* 【新しい授業】の dialog（3 つの始め方を選ぶ） */
+.cr-dialog--wide {
+  width: min(560px, calc(100vw - 32px));
+}
+
+/*
+ * 授業名・科目・言語モード・前置詞の 4 つを 2×2 に置く（狭い画面では 1 列）。
+ * 3 列のままだと 4 つ目が 1 つだけ次の行に落ちて、授業名も狭くなる。
+ */
+.cr-dialog__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+}
+
+.cr-dialog__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1, 4px);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 録音する音源（dialog の中で 1 行を使う。二音源を選ぶと案内が付く） */
+.cr-dialog__audio {
+  margin-bottom: var(--sp-2);
+}
+
+.cr-dialog__modes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1, 4px);
+  margin-bottom: var(--sp-2);
+}
+
+.cr-dialog__mode {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+}
+
+.cr-dialog__note {
+  margin: 0 0 var(--sp-2);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}

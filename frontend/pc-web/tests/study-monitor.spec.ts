@@ -225,6 +225,15 @@ describe('学習状況モニター', () => {
     expect(wrapper.find('.monitor-main-column').exists()).toBe(true)
     expect(wrapper.findAll('.segment-row').length).toBe(1)
 
+    // 一覧の見出しは「〜一覧」＋一覧アイコン（他の一覧画面と揃える）。
+    // スナップショットは「動画から確認」「スナップショットから確認」の両方で使う 1 つの見出し。
+    const videoTitle = wrapper.get('.segment-section h2')
+    expect(videoTitle.text()).toBe('動画一覧')
+    expect(videoTitle.get('use').attributes('href')).toBe('#i-list')
+    const snapshotTitle = wrapper.get('.snapshot-section h2')
+    expect(snapshotTitle.text()).toBe('スナップショット一覧')
+    expect(snapshotTitle.get('use').attributes('href')).toBe('#i-list')
+
     await wrapper.get('[data-action="timeline-open"]').trigger('click')
     await flushPromises()
     expect(wrapper.get('#smTimelineTitle').text()).toBe('時間軸で確認')
@@ -277,7 +286,7 @@ describe('学習状況モニター', () => {
     expect(wrapper.get('#smDetailTitle').text()).toBe('15:55:46')
   })
 
-  it('詳細モーダルで分析結果を修正できる（修正理由は必須）', async () => {
+  it('詳細モーダルは修正理由なしでも直せる（理由は任意・ユーザーの指定）', async () => {
     const { wrapper, calls } = await setup()
 
     await wrapper.get('[data-snapshot="956"] [data-snapshot-open="956"]').trigger('click')
@@ -285,26 +294,40 @@ describe('学習状況モニター', () => {
 
     // 分析結果の初期値は今の判定（離席中）
     expect((wrapper.get('select[aria-label="詳細の分析結果"]').element as HTMLSelectElement).value).toBe('AWAY')
+    // 入力欄に「必須」を出さない
+    expect(wrapper.get('.sm-detail-form').text()).toContain('修正理由（任意）')
 
     await wrapper.get('select[aria-label="詳細の分析結果"]').setValue('STUDY_PC')
     await wrapper.get('[data-action="detail-apply"]').trigger('click')
     await flushPromises()
-    expect(useToast().items.map((item) => item.message).join(' ')).toContain('修正理由を入力してください')
-    expect(calls().some((call) => call.method === 'PATCH')).toBe(false)
 
-    await wrapper.get('textarea[aria-label="詳細の修正理由"]').setValue('E2E: 詳細から修正')
-    await wrapper.get('[data-action="detail-apply"]').trigger('click')
-    await flushPromises()
-
+    // 理由が空でも送る（理由は任意）
     const patch = calls().find((call) => call.method === 'PATCH')
     expect(patch?.url).toContain('/api/user/study-monitor/snapshots')
     expect(JSON.parse(String(patch?.body))).toEqual({
       updates: [{ snapshotId: 956, version: 1 }],
       result: 'STUDY_PC',
-      reason: 'E2E: 詳細から修正'
+      reason: ''
     })
     // 保存したら閉じて、一覧を取り直す
     expect(wrapper.find('#smDetailTitle').exists()).toBe(false)
+  })
+
+  it('詳細モーダルに修正理由を書けば一緒に送る', async () => {
+    const { wrapper, calls } = await setup()
+
+    await wrapper.get('[data-snapshot="956"] [data-snapshot-open="956"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('textarea[aria-label="詳細の修正理由"]').setValue('E2E: 詳細から修正')
+    await wrapper.get('[data-action="detail-apply"]').trigger('click')
+    await flushPromises()
+
+    const patch = calls().find((call) => call.method === 'PATCH')
+    expect(JSON.parse(String(patch?.body))).toEqual({
+      updates: [{ snapshotId: 956, version: 1 }],
+      result: 'AWAY',
+      reason: 'E2E: 詳細から修正'
+    })
   })
 
   it('未分析の画像は詳細で修正できない（その旨を出す）', async () => {

@@ -312,7 +312,7 @@ onMounted(() => { if (isFamilyUser.value) void load() })
         <div class="card">
           <div class="card__header">
             <h2 class="card__title">
-              <AppIcon name="bookmark" /> 保存リンク一覧
+              <AppIcon name="list" size="sm" /> 保存リンク一覧
             </h2>
             <span class="card__sub">
               {{ FOLDER_LANES.find((lane) => lane.code === activeLane)?.label }} ・ 全 {{ rows.length }} 件

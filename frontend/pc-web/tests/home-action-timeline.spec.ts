@@ -14,6 +14,8 @@ describe('ホーム：行動タイムライン', () => {
     const wrapper = mount(ActionTimeline)
 
     expect(wrapper.text()).toContain('行動タイムライン')
+    // 一覧（時間軸に並べた記録）の見出しには一覧アイコンを付ける
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
     expect(wrapper.text()).toContain('学習状況モニターの分析結果を時間軸で表示します。')
     // 既定は 08:00〜23:59
     expect((wrapper.get('[data-timeline-from]').element as HTMLInputElement).value).toBe('08:00')

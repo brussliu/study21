@@ -13,6 +13,7 @@ import type { BatchExecutionRow, BatchTaskRow } from '@/api/batch'
  *   * 「並列」の列は持たない（2.1 は並列実行の仕組みを持たないため）
  *   * 有効にできるのは S / L / R。起動時に走るのは batS01 だけ
  *   * 【再実行】は有効／無効に関係なく押せる（業務処理が未実装のバッチは押せない）
+ *   * 種別 C（呼出）は他の処理から呼ばれるバッチなので、【再実行】ボタン自体を出さない
  */
 function ok(data: unknown, message = 'OK'): Response {
   return new Response(JSON.stringify({ success: true, code: 'OK', message, data, timestamp: '' }), {
@@ -30,6 +31,7 @@ function taskRow(overrides: Partial<BatchTaskRow> = {}): BatchTaskRow {
     activeVersion: 1,
     lastRunAt: '2026-09-12T00:00:00',
     canToggleActive: true,
+    canManualRerun: true,
     canRerun: true,
     runsOnStartup: true,
     loopEveryMinutes: null,
@@ -118,7 +120,10 @@ async function setup(options: {
       description: '英訳中日問題生成',
       active: false,
       canToggleActive: false,
-      canRerun: false,
+      // 種別 C でもハンドラは実装済みであり得る（実データの batC51 / batC52）。
+      // 「ボタンを出さない」は canManualRerun だけで決まることを固定するため canRerun は true にする
+      canManualRerun: false,
+      canRerun: true,
       runsOnStartup: false
     })
   ]
@@ -158,6 +163,9 @@ async function setup(options: {
 describe('バッチ一覧（バッチ管理＞バッチ一覧）', () => {
   it('バッチ一覧を表示する（種別・有効・実行タイミング）', async () => {
     const { wrapper } = await setup()
+
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
 
     const firstRow = wrapper.get('tbody tr[data-batch-code="batS01"]')
     expect(firstRow.text()).toContain('batS01')
@@ -245,6 +253,23 @@ describe('バッチ一覧（バッチ管理＞バッチ一覧）', () => {
     const button = wrapper.get('tbody tr[data-batch-code="batR02"] button')
     expect((button.element as HTMLButtonElement).disabled).toBe(true)
     expect(button.attributes('title')).toContain('2.1 では未実装')
+  })
+
+  it('呼出（C）バッチには【再実行】ボタンを出さない', async () => {
+    const { wrapper } = await setup()
+
+    // 種別 C は他の処理から呼ばれるバッチで、画面からは起動しない → ボタンごと出さない。
+    // ハンドラが実装済み（canRerun=true）でも同じで、出し分けは canManualRerun だけで決まる
+    const callRow = wrapper.get('tbody tr[data-batch-code="batC04"]')
+    expect(callRow.find('button').exists()).toBe(false)
+    expect(callRow.findAll('td').at(-1)?.text()).toBe('—')
+    // 押せない灰色のボタンも残さない（「2.1 では未実装です」の説明も出ない）
+    expect(callRow.text()).not.toContain('再実行')
+
+    // 他の種別は今までどおり（S は押せて、ハンドラ未実装の R は押せない見た目）
+    expect((wrapper.get('tbody tr[data-batch-code="batS01"] button').element as HTMLButtonElement).disabled)
+      .toBe(false)
+    expect(wrapper.findAll('tbody button').length).toBe(2)
   })
 
   it('再実行が失敗したら失敗として表示する', async () => {

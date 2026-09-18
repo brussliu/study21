@@ -1,0 +1,1260 @@
+/* ============================================================================
+   読書管理【書籍閲覧】（生徒が使う画面）のレイアウト。
+
+   2.0 の english_reading_reader.css を 2.1 の設計システムに合わせて作り直したもの。
+   色は tokens.css の変数だけを使う（assets/prototype/*.css は変更しない）。
+   クラス名は rrd-（reading reader）で統一し、書籍管理（rd-）とぶつけない。
+   ============================================================================ */
+
+.rrd-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.rrd-loading,
+.rrd-empty {
+  margin: 0;
+  padding: var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.rrd-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-relaxed);
+}
+
+.rrd-required {
+  margin-left: var(--sp-1);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+}
+
+.rrd-cell-memo {
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 本棚（分類タブ） ---------- */
+
+.rrd-tabs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rrd-tab {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.rrd-tab:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rrd-tab.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-shelf {
+  display: grid;
+  /* カードを広く取る（2026-09-15 の指示。340px だと書名やバッジが折り返して縦に伸びる）。
+     1280/1680/1920 のどれでも横に溢れない範囲で広げる */
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.rrd-book {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* 【自分の本棚】に入っている本は、カードの地色を変えて区別する（2026-09-15 の指示）。
+   色は tokens.css の変数だけを使い、暗色テーマでも同じ作り方で読めるようにする。 */
+.rrd-book.is-in-shelf {
+  border-color: color-mix(in srgb, var(--color-primary) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+}
+
+/* 表紙（書籍管理の .rd-book__cover と同じ 136×190 にする） */
+.rrd-book__cover {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 136px;
+  height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+}
+
+.rrd-book__cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rrd-book__cover-fallback {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+}
+
+.rrd-book__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rrd-book__title {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.rrd-book__author {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.rrd-book__badges,
+.rrd-book__tags,
+.rrd-book__stats {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.rrd-book__stats {
+  gap: var(--sp-3);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  /* メタ情報＋操作の行はカードの下端に寄せる（下に余白を残さない。2026-09-15 の指示） */
+  margin-top: auto;
+}
+
+/* 最後の行（最終読書 …）は、左にメタ情報・右に操作のアイコンを同じ行で並べる。
+   操作だけの行を作らないので、カードの下に空白ができない（2026-09-15 の指示）。 */
+.rrd-book__stat--foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  width: 100%;
+}
+
+.rrd-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.rrd-book__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.rrd-progress {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.rrd-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary);
+}
+
+.rrd-book__pdf {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.rrd-book__pdf.is-missing {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-weight: var(--fw-medium);
+}
+
+.rrd-book__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--sp-1);
+}
+
+/* 操作のアイコンは「淡い色の面 ＋ 色の付いたアイコン ＋ 同系の枠」のチップにして目立たせる
+   （2026-09-15 の指示。既定の灰色の枠だけでは押せる場所だと分かりにくい）。
+   色は tokens.css の変数と color-mix だけで作るので、暗色テーマでも同じ作り方で読める。 */
+.rrd-book__actions .btn--icon {
+  width: var(--control-md);
+  border: 1px solid color-mix(in srgb, currentcolor 35%, transparent);
+  background: color-mix(in srgb, currentcolor 12%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.rrd-book__actions .btn--icon:hover:not(:disabled) {
+  background: color-mix(in srgb, currentcolor 24%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+/* 閲覧は主色で塗って、いちばん目立つ操作にする */
+.rrd-book__actions .rrd-book__action--open {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.rrd-book__actions .rrd-book__action--open:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 85%, var(--color-text-strong));
+  color: var(--color-on-primary);
+}
+
+/* 標記クリア（標記・読書記録・進捗を消す）は警告色で、取り返しのつかない操作だと分かるようにする */
+.rrd-book__actions .rrd-book__action--clear {
+  color: var(--color-warning);
+}
+
+.rrd-book__actions .rrd-book__action--clear:hover:not(:disabled) {
+  color: var(--color-warning);
+}
+
+.rrd-more {
+  display: flex;
+  justify-content: center;
+  padding: 0 var(--sp-5) var(--sp-4);
+}
+
+/* ---------- 読書状況カード（書名・バッジ・進捗と読書の状況） ---------- */
+
+.rrd-status-card__title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.rrd-status-card__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- 閲覧の本体 ---------- */
+
+/* 左（本文 PDF）｜右（読書状況・ページ一覧・標記の一覧。320px）の 2 カラム。
+   2026-09-14 の指示で、本文を広く取れるように左へ戻した（ページ一覧も右カラムの【読書状況】の下）。 */
+.rrd-reader {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.rrd-viewer-card {
+  min-width: 0;
+}
+
+/* ツールバーの区切り線（本棚へ戻ると、ページ送りのあいだ） */
+.rrd-toolbar__sep {
+  width: 1px;
+  height: 1.5rem;
+  background: var(--color-border);
+}
+
+.rrd-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.rrd-toolbar__gap {
+  flex: 1 1 auto;
+}
+
+.rrd-page-input {
+  width: 5rem;
+}
+
+.rrd-page-total {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+}
+
+.rrd-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/* 標記ツールの入れ物。2026-09-14 の指示で、スクロールしても常に使えるようにした。
+   位置（top / left）は BookReaderView の placeTools() が「本文の枠の見えている範囲」へ挟んで入れる。
+   高さは消費しない（ページの上に重ねる）ので、本文の枠は動かない。 */
+.rrd-tools-anchor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 5;
+  /* 位置が入るまでは出さない（画面の左上に一瞬出るのを防ぐ） */
+  visibility: hidden;
+}
+
+/* 標記ツール。下の本文と区別できるよう、半透明の面と境界線を付ける（色は tokens.css の変数だけ）。
+   幅は中身に合わせ、画面からはみ出さないところで折り返す。 */
+.rrd-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  max-width: min(72rem, calc(100vw - 4 * var(--sp-4)));
+  padding: var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
+  box-shadow: var(--shadow-sm);
+  backdrop-filter: blur(4px);
+}
+
+.rrd-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rrd-tool:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rrd-tool.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+/* 色のボタン（いま選んでいるツールの色）とパレット */
+.rrd-color {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.rrd-color__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: var(--control-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rrd-color__button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rrd-color__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+}
+
+.rrd-color__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.rrd-color__popover {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.rrd-color__option {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.rrd-color__option.is-active {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* ページ一覧の見出し（開閉ボタンと現在ページ） */
+.rrd-rail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rrd-page-chip {
+  position: relative;
+  min-width: 2.25rem;
+  padding: 2px var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+/* 既読は濃いめ・未読は淡め（暗色テーマでも区別できるよう tokens.css の変数だけを使う） */
+.rrd-page-chip.is-read {
+  border-color: var(--color-border-strong);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-page-chip.is-unread {
+  border-style: dashed;
+  border-color: var(--color-border);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+}
+
+.rrd-page-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rrd-page-chip.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.rrd-page-chip.has-mark::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-warning);
+}
+
+.rrd-page-chip.is-active.has-mark::after {
+  background: var(--color-on-primary);
+}
+
+/* ---------- ページ一覧の「悬浮式」一覧（2026-09-14 の指示） ---------- */
+
+/* カードにマウスを乗せた（またはキーボードで入った）ときに、本文の上へ左向きに開く。
+   カードの右端から左へ出すので、本文の幅（レイアウト）は動かさない。
+   z-index は PDF の内容と貼り付いた標記ツール（5）より上、ダイアログ・トースト（100 以上）より下。 */
+.rrd-rail-card {
+  position: relative;
+}
+
+.rrd-rail-popover {
+  position: absolute;
+  top: 0;
+  right: calc(100% + var(--sp-3));
+  z-index: var(--z-dropdown);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* 1 行 10 ページが入る幅（2026-09-15 の指示で広く・低くした）。
+     左端は本文の枠の中に収まるので、貼り付いた標記ツールには重ならない */
+  width: min(33rem, calc(100vw - 2 * var(--sp-6)));
+  max-height: 45vh;
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-surface) 94%, transparent);
+  box-shadow: var(--shadow-lg);
+  backdrop-filter: blur(6px);
+  animation: rrd-rail-popover-in var(--duration-fast) var(--ease-standard);
+}
+
+@keyframes rrd-rail-popover-in {
+  from { opacity: 0; transform: translateX(var(--sp-2)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* 演出（動き）が苦手な設定のときはアニメーションを付けない（機能は同じ） */
+@media (prefers-reduced-motion: reduce) {
+  .rrd-rail-popover { animation: none; }
+}
+
+.rrd-rail-popover__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rrd-rail-popover__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-rail-popover__now {
+  color: var(--color-primary);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-rail-popover__legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.rrd-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+.rrd-legend__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-surface);
+}
+
+.rrd-legend__dot.is-read { background: var(--color-text-muted); }
+.rrd-legend__dot.is-unread { border-style: dashed; background: var(--color-surface-alt); }
+.rrd-legend__dot.has-mark { background: var(--color-warning); }
+
+/* ページのマス。読みやすい大きさで、当たり判定も広く取る */
+.rrd-rail-popover__grid {
+  display: grid;
+  /* 1 行 10 ページ（固定列。2026-09-15 の指示） */
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: var(--sp-1);
+}
+
+.rrd-rail-popover__chip {
+  min-width: 0;
+  min-height: 2.5rem;
+  padding: var(--sp-1);
+  border-radius: var(--radius-md);
+  font-size: var(--fs-sm);
+}
+
+.rrd-rail-popover__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.rrd-rail-popover__hint {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* PDF の表示面 */
+.rrd-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 24rem;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  overflow: auto;
+}
+
+.rrd-status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.rrd-status:empty {
+  display: none;
+}
+
+.rrd-help {
+  width: 100%;
+  max-width: 44rem;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--color-warning);
+  border-radius: var(--radius-md);
+  background: var(--color-warning-soft);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+}
+
+.rrd-help__title {
+  margin: 0 0 var(--sp-2);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.rrd-help__list {
+  margin: 0;
+  padding-left: 1.25rem;
+  line-height: var(--lh-relaxed);
+}
+
+.rrd-help__note {
+  margin: var(--sp-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.rrd-help code {
+  padding: 0 2px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  font-size: var(--fs-xs);
+}
+
+/* ページ枠（canvas ＋ テキストレイヤー ＋ 標記レイヤーを重ねる） */
+.rrd-page-box {
+  position: relative;
+  flex: 0 0 auto;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.rrd-canvas {
+  display: block;
+}
+
+.rrd-text-layer,
+.rrd-mark-layer {
+  position: absolute;
+  inset: 0;
+}
+
+/* テキストレイヤー（pdf.js）。文字は透明にして選択だけ拾えるようにする。
+   大きさは描画時に viewport の px で入れる（2.0 と同じ）。 */
+.rrd-text-layer {
+  overflow: hidden;
+  line-height: 1;
+  z-index: 2;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+}
+
+.rrd-text-layer span,
+.rrd-text-layer br {
+  position: absolute;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.rrd-text-layer .markedContent {
+  top: 0;
+  height: 0;
+}
+
+.rrd-text-layer .endOfContent {
+  display: block;
+  position: absolute;
+  inset: 100% 0 0;
+  z-index: -1;
+  cursor: default;
+  user-select: none;
+}
+
+.rrd-text-layer ::selection {
+  background: var(--color-primary-soft);
+}
+
+/* 標記レイヤー（標記を絶対配置で重ねる）。
+   本文をいつでも選べるように、レイヤー自体は当たり判定を持たせず、
+   標記の矩形とポップアップだけがクリックを受ける。 */
+.rrd-mark-layer {
+  z-index: 3;
+  pointer-events: none;
+}
+
+.rrd-mark-layer.is-marking {
+  cursor: crosshair;
+}
+
+.rrd-mark-rect {
+  position: absolute;
+  padding: 0;
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+/* 標記を付ける操作中は、下の本文（テキストレイヤー）を選べるようにする */
+.rrd-mark-layer.is-marking .rrd-mark-rect {
+  pointer-events: none;
+}
+
+.rrd-mark-rect.is-underline {
+  background: transparent;
+}
+
+.rrd-pen {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.rrd-pen.is-draft {
+  pointer-events: none;
+}
+
+/* 標記のポップアップ（既存の標記を押したときの小窓。ダイアログと同じように読みやすくする） */
+.rrd-popup {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 18rem;
+  max-width: 80%;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-100%);
+  pointer-events: auto;
+}
+
+.rrd-popup__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rrd-popup__page {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.rrd-popup__close {
+  display: inline-flex;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.rrd-popup__word {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.rrd-popup__content {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-md);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rrd-popup__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-1);
+}
+
+/* ---------- 右カラム（読書状況・ページ一覧・標記の一覧） ---------- */
+
+.rrd-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.rrd-status-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.rrd-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rrd-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.rrd-status-row__label {
+  color: var(--color-text-muted);
+}
+
+.rrd-status-row__value {
+  color: var(--color-text-strong);
+  font-weight: var(--fw-medium);
+}
+
+.rrd-mark-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.rrd-mark-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.rrd-mark-group__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
+.rrd-mark-group__label {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.rrd-mark-group__count {
+  color: var(--color-text-subtle);
+}
+
+.rrd-mark-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rrd-mark-item:hover {
+  background: var(--color-surface-hover);
+}
+
+.rrd-mark-item.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+
+.rrd-mark-item__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rrd-mark-item__meta {
+  flex: 0 0 auto;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 読書履歴（本棚の「読書履歴」タブ／閲覧の「この本の読書履歴」で共通） ---------- */
+
+.rrd-history-filters {
+  margin-bottom: var(--sp-4);
+  padding-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 検索・リセットは絞り込みの行の右端にまとめる */
+.rrd-history-filters__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* ---------- 語彙・読み方の引き当て（標記ダイアログの中） ---------- */
+
+/* 選んだ語の意味を自動で引いて出す（取得元と、取れた意味） */
+.rrd-lookup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.rrd-lookup__status {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.rrd-lookup__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.rrd-lookup__row {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.rrd-lookup__row dt {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.rrd-lookup__row dd {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+}
+
+/* ピンイン（中国語の本の「読み方」）はこの小窓の主役なので、ひと回り大きく・主色で出す。
+   色は tokens.css の変数だけを使う（暗色テーマでも同じ作り方で読める）。 */
+.rrd-lookup__row--pinyin {
+  align-items: center;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface));
+}
+
+.rrd-lookup__row--pinyin dt {
+  color: var(--color-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-lookup__row--pinyin dd {
+  color: var(--color-primary);
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.02em;
+}
+
+.rrd-lookup__note {
+  margin: 0;
+  color: var(--color-warning);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- 標記の入力ダイアログ（語彙・読み方・メモ） ---------- */
+
+/* 小窓の文字をひと回り大きくして読みやすくする（2026-09-14 の指示）。
+   大きさは tokens.css の変数だけを使う。 */
+.rrd-mark-dialog .dialog__title {
+  font-size: var(--fs-lg);
+}
+
+.rrd-mark-dialog .dialog__body {
+  font-size: var(--fs-md);
+  line-height: var(--lh-relaxed);
+}
+
+.rrd-mark-dialog .field__label {
+  font-size: var(--fs-md);
+}
+
+.rrd-mark-dialog .input,
+.rrd-mark-dialog .textarea {
+  font-size: var(--fs-md);
+  line-height: var(--lh-relaxed);
+}
+
+.rrd-mark-dialog .textarea {
+  min-height: 5rem;
+}
+
+.rrd-mark-dialog .rrd-hint,
+.rrd-mark-dialog .field__error {
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+}
+
+/* ---------- 音声読み上げ（TTS。phase 1 はブラウザ内蔵の音声合成だけ） ---------- */
+
+/* 主ボタン（読み上げ⇄停止）と「はやさ／こえ」のポップオーバー。
+   ツールバーの中では 1 つのまとまりとして扱い、幅は中身に合わせる */
+/* 浮いている標記ツールバーの中の区切り線（標記ツールと読み上げのあいだ。2026-09-15） */
+.rrd-tools__sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.5rem;
+  background: var(--color-border);
+}
+
+/* 音声読み上げは、標記ツールと同じ浮いているツールバーの中に置く（2026-09-15 の指示） */
+.rrd-tts {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* 主ボタンはアイコンだけ。読み上げ中は `data-rd-tts-state="playing"` で色を変えて状態を出す */
+.rrd-tts__button {
+  color: var(--color-primary);
+}
+
+.rrd-tts__button[data-rd-tts-state='playing'] {
+  border-color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 14%, var(--color-surface));
+  color: var(--color-primary);
+}
+
+.rrd-tts__panel {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 16rem;
+  /* 浮いているツールバーの中に移したので、視口からはみ出さないように高さを抑える（2026-09-15） */
+  max-height: 60vh;
+  max-width: calc(100vw - 2 * var(--sp-4));
+  overflow: auto;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+  text-align: left;
+}
+
+.rrd-tts__head {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.rrd-tts__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.rrd-tts__label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.rrd-tts__select {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* 音声が無い言語・使えない理由（日本語）。枠と下地は tokens.css の変数だけで作る */
+.rrd-tts__warn {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px dashed var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+/* 読み上げ中の文のハイライト。**標記ではない**ので DB には書かない。
+   標記レイヤー（z-index 3）より下・テキストレイヤー（z-index 2）と同じ高さに置き、
+   当たり判定は持たせない（本文の選択・標記の操作を邪魔しない） */
+.rrd-tts-highlight {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.rrd-tts-highlight__rect {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--color-primary) 22%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-primary) 35%, transparent);
+}
+
+/* 読み上げが使えない理由の行（.rrd-help と同じ体裁。本文の枠の中で 1 行だけ出す） */
+.rrd-help--tts {
+  max-width: none;
+  padding: var(--sp-2) var(--sp-3);
+}
+
+/* ---------- ダイアログ ---------- */
+
+.rrd-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.rrd-dialog-grid .field--wide {
+  grid-column: 1 / -1;
+}
+
+/* ---------- 狭い画面（1 カラムに折り返す） ---------- */
+
+@media (max-width: 1024px) {
+  .rrd-reader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rrd-shelf {
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .rrd-shelf,
+  .rrd-viewer {
+    padding: var(--sp-3);
+  }
+
+  .rrd-toolbar {
+    margin-left: 0;
+  }
+
+  .rrd-dialog-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

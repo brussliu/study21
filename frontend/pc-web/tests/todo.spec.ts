@@ -73,7 +73,20 @@ async function setup(options: { items?: TodoRow[]; role?: string; attachTo?: boo
   const fetchMock = vi.fn(async (url: string) => {
     const target = String(url)
     if (target.includes('/todos/calendar')) {
-      return ok({ year: 2026, month: 9, cells: [{ dueDate: '2026-09-20', openCount: 2, doneCount: 1 }] })
+      return ok({
+        year: 2026, month: 9,
+        cells: [{
+          dueDate: '2026-09-20', openCount: 4, doneCount: 2,
+          tasks: [
+            { todoId: 1, title: '数学の宿題', status: 'TODO', priority: 'HIGH', child: false },
+            { todoId: 2, title: '英語の宿題', status: 'DOING', priority: 'NORMAL', child: false },
+            { todoId: 3, title: 'ワーク p.10', status: 'TODO', priority: 'NORMAL', child: true },
+            { todoId: 4, title: '塾の準備', status: 'TODO', priority: 'LOW', child: false },
+            { todoId: 5, title: '読書', status: 'DONE', priority: 'NORMAL', child: false },
+            { todoId: 6, title: '部屋の片付け', status: 'DONE', priority: 'LOW', child: false }
+          ]
+        }]
+      })
     }
     if (target.includes('/todos')) {
       return ok({
@@ -222,6 +235,8 @@ describe('TODO', () => {
     const head = wrapper.get('.table-section__head')
     expect(head.find('.todo-filters').exists()).toBe(true)
     expect(head.get('.table-section__title').text()).toBe('TODO一覧')
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(head.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
     expect(head.get('.table-section__meta').text()).toContain('全')
 
     // ラベルは置かず、aria-label と placeholder で意味を持たせる
@@ -314,13 +329,32 @@ describe('TODO', () => {
     await flushPromises()
 
     const day = wrapper.get('[data-due-date="2026-09-20"]')
-    expect(day.text()).toContain('2')  // 未完了
-    expect(day.text()).toContain('1')  // 完了
+    expect(day.text()).toContain('4')  // 未完了
+    expect(day.text()).toContain('2')  // 完了
 
     await day.trigger('click')
     await flushPromises()
     expect(wrapper.find('#todoDialogTitle').text()).toContain('新規登録')
     expect((wrapper.get('input[type="date"]').element as HTMLInputElement).value).toBe('2026-09-20')
+  })
+
+  it('カレンダーのマスに TODO の中身を並べる（件数だけでなく）', async () => {
+    const { wrapper } = await setup()
+
+    await wrapper.get('[data-tab="calendar"]').trigger('click')
+    await flushPromises()
+
+    const day = wrapper.get('[data-due-date="2026-09-20"]')
+    // 期限日がその日の TODO をタイトルで並べる（上限までは全部）
+    const titles = day.findAll('.todo-day__task').map((task) => task.text())
+    expect(titles.slice(0, 5)).toEqual(['数学の宿題', '英語の宿題', 'ワーク p.10', '塾の準備', '読書'])
+    // 上限を超えたぶんは「他 N 件」にまとめる
+    expect(day.get('.todo-day__more').text()).toContain('他 1 件')
+    // 完了は取り消し線、優先度は色で分かる
+    expect(day.get('[data-calendar-task="5"]').classes()).toContain('is-done')
+    expect(day.get('[data-calendar-task="1"]').classes()).toContain('is-high')
+    // 子タスクは少し下げて出す
+    expect(day.get('[data-calendar-task="3"]').classes()).toContain('is-child')
   })
 
   it('新規ダイアログの子タスクは Excel 風グリッドで行を増やせる', async () => {

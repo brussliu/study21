@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ApiError, formatIsoDateTime, useToast } from '@study21/web-shared'
+import AppIcon from '@/components/ui/AppIcon.vue'
 import {
   fetchBatchTasks,
   searchBatchExecutions,
   type BatchExecutionPage
 } from '@/api/batch'
-import { STATUS_BADGE_CLASSES, STATUS_LABELS, TYPE_LABELS, durationLabel, optionsOf } from '@/features/batch/batchLabels'
+import {
+  STATUS_BADGE_CLASSES,
+  STATUS_LABELS,
+  TYPE_LABELS,
+  batchTargetLabel,
+  durationLabel,
+  optionsOf
+} from '@/features/batch/batchLabels'
 import { paginationItems } from '@/features/pagination/pagination'
 import '@/features/batch/batch.css'
 
@@ -81,7 +89,7 @@ onMounted(async () => {
   <div class="batch-page">
     <div class="card table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">実行履歴</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> 実行履歴</h3>
         <span class="table-section__meta">全 {{ history.totalElements }} 件</span>
         <span class="batch-page__filters">
           <select v-model="historyFilters.batchCode" class="select" aria-label="バッチコード" @change="searchHistory">
@@ -113,6 +121,7 @@ onMounted(async () => {
             <tr>
               <th>実行ID</th>
               <th>バッチコード</th>
+              <th>対象</th>
               <th>種別</th>
               <th>起動</th>
               <th class="align-center">状態</th>
@@ -126,6 +135,8 @@ onMounted(async () => {
             <tr v-for="item in history.items" :key="item.executionId" :data-execution-id="item.executionId">
               <td class="cell-muted">{{ item.executionId }}</td>
               <td class="cell-strong">{{ item.batchCode }}</td>
+              <!-- 何を処理した行か（バッチコードは再利用されるため。分からない行は「—」） -->
+              <td class="cell-muted batch-page__target" data-batch-target>{{ batchTargetLabel(item) }}</td>
               <td>{{ TYPE_LABELS[item.batchType] }}</td>
               <td>{{ TYPE_LABELS[item.triggerType] }}</td>
               <td class="align-center">

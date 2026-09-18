@@ -1,0 +1,1056 @@
+/* AI 生図（図形管理＞【新規】＞ AI で作図する）と AI 画図助手・設定のレイアウト。
+   色は tokens.css の変数のみを使う（assets/prototype/*.css は変更しない）。
+   画面（流れ）だけを先に用意した段階なので、「準備中」を目立たせる見た目を多く使う。 */
+
+/* ---------- 一覧の【新規】で開く選択ダイアログ ---------- */
+
+.gm-create-dialog__choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+/* 2 つの作成方法（手動 / AI）。カード全体が押せるボタン */
+.gm-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.gm-choice:hover {
+  border-color: var(--color-primary);
+  background: var(--color-surface-hover);
+}
+
+.gm-choice:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* アイコンは 2 行ぶんの中央に置く */
+.gm-choice > .icon {
+  grid-row: 1 / span 2;
+  color: var(--color-primary);
+}
+
+.gm-choice__label {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  color: var(--color-text-strong);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-choice__note {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ---------- AI 生図の画面 ---------- */
+
+.gm-ai-page {
+  min-height: 0;
+}
+
+/* 「この画面は流れだけ」の案内（目立たせるが警告色は使わない） */
+.gm-ai-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-info);
+  border-radius: var(--radius-md);
+  background: var(--color-info-soft);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
+.gm-ai-notice .icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-info);
+}
+
+.gm-ai-notice--inline {
+  margin-top: var(--sp-3);
+}
+
+/* ステップの案内（1〜4） */
+.gm-ai-steps {
+  display: flex;
+  align-items: stretch;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-3) var(--sp-5);
+  border-bottom: 1px solid var(--color-border);
+  list-style: none;
+}
+
+.gm-ai-steps__item {
+  display: flex;
+  min-width: 0;
+}
+
+.gm-ai-step {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.gm-ai-step:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.gm-ai-step:disabled {
+  color: var(--color-text-subtle);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.gm-ai-step.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-strong);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-ai-step.is-done {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.gm-ai-step__no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-ai-step.is-active .gm-ai-step__no {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+/* ステップの中身 */
+.gm-ai-body {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.gm-ai-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.gm-ai-panel__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+/* ステップの移動（戻る／次へ） */
+.gm-ai-foot {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+}
+
+/* ---------- 1. 画像のアップロード ---------- */
+
+.gm-ai-drop {
+  position: relative;
+  overflow: hidden;
+}
+
+.gm-ai-drop__title {
+  color: var(--color-text);
+  font-weight: var(--fw-medium);
+}
+
+.gm-ai-drop__note {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* input 自体は見えなくする（枠を押したら画像を選ぶ。書籍管理と同じ作り） */
+.gm-ai-drop__input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 選んだ画像の確認 */
+.gm-ai-picked {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.gm-ai-picked__thumb {
+  flex: none;
+  max-width: 220px;
+  max-height: 160px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  object-fit: contain;
+}
+
+.gm-ai-picked__info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.gm-ai-picked__name {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  word-break: break-all;
+}
+
+/* ---------- 2. 切り抜き ---------- */
+
+.gm-ai-crop {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.gm-ai-crop__stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+/* 切り抜き枠の基準（画像と同じ大きさの箱） */
+.gm-ai-crop__canvas {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+  user-select: none;
+  touch-action: none;
+}
+
+.gm-ai-crop__image {
+  display: block;
+  max-width: 100%;
+  max-height: 52vh;
+  object-fit: contain;
+}
+
+/* 切り抜き枠（内側をドラッグすると移動） */
+.gm-ai-crop__box {
+  position: absolute;
+  border: 1.5px dashed var(--color-primary-strong);
+  background: rgba(255, 255, 255, 0.12);
+  cursor: move;
+}
+
+/* 外側を影で覆い、送る範囲が分かるようにする（枠の外側だけが暗くなる） */
+.gm-ai-crop__box {
+  /* 遮る色は設計システムのオーバーレイと同じ色（rgba(13, 20, 28, …)）を使う */
+  box-shadow: 0 0 0 100vmax rgba(13, 20, 28, 0.45);
+}
+
+.gm-ai-crop__handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--color-primary-strong);
+  border-radius: 2px;
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.gm-ai-crop__handle--nw { top: -6px; left: -6px; cursor: nwse-resize; }
+.gm-ai-crop__handle--n  { top: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.gm-ai-crop__handle--ne { top: -6px; right: -6px; cursor: nesw-resize; }
+.gm-ai-crop__handle--e  { top: calc(50% - 6px); right: -6px; cursor: ew-resize; }
+.gm-ai-crop__handle--se { bottom: -6px; right: -6px; cursor: nwse-resize; }
+.gm-ai-crop__handle--s  { bottom: -6px; left: calc(50% - 6px); cursor: ns-resize; }
+.gm-ai-crop__handle--sw { bottom: -6px; left: -6px; cursor: nesw-resize; }
+.gm-ai-crop__handle--w  { top: calc(50% - 6px); left: -6px; cursor: ew-resize; }
+
+.gm-ai-crop__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* ラベルと値の行（切り抜きの状態・送信前の確認） */
+.gm-ai-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.gm-ai-rows__row {
+  display: grid;
+  grid-template-columns: 9em minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: baseline;
+}
+
+.gm-ai-rows__row dt {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.gm-ai-rows__row dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  word-break: break-word;
+}
+
+/* ---------- 3. 分類の指定 ---------- */
+
+.gm-ai-fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.gm-ai-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.gm-ai-radio:hover {
+  border-color: var(--color-primary);
+}
+
+.gm-ai-radio input {
+  margin-top: 3px;
+  accent-color: var(--color-primary);
+}
+
+.gm-ai-radio__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.gm-ai-radio__label {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.gm-ai-radio__help {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ---------- 4. 送信前の確認 ---------- */
+
+.gm-ai-confirm {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.gm-ai-confirm__preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.gm-ai-confirm__thumb {
+  max-width: 100%;
+  max-height: 260px;
+  background: #fff;
+  object-fit: contain;
+}
+
+.gm-ai-confirm__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  text-align: center;
+}
+
+.gm-ai-confirm__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.gm-ai-confirm__subtitle {
+  margin: var(--sp-2) 0 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- 結果プレビュー（AI の生成結果が出る場所。いまは準備中） ---------- */
+
+.gm-ai-result__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/* GeoGebra のコマンドを出す枠（等幅。中身は準備中の定型文だけ） */
+.gm-ai-result__commands {
+  margin: 0;
+  padding: var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 1100px) {
+  .gm-ai-crop,
+  .gm-ai-confirm {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* ---------- AI 画図助手（作図画面の**浮動ウィンドウ**） ----------
+
+   作図をしながら使うので**モーダルにしない**（利用者の指示）。
+   ・背景を覆わない（`overlay` を置かず、背景クリックでも閉じない）
+   ・動かせるのはタイトルバーだけ（`cursor: move` もそこだけ）
+   ・見た目は設計システムのダイアログ（`dialogs.css` の `.dialog`）に合わせる
+   ・色は `tokens.css` の変数だけを使う（暗色テーマも自動で追随する）
+   ------------------------------------------------------------------- */
+
+.gm-assist-window {
+  position: fixed;
+  /* モーダルのダイアログ（--z-dialog）より下、サイドバーより上 */
+  z-index: var(--z-overlay);
+  display: flex;
+  flex-direction: column;
+  /* 既定の大きさ。実際の大きさは JS が style で入れる（画面に収まる範囲で） */
+  width: 380px;
+  height: 560px;
+  min-width: 320px;
+  min-height: 320px;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-dialog);
+  overflow: hidden;
+  animation: gm-assist-in var(--duration-base) var(--ease-standard);
+}
+
+@keyframes gm-assist-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* タイトルバー（**ここだけ**つまんで動かせる） */
+.gm-assist-window__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  flex: 0 0 auto;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+}
+
+.gm-assist-window__head .dialog__title {
+  font-size: var(--fs-md);
+}
+
+.gm-assist-window__spacer {
+  margin-left: auto;
+}
+
+.gm-assist-window__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  /* 窓の高さが足りないときは、ここだけがスクロールする（入力欄は下に固定） */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-4) var(--sp-4) var(--sp-3);
+}
+
+/* ---------- 会話ログ（利用者の指示 ↔ AI の応答） ---------- */
+
+.gm-assist-log {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gm-assist-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* 利用者の指示（右寄せの吹き出し） */
+.gm-assist-step__user {
+  align-self: flex-end;
+  max-width: 88%;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  background: var(--color-primary-soft);
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 自動修正の印（実行できなかった案のあとに出した、AI の再提案であることを示す） */
+.gm-assist-step__badge {
+  display: inline-block;
+  margin-left: var(--sp-2);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-pill);
+  color: var(--color-primary);
+  font-size: var(--fs-2xs, var(--fs-xs));
+  vertical-align: middle;
+}
+
+/* AI の応答（左寄せ。作図の説明とコマンド） */
+.gm-assist-step__ai {
+  align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: 96%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) var(--radius-sm);
+  background: var(--color-surface-alt);
+}
+
+.gm-assist-step__description {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+.gm-assist-step__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+}
+
+/* 送信先の案内（1 行だけ。詳しい説明は title に置く） */
+.gm-assist-window__note {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs, var(--fs-xs));
+}
+
+.gm-assist-window__notice {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 状態は**短いタグ**にする（長い説明は書かない。利用者の指示） */
+.gm-assist-step__status {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs, var(--fs-xs));
+  line-height: 1.6;
+}
+
+.gm-assist-step.is-running .gm-assist-step__status {
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+.gm-assist-step.is-pending .gm-assist-step__status {
+  border-color: var(--color-primary);
+  color: var(--color-primary-strong);
+}
+
+.gm-assist-step.is-applied .gm-assist-step__status {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.gm-assist-step.is-failed .gm-assist-step__status {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+/* AI の説明は既定で 2 行まで（長いときだけ「詳細」で開く） */
+.gm-assist-step__description.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.gm-assist-step__detail {
+  align-self: flex-start;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--color-link);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.gm-assist-step__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.gm-assist-step__commands {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 反映済み・破棄・失敗は控えめにする（いま操作するのは未反映のものだけ） */
+.gm-assist-step.is-applied .gm-assist-step__ai,
+.gm-assist-step.is-discarded .gm-assist-step__ai,
+.gm-assist-step.is-failed .gm-assist-step__ai {
+  background: var(--color-surface);
+}
+
+.gm-assist-step.is-superseded {
+  opacity: 0.7;
+}
+
+.gm-assist-step.is-sending .gm-assist-step__ai {
+  border-style: dashed;
+}
+
+.gm-assist-step__commands:empty {
+  display: none;
+}
+
+.gm-assist-log__empty {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 中身が無いときは場所を取らない（未反映の変更案が無いときの枠） */
+.gm-assist-log__empty:empty,
+.gm-assist-step__commands:empty {
+  display: none;
+}
+
+/* 大きさを変える把手（右下）。つまむと大きさが変わる（位置は動かさない） */
+.gm-assist-window__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+  user-select: none;
+  /* 斜めの線 2 本で「つまめる」ことを示す（色は tokens の変数だけ） */
+  background:
+    linear-gradient(135deg, transparent 45%, var(--color-border-strong) 45%, var(--color-border-strong) 55%, transparent 55%)
+      no-repeat 100% 100% / 8px 8px,
+    linear-gradient(135deg, transparent 45%, var(--color-border) 45%, var(--color-border) 55%, transparent 55%)
+      no-repeat 100% 100% / 14px 14px;
+}
+
+/* ---------- 指示の入力（下部） ---------- */
+
+.gm-assist-compose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  /* 窓の下に固定する（本文をスクロールしても【送信】が隠れない） */
+  flex: 0 0 auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.gm-assist-compose__row {
+  display: flex;
+  /* 反映方法の選択を置かなくなり、送信は右端のまま（利用者の指示） */
+  justify-content: flex-end;
+  gap: var(--sp-3);
+}
+
+/* ---------- システム設定「AI 生図」 ---------- */
+
+.gm-ai-set {
+  margin-top: var(--sp-4);
+}
+
+.gm-ai-set__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/* 幅いっぱいに使う項目（指示テンプレート・注意書き） */
+.gm-ai-set__field--wide {
+  grid-column: 1 / -1;
+}
+
+.gm-ai-set__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.gm-ai-set__label {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.gm-ai-set__help {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 有効／無効のスイッチ（設計システムの設定画面と同じ見た目） */
+.gm-ai-set__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.gm-ai-set__switch {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.gm-ai-set__switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+.gm-ai-set__radios {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.gm-ai-set__radio {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.gm-ai-set__radio input {
+  accent-color: var(--color-primary);
+}
+
+.gm-ai-set__foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-5);
+  border-top: 1px solid var(--color-border);
+}
+
+/* 状態と【戻す】（アイコン）を同じ行に置く。戻すは右端（利用者の指示） */
+.gm-assist-step__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.gm-assist-step__restore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.gm-assist-step__restore:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* コマンド（コピーのアイコンを右上に重ねる） */
+.gm-assist-step__commands-wrap {
+  position: relative;
+}
+
+.gm-assist-step__copy {
+  position: absolute;
+  top: var(--sp-1, 4px);
+  right: var(--sp-1, 4px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.gm-assist-step__copy:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* ---------- 図形管理の一覧に出す AI 生図のタスク ---------- */
+
+/* カードの並び（図形一覧のカードと同じ幅の基準にする） */
+.gm-ai-tasks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.gm-ai-task {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.gm-ai-task__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.gm-ai-task__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+.gm-ai-task__text {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+/* 作図方法・作図の種類・実際の処理段階（項目名と値を 2 列に分ける） */
+.gm-ai-task__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+}
+
+.gm-ai-task__row {
+  display: grid;
+  grid-template-columns: 8.5em minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.gm-ai-task__row dt {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.gm-ai-task__row dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* 実際に作る種類（決まったときだけ併記する） */
+.gm-ai-task__resolved {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 追加入力待ちの質問の件数（利用者の操作待ちなので控えめに目立たせる） */
+.gm-ai-task__questions {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+}
+
+/* 失敗の理由（サーバーの日本語をそのまま出す。隠さない） */
+.gm-ai-task__error {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-danger);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-soft);
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.gm-ai-task__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: auto;
+  padding-top: var(--sp-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.gm-ai-task__updated,
+.gm-ai-task__wait {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 処理中の案内（ボタンは出さない。幅が狭いときは次の行へ） */
+.gm-ai-task__wait {
+  flex: 1 1 100%;
+}
+
+/* タスクを取得できなかったときの案内（図形一覧はそのまま使える） */
+.gm-ai-tasks__note {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}

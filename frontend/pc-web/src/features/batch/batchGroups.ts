@@ -10,8 +10,21 @@ import type { BatchTaskRow } from '@/api/batch'
  *
  * 2.1 で追加・改名したタスク:
  *   * batL01 → **batS01**（プロキシサービス。タブは「システム」）
+ *   * **batC51**（AI生図の AI 生成。タブは「図形管理」＝2.1 で足した新タブ）
+ *   * **batC52**（AI 画図助手。タブは同じ「図形管理」）
  *   * 上の表に無い新しいコードは、設定ページ（pageCode）から推定し、
  *     それでも決まらなければ「その他」に入れる（タブから漏れないようにするため）。
+ *
+ * **2026-09 のバッチ構成変更（AI 生図）**:
+ *   以前は 1 操作で batC51（画像取込・前処理）→ batC52（AI 生成）→ batC53（検証・確定）の
+ *   3 バッチを通っていたが、**AI を呼ぶ工程だけをバッチに残した**:
+ *     * `batC51`＝AI 生成（**旧 batC52 の改名**。番号を 1 つ繰り上げた）
+ *     * 画像の取込・前処理と、コマンドの検証・確定は**バッチではない**（バックエンドの通常コードが実行）
+ *     * `batC52`＝**AI 画図助手**（空いた番号を再利用。依頼を受けたらその場で実行）
+ *   そのため `batC53` は**この表から外した**。ただし `BAT_バッチ実行履歴情報` には
+ *   **古い batC52（＝昔の AI 生図 AI 生成）と新しい batC52（AI 画図助手）の履歴が同居する**。
+ *   番号だけでは区別できないので、画面がコード決め打ちで意味を推測しないようにしてある
+ *   （タブは設定ページから推定し、履歴は**コードをそのまま表示**する）。
  */
 
 /** タブの表示順（「すべて」はこの前に付く）。 */
@@ -23,6 +36,8 @@ export const BATCH_GROUP_ORDER = [
   '英作文',
   '英語穴埋め',
   '英語長文精読',
+  '図形管理',
+  '授業録音',
   'AI共通・OCR',
   '学習モニター',
   'システム',
@@ -62,6 +77,14 @@ const TASK_GROUPS: Record<string, string> = {
   'batC42': '日本語単語',
   'batC43': '日本語単語',
   'batC44': '日本語単語',
+  // AI生図の AI 生成（画像 → 分類 → AI → GeoGebra コマンド）。バッチはこの 1 つだけ。
+  // 画像の取込・前処理と、コマンドの検証・確定はバックエンドの通常コードが実行する（履歴を残さない）。
+  'batC51': '図形管理',
+  // AI 画図助手（作図画面の指示。依頼を受けたらその場で実行する。旧 batC52 の番号を再利用）
+  'batC52': '図形管理',
+  // 授業録音 / AI 授業記録（フェーズ分析 batC61・最終まとめ batC62）
+  'batC61': '授業録音',
+  'batC62': '授業録音',
   'batC91': 'AI共通・OCR',
   'batL02': '学習モニター',
   'batL03': '学習モニター',
@@ -79,6 +102,7 @@ const TASK_GROUPS: Record<string, string> = {
  */
 const PAGE_GROUPS: Record<string, string> = {
   AI_MODEL: 'AI共通・OCR',
+  CLASSROOM_AI: '授業録音',
   DAILY_REPORT: 'システム',
   ENGLISH_CLOZE: '英語穴埋め',
   ENGLISH_ESSAY: '英作文',
@@ -86,6 +110,7 @@ const PAGE_GROUPS: Record<string, string> = {
   ENGLISH_READING_INTENSIVE: '英語長文精読',
   ENGLISH_WORD_DETAIL_AI: '英語単語',
   ENGLISH_WORD_TEXTBOOK_AI: '英語単語',
+  GEOMETRY_AI: '図形管理',
   JAPANESE_WORD_AI: '日本語単語',
   STUDY_MONITOR: '学習モニター',
   SYSTEM: 'システム',

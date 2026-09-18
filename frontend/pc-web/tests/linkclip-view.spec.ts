@@ -85,6 +85,8 @@ describe('LinkClipView', () => {
     expect(text).toContain('OpenAI料金及びAPI key')
     expect(text).toContain('まず投げ込む一時置き場')
     expect(text).toContain('保存リンク一覧')
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.card__title').get('use').attributes('href')).toBe('#i-list')
     expect(text).toContain('OpenAI')
     // 動画の長さ（1056 秒 = 17:36）とローカルファイル表示
     expect(text).toContain('17:36')

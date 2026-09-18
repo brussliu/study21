@@ -223,7 +223,7 @@ onMounted(async () => {
     <!-- 一覧 -->
     <div class="card table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">AI呼出履歴</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> AI呼出履歴</h3>
         <span class="table-section__meta">全 {{ page.totalElements }} 件</span>
       </div>
 

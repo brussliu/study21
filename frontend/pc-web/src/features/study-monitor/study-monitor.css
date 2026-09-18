@@ -257,7 +257,12 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* 見出しは一覧アイコン（#i-list）＋文言。他の一覧見出し（.card__title /
+   .table-section__title）と同じく、アイコンと文字を横に並べて中央で揃える。 */
 .section-heading h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
   margin: 0 0 2px;
   font-size: var(--fs-sm);
   font-weight: var(--fw-semibold);

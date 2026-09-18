@@ -89,7 +89,7 @@ async function mountTopbar(role: 'STUDENT' | 'GUARDIAN' | 'ADMIN', profile: Prof
 }> {
   const pinia = createPinia()
   setActivePinia(pinia)
-  useAuthStore().fakeLogin(role)
+  useAuthStore().login(role, 'テスト利用者')
   const router = createAppRouter()
   await router.push('/student/home')
   await router.isReady()

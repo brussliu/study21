@@ -44,6 +44,14 @@
   color: var(--color-danger);
 }
 
+/* 実行履歴の「対象」列。狭い幅でも表が崩れないように、折り返さず 1 行で切る。 */
+.batch-page__target {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* メッセージ・エラー詳細は長いので折り返して 2 行までで切る。 */
 .batch-page__message {
   display: -webkit-box;

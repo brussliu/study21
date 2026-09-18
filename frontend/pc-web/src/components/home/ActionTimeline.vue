@@ -180,7 +180,7 @@ const resultLegend = ANALYSIS_RESULTS.map((result) => ({
     <div class="card__body">
       <div class="table-section__head home-timeline__head">
         <div>
-          <h3 class="table-section__title"><AppIcon name="video" size="sm" /> 行動タイムライン</h3>
+          <h3 class="table-section__title"><AppIcon name="list" size="sm" /> 行動タイムライン</h3>
           <p class="home-timeline__lead">学習状況モニターの分析結果を時間軸で表示します。</p>
         </div>
         <div class="home-timeline__filters">

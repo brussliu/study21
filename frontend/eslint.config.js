@@ -9,6 +9,8 @@ export default tseslint.config(
       '**/dist/**',
       '**/coverage/**',
       '**/src/views/prototype/generated/**',
+      // 同梱ライブラリ（pdf.js など）。第三者のビルド済みファイルなので lint しない。
+      '**/public/lib/**',
       '**/*.d.ts',
       '**/vite.config.ts',
       '**/vitest.config.ts'

@@ -38,7 +38,10 @@ async function onSubmit(): Promise<void> {
     const account = response.data
     auth.login(account.accountType, account.displayName || account.loginId)
     toast.success('ログインしました')
-    await router.push(account.accountType === 'GUARDIAN' ? '/parent/home' : '/student/home')
+    // 管理者（2026-09-14 の決定 Q8 で user-api でも認証できる）は管理画面へ
+    await router.push(account.accountType === 'ADMIN'
+      ? '/admin/home'
+      : account.accountType === 'GUARDIAN' ? '/parent/home' : '/student/home')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'ログインに失敗しました。'
     errorMessage.value = message

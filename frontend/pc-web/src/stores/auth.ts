@@ -20,12 +20,6 @@ function readSession(): AuthSession | null {
   }
 }
 
-const DEFAULT_NAMES: Record<Role, string> = {
-  ADMIN: 'テスト管理者',
-  STUDENT: '山田 太郎',
-  GUARDIAN: '山田 花子'
-}
-
 export const useAuthStore = defineStore('auth', () => {
   const initial = readSession()
   const currentUser = ref<string | null>(initial?.username ?? null)
@@ -56,11 +50,6 @@ export const useAuthStore = defineStore('auth', () => {
     login(role.value, normalized)
   }
 
-  /** 管理者画面の既存モック認証用。一般ユーザーログインでは使用しない。 */
-  function fakeLogin(nextRole: Role, username?: string): void {
-    login(nextRole, username?.trim() || DEFAULT_NAMES[nextRole])
-  }
-
   function logout(): void {
     if (role.value === 'STUDENT' || role.value === 'GUARDIAN') {
       void fetch('/api/user/logout', { method: 'POST' }).catch(() => undefined)
@@ -70,5 +59,5 @@ export const useAuthStore = defineStore('auth', () => {
     window.sessionStorage.removeItem(STORAGE_KEY)
   }
 
-  return { isAuthenticated, currentUser, role, login, updateDisplayName, fakeLogin, logout }
+  return { isAuthenticated, currentUser, role, login, updateDisplayName, logout }
 })

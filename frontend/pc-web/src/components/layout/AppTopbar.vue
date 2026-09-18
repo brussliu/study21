@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import UserProfileDialog from '@/components/account/UserProfileDialog.vue'
 import PasswordChangeDialog from '@/components/account/PasswordChangeDialog.vue'
+import BrowserPluginMenu from '@/features/browserext/BrowserPluginMenu.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useThemeStore } from '@/stores/theme'
 import { reloadParentPage } from '@/features/user-profile/reloadPage'
@@ -119,6 +120,9 @@ onBeforeUnmount(() => {
         <AppIcon name="user" size="sm" />
         <span>{{ roleText }}</span>
       </span>
+
+      <!-- プラグイン（ブラウザ拡張）のダウンロード。学生・保護者の表示のとなりに置く -->
+      <BrowserPluginMenu />
 
       <div ref="anchor" class="up-anchor">
         <button

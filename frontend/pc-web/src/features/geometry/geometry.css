@@ -1,0 +1,734 @@
+/* 図形管理（数学勉強＞図形管理）のレイアウト。
+   色は tokens.css の変数のみを使う（assets/prototype/*.css は変更しない）。 */
+
+.gm-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.gm-page__loading,
+.gm-page__empty {
+  margin: 0;
+  padding: var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* ---------- 検索条件の下に出すタグ候補 ---------- */
+
+.gm-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.gm-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.gm-tag-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.gm-tag-chip.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.gm-tag-chip__count {
+  color: var(--color-text-subtle);
+  font-weight: var(--fw-regular);
+}
+
+/* ---------- 図形のカード ---------- */
+
+.gm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.gm-card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  transition: border-color var(--duration-fast) var(--ease-standard),
+    box-shadow var(--duration-fast) var(--ease-standard);
+}
+
+.gm-card:hover {
+  border-color: var(--color-primary);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.08));
+}
+
+/* サムネイル（GeoGebra が描いた図）。
+   浅色の枠線を付けて、白い作図でも輪郭が分かるようにする（利用者の指示）。
+   一覧カードと作図画面で同じ枠（同じ class を使う）。色は tokens の変数だけ。 */
+.gm-card__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 4 / 3;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.gm-card__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.gm-card__thumb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.gm-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  min-width: 0;
+}
+
+.gm-card__title {
+  margin: 0;
+  min-width: 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-card__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* 書名とバッジは 1 行に詰め込まず、書名の下の行に出す（利用者の指示） */
+.gm-card__head {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+.gm-card__no {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+.gm-card__memo {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.gm-card__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.gm-card__meta {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.gm-card__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--color-border);
+  /* 操作アイコンの帯はカード本体と面の色を変えて、ひとまとまりに見せる（利用者の指示）。
+     色は tokens の変数から作り、暗色テーマでもそのまま成立させる（生の色は書かない）。 */
+  background: color-mix(in srgb, var(--color-surface-alt) 70%, transparent);
+  border-bottom-left-radius: calc(var(--radius-md) - 1px);
+  border-bottom-right-radius: calc(var(--radius-md) - 1px);
+}
+
+.gm-card__actions-spacer {
+  margin-left: auto;
+}
+
+/* ---------- 作図画面（GeoGebra エディタ） ---------- */
+
+/* 1 画面に収める（縦に長くスクロールさせない）。
+   作図枠の高さは JS がビューポートの残りから入れるので、ページ自身の下余白は要らない。 */
+.page:has(.gm-draw-page) {
+  padding-bottom: 0;
+}
+
+.gm-draw-page {
+  min-height: 0;
+}
+
+.gm-draw {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+  /* カードの内側の余白（左の入力欄が枠に貼り付かないように） */
+  padding: var(--sp-4) var(--sp-5) var(--sp-5);
+}
+
+/* 入力欄を折りたたんだら作図エリアを画面幅いっぱいに使う（1 カラム） */
+[data-gm-draw-collapsed='true'] .gm-draw {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.gm-draw__side {
+  display: flex;
+  flex-direction: column;
+  /* 1 画面に収めるため、入力欄の間隔は詰めめにする（スクロールバーを出さない。利用者の指示） */
+  gap: var(--sp-2);
+  /*
+   * 入力欄には**縦スクロールバーを出さない**（利用者の指示）。
+   * 中身が作図エリアより高くなったときは、入力欄の中でスクロールさせず、
+   * カード（ページ）ごと縦に伸びる＝ページをスクロールして全体を見せる
+   * （狭い画面で「小さなスクロール領域」ができるより読みやすい）。
+   */
+  min-width: 0;
+}
+
+/* 作図タイプ（2 択なのでラジオで出す） */
+.gm-draw__types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.gm-draw__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+/* GeoGebra コマンド（見出しと操作を 1 行にまとめる） */
+.gm-command__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+
+.gm-command__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* コピーして開いたときの案内 */
+.gm-draw__source {
+  padding: 0 var(--sp-5) var(--sp-2);
+}
+
+/* 上部の操作行に置く表示の切替（座標軸・グリッド）。
+   見出しの行に収めるため、ラベルは短く・1 行にする。色は tokens の変数だけ。 */
+.gm-draw__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.gm-draw__toggle input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* サムネイルのプレビュー: **左欄（入力欄）と同じ幅**（利用者の指示）。
+   枠は一覧カードと同じ 4:3 で、画像は縦横比を保って収める（はみ出さない）。 */
+.gm-draw__thumb {
+  width: 100%;
+  max-width: 100%;
+}
+
+.gm-draw__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* GeoGebra を載せる枠（アプレットは iframe を差し込むので中身は GeoGebra 任せ）
+   高さは JS（measureFrame）がビューポートの残りから入れる。 */
+.gm-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+/* 枠の下の案内の行間は `.gm-hint` の後に定義する（ファイル末尾） */
+
+.gm-stage__frame {
+  position: relative;
+  width: 100%;
+  min-height: 420px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+/* GeoGebra のアプレット（iframe）を枠いっぱいに広げる */
+.gm-stage__mount {
+  position: absolute;
+  inset: 0;
+}
+
+/* GeoGebra のアプレットが読み込まれるまで出す案内 */
+.gm-stage__status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  text-align: center;
+  z-index: 1;
+}
+
+/* 保存フォーム */
+.gm-form {
+  display: flex;
+  flex-direction: column;
+  /* 入力欄どうしの間隔は詰めめにする（タグ候補と「GeoGebra コマンド」の間に空白行を作らない） */
+  gap: var(--sp-2);
+}
+
+.gm-form__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.gm-tag-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.gm-tag-input__list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* タグが 1 つも無いときは**行そのものを作らない**（「タグ」と入力欄の間に空白行が出ていた） */
+.gm-tag-input__list:empty {
+  display: none;
+}
+
+.gm-tag-input__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-xs);
+}
+
+.gm-tag-input__remove {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+/* タグの入力と【追加】は横並び（入力欄が伸び、ボタンは内容幅） */
+.gm-tag-input__row {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.gm-tag-input__row .input {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+
+.gm-tag-input__row .btn {
+  flex: 0 0 auto;
+}
+
+.gm-tag-suggestions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+/* 候補のチップは小さく（左パネルの中身が 1 画面に収まるように） */
+.gm-tag-suggestion {
+  padding: 0 var(--sp-2);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.gm-tag-suggestion:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* タグ候補の「もっと見る」／「閉じる」 */
+.gm-tag-more {
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: transparent;
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.gm-tag-more:hover {
+  text-decoration: underline;
+}
+
+/* コマンド入力（**いまの作図そのもの**を出し、貼り付けて実行もできる） */
+.gm-command {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.gm-command textarea {
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+/* コマンド欄の状態（自動同期／編集中）。行の高さを増やさないよう 1 行にまとめる。 */
+.gm-command__state {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+/* 編集中は色で区別する（まだ作図に反映されていないことが分かるように） */
+.gm-command__state.is-editing {
+  color: var(--color-text);
+}
+
+.gm-command__reset {
+  padding: 0 var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.gm-command__reset:hover {
+  text-decoration: none;
+}
+
+/* コマンドにできない作図の案内（**黙って落とさない**ための表示） */
+.gm-command__limit {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-1);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+}
+
+.gm-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 枠の下の案内（1 画面に収めるため行間を詰める。`.gm-hint` より後に置いて上書きする） */
+.gm-stage__hint {
+  line-height: 1.5;
+}
+
+.gm-required {
+  margin-left: var(--sp-1);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+}
+
+.gm-list-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.gm-list-head__spacer {
+  margin-left: auto;
+}
+
+/* 見出し行に並べる作図の操作（入力欄・中央表示・全消去・保存） */
+/* 作図の操作は 1 行に並べる（折り返すと作図エリアが狭くなるため）。
+   幅が狭いときは下のメディアクエリでラベルを落として幅を稼ぐ。 */
+.gm-draw__actions {
+  flex-wrap: nowrap;
+}
+
+/* 幅が狭いときは【GeoGebra を再読み込み】をアイコンだけにする（title と aria-label は残す） */
+@media (max-width: 1440px) {
+  .gm-draw__reload-label {
+    display: none;
+  }
+}
+
+.gm-draw__actions {
+  flex-wrap: wrap;
+}
+
+/* ---------- 印刷プレビューの小窓（一覧のカードの【印刷】） ---------- */
+
+.gm-print-dialog {
+  /* 図形 1 件の紙面なので、大きくしすぎない */
+  max-width: 720px;
+}
+
+/* 紙面（印刷するのはこの中だけ） */
+.gm-print-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* 図だけのとき（既定）は図を主役にする */
+.gm-print-sheet--figure .gm-print-sheet__thumb {
+  min-height: 320px;
+}
+
+.gm-print-sheet--figure .gm-print-sheet__thumb img {
+  max-height: 52vh;
+}
+
+/* 詳細を出すときは、その分だけ図を小さくする */
+.gm-print-sheet--detail .gm-print-sheet__thumb img {
+  max-height: 32vh;
+}
+
+.gm-print-sheet__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  word-break: break-word;
+}
+
+.gm-print-sheet__no {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  word-break: break-all;
+}
+
+/* サムネイルは大きく出す（紙にしたときの見え方に合わせる） */
+.gm-print-sheet__thumb {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.gm-print-sheet__thumb img {
+  max-width: 100%;
+  max-height: 40vh;
+  object-fit: contain;
+  background: #fff;
+}
+
+.gm-print-sheet__thumb-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 種別・区分・タグ・更新・メモ（有るときだけ） */
+.gm-print-sheet__fields {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.gm-print-sheet__row {
+  display: grid;
+  grid-template-columns: 5em minmax(0, 1fr);
+  gap: var(--sp-3);
+  align-items: baseline;
+}
+
+.gm-print-sheet__row dt {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.gm-print-sheet__row dd {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  word-break: break-word;
+}
+
+/* 【詳細情報も印刷する】のチェック（操作の行の左に置く。紙には出さない） */
+.gm-print-dialog__option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.gm-print-dialog__option input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+
+/* 印刷するとき: 紙にはプレビューの紙面だけを出す
+   （サイドバー・上部バー・検索条件・一覧と、小窓の操作ボタンは出さない） */
+@media print {
+  /* .app はアプリの画面そのもの（min-height: 100vh なので、残すと紙に空白の 1 ページができる）。
+     小窓は body の直下に出しているので、ここを消しても紙面は残る。 */
+  html.gm-print-open .app,
+  html.gm-print-open .sidebar,
+  html.gm-print-open .topbar,
+  html.gm-print-open .breadcrumb,
+  html.gm-print-open .page-head,
+  html.gm-print-open .gm-page,
+  html.gm-print-open .gm-print-dialog__foot,
+  html.gm-print-open .dialog__close {
+    display: none !important;
+  }
+
+  /* 小窓は紙の上では「紙面そのもの」にする（背景・影・枠は出さない） */
+  html.gm-print-open .overlay {
+    position: static;
+    display: block;
+    padding: 0;
+    background: none;
+    animation: none;
+  }
+
+  html.gm-print-open .gm-print-dialog {
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+    overflow: visible;
+  }
+
+  html.gm-print-open .gm-print-dialog .dialog__body {
+    overflow: visible;
+    padding: 0;
+  }
+
+  html.gm-print-open .gm-print-sheet {
+    border: 0;
+    padding: 0;
+  }
+
+  /* 紙の上では縮めない（プレビューの大きさのまま出す）。
+     図だけのときは紙面いっぱいに、詳細を出すときは情報の分だけ小さく出す
+     （切り替えは画面と同じ状態のまま紙に出る）。 */
+  html.gm-print-open .gm-print-sheet--figure .gm-print-sheet__thumb img {
+    max-height: none;
+  }
+
+  html.gm-print-open .gm-print-sheet--figure .gm-print-sheet__thumb {
+    min-height: 0;
+  }
+
+  html.gm-print-open .gm-print-sheet--detail .gm-print-sheet__thumb img {
+    max-height: 45vh;
+  }
+}

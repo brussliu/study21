@@ -170,7 +170,7 @@ onMounted(() => { if (isFamilyUser.value) void load() })
 
     <div class="table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">テスト一覧</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> テスト一覧</h3>
         <span class="table-section__meta">全 {{ rows.length }} 件</span>
       </div>
       <div class="table-wrap">

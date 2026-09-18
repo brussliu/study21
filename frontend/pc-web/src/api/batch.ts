@@ -21,7 +21,17 @@ export interface BatchTaskRow {
   lastRunAt: string | null
   /** 有効／無効を切り替えられるか（S / L / R のみ true） */
   canToggleActive: boolean
-  /** 業務処理が実装済みで【再実行】できるか */
+  /**
+   * 【再実行】ボタンをこの行に出すか。
+   * 種別 C（呼出）は他の処理（AI 生図の流水線・授業ノートなど）が工程として呼ぶバッチで、
+   * 画面からは起動できないため false（ボタンごと出さない）。
+   */
+  canManualRerun: boolean
+  /**
+   * この一覧の【再実行】ボタンを押せるか（業務処理のハンドラが実装済みか。種別 C は常に false）。
+   * `false` は「一覧のボタンが押せない」の意味で、他の処理（AI 生図の流水線など）からの
+   * 呼出まで禁じるものではない（呼出は `canManualRerun` とも別の入口）。
+   */
   canRerun: boolean
   /** 起動時に実行されるバッチか（種別 S） */
   runsOnStartup: boolean
@@ -58,6 +68,17 @@ export interface BatchExecutionRow {
   durationMs: number | null
   message: string | null
   errorDetail: string | null
+  /**
+   * 何を処理した行か（実行履歴の「対象」列）。
+   * バッチコードは**再利用される**（例: batC52 は以前 AI 生図の AI 生成、いまは AI 画図助手）ので、
+   * コードだけでは何の処理か分からない。`AI_FIGURE` / `AI_ASSIST` / `CLASSROOM_NOTE` が入る。
+   * バックエンドがまだ返さないときは `requestPayload` から推定する（`batchTargetLabel`）。
+   */
+  targetKind?: string | null
+  targetId?: number | null
+  targetKey?: string | null
+  /** 要求内容（生 JSON）。例: `{"aiRequestId":164}` / `{"assistId":12}` / `{"noteId":89}` */
+  requestPayload?: string | null
 }
 
 export interface BatchExecutionPage {

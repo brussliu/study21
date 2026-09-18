@@ -348,7 +348,7 @@ onMounted(load)
 
     <div class="table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">資料一覧</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> 資料一覧</h3>
         <span class="table-section__meta">全 {{ filtered.length }} 件<template v-if="filtered.length !== documents.length">（{{ documents.length }} 件中）</template></span>
       </div>
       <div class="table-wrap">

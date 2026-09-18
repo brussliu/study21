@@ -39,7 +39,7 @@ function executionRow(overrides: Partial<BatchExecutionRow> = {}): BatchExecutio
 function taskRow(overrides: Partial<BatchTaskRow> = {}): BatchTaskRow {
   return {
     taskCode: 'batS01', taskType: 'S', description: 'プロキシサービス', active: true, activeVersion: 1,
-    lastRunAt: null, canToggleActive: true, canRerun: true, runsOnStartup: true, loopEveryMinutes: null,
+    lastRunAt: null, canToggleActive: true, canManualRerun: true, canRerun: true, runsOnStartup: true, loopEveryMinutes: null,
     minuteOfHour: null, pageCode: 'SYSTEM', requiredSettings: [], settingsComplete: true, missingSettings: [],
     latestStatus: null, latestStartTime: null, latestEndTime: null, latestMessage: null, running: false,
     ...overrides
@@ -86,6 +86,9 @@ async function setup(options: { executions?: BatchExecutionRow[]; total?: number
 describe('バッチ実行履歴（バッチ管理＞バッチ実行履歴）', () => {
   it('実行履歴を表示する（実行ID・バッチコード・種別・起動・状態・処理時間）', async () => {
     const { wrapper } = await setup()
+
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
 
     const first = wrapper.get('tbody tr[data-execution-id="9001"]')
     expect(first.text()).toContain('batS01')

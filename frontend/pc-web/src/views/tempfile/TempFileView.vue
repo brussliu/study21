@@ -196,7 +196,7 @@ onMounted(() => { if (isFamilyUser.value) void load() })
 
     <div class="card">
       <div class="card__header">
-        <h2 class="card__title">ファイル一覧</h2>
+        <h2 class="card__title"><AppIcon name="list" size="sm" /> ファイル一覧</h2>
         <span class="card__sub">全 {{ items.length }} 件<template v-if="selected.size > 0">／選択 {{ selected.size }} 件</template></span>
       </div>
       <div class="card__body">

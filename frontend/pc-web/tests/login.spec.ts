@@ -76,7 +76,26 @@ describe('login pages', () => {
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe(expectedPath))
   })
 
-  it('管理者は仮認証で管理者画面へ進める', async () => {
+  /**
+   * 管理者ログインも**実認証**（2026-09-14 の決定 Q8。以前は UI 確認用の仮認証で、
+   * サーバへ送っていなかった）。管理者は user-api のセッションを持ち、
+   * 読書管理の【全体書籍】を管理する。
+   */
+  it('管理者は実認証で管理者画面へ進める（accountType=ADMIN のときだけ）', async () => {
+    vi.mocked(loginAccount).mockResolvedValueOnce({
+      success: true,
+      code: 'OK',
+      message: 'OK',
+      data: {
+        accountId: 2517,
+        loginId: 'admin@study21.local',
+        displayName: 'システム 管理者',
+        accountType: 'ADMIN',
+        expiryDate: null
+      },
+      traceId: 'test',
+      timestamp: '2026-09-14T00:00:00Z'
+    })
     const pinia = createPinia()
     setActivePinia(pinia)
     const router = createAppRouter()
@@ -84,10 +103,46 @@ describe('login pages', () => {
     await router.isReady()
     const wrapper = mount(AdminLoginView, { global: { plugins: [pinia, router] } })
 
+    await wrapper.find('input[type="text"]').setValue('admin@study21.local')
+    await wrapper.find('input[type="password"]').setValue('Admin1234!')
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
+    expect(loginAccount).toHaveBeenCalledWith({ loginId: 'admin@study21.local', password: 'Admin1234!' })
     expect(useAuthStore().role).toBe('ADMIN')
+    expect(useAuthStore().currentUser).toBe('システム 管理者')
     await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/admin/home'))
+  })
+
+  it('管理者以外のアカウントでは管理者画面へ進めない', async () => {
+    vi.mocked(loginAccount).mockResolvedValueOnce({
+      success: true,
+      code: 'OK',
+      message: 'OK',
+      data: {
+        accountId: 1,
+        loginId: 'parent@example.com',
+        displayName: '山田 花子',
+        accountType: 'GUARDIAN',
+        expiryDate: '2027-12-31'
+      },
+      traceId: 'test',
+      timestamp: '2026-09-14T00:00:00Z'
+    })
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createAppRouter()
+    await router.push('/admin/login')
+    await router.isReady()
+    const wrapper = mount(AdminLoginView, { global: { plugins: [pinia, router] } })
+
+    await wrapper.find('input[type="text"]').setValue('parent@example.com')
+    await wrapper.find('input[type="password"]').setValue('Parent1234')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(useAuthStore().role).toBeNull()
+    expect(wrapper.get('[role="alert"]').text()).toContain('管理者アカウントではありません')
+    expect(router.currentRoute.value.path).toBe('/admin/login')
   })
 })

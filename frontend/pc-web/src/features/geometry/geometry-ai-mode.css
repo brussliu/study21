@@ -1,0 +1,280 @@
+/**
+ * AI 生図の「作図方法（A〜D）」「作成する図の種類」「補充項目」「臨時ファイル選択」の見た目。
+ *
+ * `geometry-ai.css` は既存の画面（読み取り範囲・ステップなど）が使っているので、
+ * ここには**今回の作り直しで足した部分**だけを置く（色は tokens.css の変数だけを使う）。
+ */
+
+/* ------------------------------------------------------------ 追加入力待ちの再開 */
+
+.gm-ai-resume {
+  border: 1px solid var(--color-warning-border, var(--color-border));
+  border-radius: var(--radius-md);
+  background: var(--color-warning-surface, var(--color-surface));
+  padding: var(--space-3) var(--space-4);
+  margin-bottom: var(--space-4);
+}
+
+.gm-ai-resume__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0 0 var(--space-2);
+}
+
+.gm-ai-questions {
+  margin-top: var(--space-3);
+  border-top: 1px dashed var(--color-border);
+  padding-top: var(--space-3);
+}
+
+.gm-ai-questions__title {
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  margin: 0 0 var(--space-2);
+}
+
+.gm-ai-question {
+  margin-bottom: var(--space-3);
+}
+
+.gm-ai-question__text {
+  margin: 0 0 var(--space-1);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.gm-ai-question__no {
+  display: inline-block;
+  min-width: 2em;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* ------------------------------------------------------------ 作図方法の選択 */
+
+.gm-ai-modes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--space-3);
+}
+
+.gm-ai-mode {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  padding: var(--space-3);
+  cursor: pointer;
+}
+
+.gm-ai-mode:hover {
+  border-color: var(--color-primary);
+}
+
+.gm-ai-mode.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-surface, var(--color-surface));
+}
+
+.gm-ai-mode__body {
+  display: block;
+}
+
+.gm-ai-mode__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-1);
+}
+
+.gm-ai-mode__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.6em;
+  height: 1.6em;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-on-primary, #fff);
+  font-weight: 700;
+  font-size: var(--font-size-xs);
+}
+
+.gm-ai-mode__label {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.gm-ai-mode__help {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+
+.gm-ai-fixed-type {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt, var(--color-surface));
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------------ 補充項目 */
+
+.gm-ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: var(--space-3);
+}
+
+.gm-ai-radio-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+.gm-ai-radio--inline {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.gm-ai-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+}
+
+.gm-ai-advanced {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.gm-ai-advanced__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.gm-ai-advanced__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0 var(--space-3) var(--space-3);
+}
+
+/* ------------------------------------------------------------ 読み取る範囲の案内 */
+
+.gm-ai-crop__hint {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  margin: var(--space-2) 0;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  background: var(--color-info-surface, var(--color-surface-alt, var(--color-surface)));
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------ 臨時ファイルから選ぶ */
+
+.gm-ai-temp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog, 1000);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-overlay, rgba(0, 0, 0, 0.4));
+}
+
+.gm-ai-temp__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: var(--space-3);
+  max-height: 50vh;
+  overflow: auto;
+}
+
+.gm-ai-temp__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+  text-align: center;
+}
+
+.gm-ai-temp__item:hover {
+  border-color: var(--color-primary);
+}
+
+.gm-ai-temp__item img {
+  width: 100%;
+  height: 90px;
+  object-fit: contain;
+  background: var(--color-surface-alt, var(--color-surface));
+  border-radius: var(--radius-sm);
+}
+
+.gm-ai-temp__noimg {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 90px;
+  background: var(--color-surface-alt, var(--color-surface));
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+
+.gm-ai-temp__name {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  word-break: break-all;
+}
+
+/* 画像の追加（貼り付けの案内とボタン列） */
+.gm-ai-drop__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  justify-content: center;
+  margin-top: var(--space-2);
+}
+
+.gm-ai-drop kbd {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0 0.3em;
+  font-size: var(--font-size-xs);
+  background: var(--color-surface-alt, var(--color-surface));
+}

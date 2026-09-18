@@ -1,0 +1,1589 @@
+
+
+.rds-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-relaxed);
+}
+
+.rds-required {
+  margin-left: var(--sp-1);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 本棚（見出し・タブ） ---------- */
+
+/* ホバーで出す表紙（`.rds-preview`）とツールチップは、カードの外へ浮かせて出す。
+   `overflow: hidden` のままだと棚の端の本で切れてしまうため visible にする
+   （カードの角丸は中の棚板・ボタンが自分で持っているので崩れない）。 */
+.rds-shelf {
+  overflow: visible;
+}
+
+/* 表示中のパネルだけを縦並びの flex にする（タブの見た目は【書籍閲覧】側の
+   `.tabs` / `.rrd-tabs` が持つ。ここは自分の本棚のパネルの中身だけを整える）。 */
+.rds-panel.is-active {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  /* タブとの間隔は .rds-page の gap が持つ（デザインシステムの padding-top は消す） */
+  padding-top: 0;
+  min-width: 0;
+}
+
+.rds-tabs__count {
+  margin-left: auto;
+  padding-bottom: var(--sp-3);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* ---------- 棚（分類ごと） ---------- */
+
+.rds-cases {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-7);
+  padding: var(--sp-6) var(--sp-5) var(--sp-5);
+}
+
+/* 本が 1 冊も無い棚・空の案内（棚の下に出す） */
+.rds-empty {
+  margin: 0;
+  padding: var(--sp-6) var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+.rds-cases__more {
+  padding: 0 var(--sp-5) var(--sp-4);
+}
+
+.rds-case {
+  display: flex;
+  flex-direction: column;
+  /* 木の色は tokens.css の変数だけを color-mix() で混ぜて作る（生の色は書かない）。
+     tokens.css に「木」の色は無いので、茶色の素（--warning-600）に赤み（--danger-600）を
+     少し足した色を芯にして、面の色（--color-surface）で明度を上げる。
+     実写の棚の画像が読めないときの下地と、棚板・側板の木目に使う。
+     木目と節（ふし）は半透明にして下の色を透かす（生の色は書かず color-mix で作る）。 */
+  --rds-wood-tone: color-mix(in srgb, var(--warning-600) 88%, var(--danger-600));
+  /* 下地の面 / 小口の枠 / 影 / 木目（濃い・薄い） */
+  --rds-wood: color-mix(in srgb, var(--rds-wood-tone) 74%, var(--color-surface));
+  --rds-wood-edge: color-mix(in srgb, var(--rds-wood-tone) 84%, var(--neutral-900));
+  --rds-wood-dark: color-mix(in srgb, var(--rds-wood-tone) 40%, var(--neutral-900));
+  --rds-wood-grain: color-mix(in srgb, var(--rds-wood-dark) 20%, transparent);
+  --rds-wood-grain-soft: color-mix(in srgb, var(--rds-wood-dark) 10%, transparent);
+  --rds-wood-shadow: color-mix(in srgb, var(--rds-wood-dark) 45%, transparent);
+  /* 実写の棚の画像（`assets/reading/shelf-bg-1〜6.jpg`）に重ねる光と影。
+     画像の上では「木を塗る」のではなく、光（--rds-shelf-light）と影（--rds-shelf-shade）だけを
+     足して下の画像を透かす。色は tokens.css の変数だけを color-mix() で混ぜて作る。 */
+  --rds-shelf-light: color-mix(in srgb, var(--neutral-0) 30%, transparent);
+  --rds-shelf-light-soft: color-mix(in srgb, var(--neutral-0) 14%, transparent);
+  --rds-shelf-shade: color-mix(in srgb, var(--neutral-900) 34%, transparent);
+  --rds-shelf-shade-soft: color-mix(in srgb, var(--neutral-900) 18%, transparent);
+  --rds-shelf-deep: color-mix(in srgb, var(--neutral-900) 55%, transparent);
+  /* 背表紙の枠・影・照り（実写の棚の上で本らしく見せる光と影）と、飾りの金 */
+  --rds-spine-edge: color-mix(in srgb, var(--neutral-0) 25%, transparent);
+  --rds-spine-shadow: color-mix(in srgb, var(--neutral-900) 42%, transparent);
+  --rds-spine-light: color-mix(in srgb, var(--neutral-0) 10%, transparent);
+  --rds-spine-shade: color-mix(in srgb, var(--neutral-900) 25%, transparent);
+  --rds-spine-ink: color-mix(in srgb, var(--warning-600) 24%, var(--neutral-0));
+  /* 棚の寸法。実写の画像は「上から 80〜89% が明るい棚板（いちばん明るい行が 88%）」なので、
+     本の底がその帯に乗るように、奥板の下の余白（--rds-shelf-seat）で座らせる。
+     奥板の高さの下限 ＝ --rds-shelf-pad ＋ 背表紙の高さの上限 ＋ --rds-shelf-seat ＋ 枠線。
+     背表紙の高さの上限は shelfLook.ts の SPINE_MAX_HEIGHT（320px）と同じ値にする。
+     これで本の底は棚（奥板＋棚板）の上から約 87% ＝ プロトタイプの bottom:48px/360px（13%）と同じ。 */
+  --rds-shelf-pad: var(--sp-6);
+  --rds-shelf-seat: 27px;
+  --rds-plank-h: 22px;
+  --rds-spine-max-h: 320px;
+  /* 本の左右の余白。背景ごとに `.rds-bg-N` が上書きする（写真の側板の厚みに合わせる） */
+  --rds-book-inset: 2.7%;
+}
+
+/* ---------- 棚の背景と、本を座らせる位置・左右の余白 ----------
+
+   背景の写真は `--rds-shelf-photo` で差し替える（画面から inline で渡す＝ Vite が解決した
+   URL。既定は `.rds-case__board::before` の url()）。
+   写真ごとに、次の 2 つを実測して決める（`tmp/tools/import-shelf-bg.mjs` が測って出す）:
+     ・--rds-shelf-seat … 本を座らせる高さ（写真の中の「明るい棚板」の位置に合わせる）
+     ・--rds-book-inset … 本の左右の余白（写真の両端の「縦の側板」の厚みに合わせる）
+
+   本の底（棚の上端から）は「余白 24px ＋ 背表紙の高さの上限 320px」＝ 344px で決まるので、
+   座り位置 S を変えると棚の上端から `344 / (368 + S)` の割合になる。
+
+   | 背景 | 写真 | 明るい棚板の帯 | いちばん明るい行 | 座り位置 S | 本の底 | 側板（左/右） | 左右の余白 |
+   |-----|------|---------------|----------------|-----------|--------|--------------|-----------|
+   | 0 | shelf-bg-1.jpg | 76.9〜99.4% | 87.6% | 27px | 87.1% ✓ | 2.16% / 2.16% | 2.7% |
+   | 1 | shelf-bg-2.jpg | 80.9〜99.6% | 89.5% | 27px | 87.1% ✓ | 2.44% / 2.39% | 2.9% |
+   | 2 | shelf-bg-3.jpg | 84.9〜85.2% | 85.1% | 37px | 84.9% ✓ | 1.84% / 1.98% | 2.5% |
+   | 3 | shelf-bg-4.jpg | 78.9〜99.4% | 84.9% | 27px | 87.1% ✓ | 1.93% / 2.03% | 2.5% |
+   | 4 | shelf-bg-5.jpg | 83.8〜84.4% | 84.3% | 41px | 84.1% ✓ | 1.89% / 1.89% | 2.4% |
+   | 5 | shelf-bg-6.jpg | 79.8〜85.2% | 84.9% | 45px | 83.3% ✓ | 1.93% / 2.16% | 2.7% |
+
+   背景 2・4・5 は明るい棚板が手前の縁の細い帯なので、本をその帯のすぐ後ろに座らせる
+   （S を大きくして写真を下へずらす）。全体が明るい写真（0・1・3）は S=27 のままでよい。
+
+   左右の余白は「側板の厚み（％）＋ 0.5% の余裕」にしてある。画面の幅に対する割合（%）で
+   持つので、**横に引き伸ばしても写真の側板と同じ割合で動き、本が側板に重ならない**。 */
+.rds-case.rds-bg-0 {
+  --rds-shelf-seat: 27px;
+  --rds-book-inset: 2.7%;
+}
+
+.rds-case.rds-bg-1 {
+  --rds-shelf-seat: 27px;
+  --rds-book-inset: 2.9%;
+}
+
+.rds-case.rds-bg-2 {
+  --rds-shelf-seat: 37px;
+  --rds-book-inset: 2.5%;
+}
+
+.rds-case.rds-bg-3 {
+  --rds-shelf-seat: 27px;
+  --rds-book-inset: 2.5%;
+}
+
+.rds-case.rds-bg-4 {
+  --rds-shelf-seat: 41px;
+  --rds-book-inset: 2.4%;
+}
+
+.rds-case.rds-bg-5 {
+  --rds-shelf-seat: 45px;
+  --rds-book-inset: 2.7%;
+}
+
+/* ---------- 棚の背景の切替（カードの見出し行） ---------- */
+
+/* 見出し行では、冊数のまとめと背景の切替を右へ寄せる。 */
+.rds-shelf .card__header > [data-rd-shelf-summary] {
+  margin-left: auto;
+}
+
+.rds-bg {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rds-bg__label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+/* 背景の見本（写真そのものを 3:1 の小さな枠に出す）。選んでいるものは枠で示す。 */
+.rds-bg__option {
+  width: 48px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-alt);
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.rds-bg__option:hover {
+  border-color: var(--color-primary);
+}
+
+.rds-bg__option.is-active,
+.rds-bg__option:focus-visible {
+  border-color: var(--color-primary);
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* 狭い画面では見出し行が折り返すので、切替は次の行に置く（見出しの真下）。 */
+@media (max-width: 900px) {
+  .rds-bg {
+    flex-basis: 100%;
+  }
+}
+
+/* 棚の本体（奥板 ＋ 棚板 ＋ 両端の側板）。左右の側板は擬似要素で出す。 */
+.rds-case__unit {
+  position: relative;
+}
+
+/* 側板。実写の画像の左右の端を落として、棚に奥行きがあるように見せる。
+   木を塗り重ねず、半透明の陰影と木目だけを重ねる（下の写真を透かす）。 */
+.rds-case__unit::before,
+.rds-case__unit::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  z-index: 2;
+  width: 12px;
+  background-image:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 6px,
+      var(--rds-wood-grain-soft) 6px 7px,
+      transparent 7px 13px,
+      var(--rds-wood-grain) 13px 15px,
+      transparent 15px 26px,
+      var(--rds-wood-grain-soft) 26px 27px
+    ),
+    linear-gradient(90deg, var(--rds-shelf-shade) 0%, var(--rds-shelf-shade-soft) 58%, transparent 100%);
+  pointer-events: none;
+}
+
+.rds-case__unit::before {
+  left: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  box-shadow: inset -2px 0 4px var(--rds-shelf-shade-soft);
+}
+
+.rds-case__unit::after {
+  right: 0;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  /* 右の側板は光の向きを逆にする（左から光が当たっているように見せる） */
+  background-image:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 6px,
+      var(--rds-wood-grain-soft) 6px 7px,
+      transparent 7px 13px,
+      var(--rds-wood-grain) 13px 15px,
+      transparent 15px 26px,
+      var(--rds-wood-grain-soft) 26px 27px
+    ),
+    linear-gradient(270deg, var(--rds-shelf-shade) 0%, var(--rds-shelf-shade-soft) 58%, transparent 100%);
+  box-shadow: inset 2px 0 4px var(--rds-shelf-shade-soft);
+}
+
+.rds-case__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-2) var(--sp-2);
+}
+
+.rds-case__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.rds-case__count {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 棚の奥板（背板）。高さは「背表紙の高さの上限 ＋ 上下の余白 ＋ 枠線」で決める
+   （いちばん高い本でも必ず収まる）。実写の画像は `::before` が担うので、ここは
+   画像が読めないときの下地の色だけを持つ。
+
+   本の底は padding の下（--rds-shelf-seat）で止まる。この余白が「棚の写真のどこに
+   本を座らせるか」を決めている（上の --rds-shelf-seat の説明を参照）。 */
+.rds-case__board {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  min-height: calc(var(--rds-spine-max-h) + var(--rds-shelf-pad) + var(--rds-shelf-seat) + 2px);
+  padding-top: var(--rds-shelf-pad);
+  padding-bottom: var(--rds-shelf-seat);
+  /* 左右は背景の写真の側板の厚みに合わせた割合（%は幅に対して解くので横に伸びても追従する） */
+  padding-inline: var(--rds-book-inset);
+  border: 1px solid var(--rds-wood-edge);
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  /* 奥板の色は実写の棚の画像（`::before`）が担う。ここは画像が読めないときの下地の色だけを持つ */
+  background-color: var(--rds-wood);
+  /* 画像が読めないときの奥行き（上から落ちる影と左右の端の影）。
+     画像があるときは `::before`（z-index 0）が上に重なるので、この影は画像の下に隠れる。 */
+  box-shadow:
+    inset 0 12px 20px -6px var(--rds-wood-dark),
+    inset 14px 0 20px -10px var(--rds-wood-dark),
+    inset -14px 0 20px -10px var(--rds-wood-dark);
+}
+
+/* 棚の実写画像（`assets/reading/shelf-bg-1〜6.jpg`。高解像度の写真 2172×724 を JPEG にしたもの）。
+
+   どの写真を敷くかは `--rds-shelf-photo`（画面から inline で渡す）で切り替える。
+   プロトタイプと同じく 1 枚の写真を棚いっぱいに引き伸ばす（`background-size: 100% 100%`）。
+   棚の縦横比（約 3:1）は写真と同じなので、ほとんど歪まない。
+   写真は奥板だけでなく手前の棚板（木口）まで含むので、下へ木口のぶんだけ伸ばす
+   （-1px は奥板の枠線ぶん。こうすると画像の高さが「奥板 ＋ 棚板」とちょうど一致する）。
+   本（.rds-book）は z-index 1 なので、この層（0）より手前に出る。
+   その上に半透明の陰影（奥は暗く、手前ほど明るい）を重ねて、写真を平坦に見せない。 */
+.rds-case__board::before {
+  content: '';
+  position: absolute;
+  inset: -1px -1px calc(-1px - var(--rds-plank-h));
+  z-index: 0;
+  border-radius: inherit;
+  background-image:
+    linear-gradient(
+      180deg,
+      var(--rds-shelf-shade) 0%,
+      var(--rds-shelf-shade-soft) 26%,
+      transparent 62%,
+      transparent 100%
+    ),
+    var(--rds-shelf-photo, url('../../assets/reading/shelf-bg-1.jpg'));
+  background-size: 100% 100%, 100% 100%;
+  background-repeat: no-repeat, no-repeat;
+  background-position: left top, left top;
+  pointer-events: none;
+}
+
+/* 暗色テーマでは棚の写真を少し落ち着かせる（写真は明るい部屋で撮った前提のため） */
+html[data-theme='dark'] .rds-case__board::before {
+  filter: brightness(0.78) saturate(0.92);
+}
+
+/* 棚板（木口）。本が乗っている板。実写の写真の前端に重ねる薄い板なので、木を塗らず
+   （写真を透かし）、面取りの光・木目・手前の影だけを足す。 */
+.rds-case__plank {
+  position: relative;
+  height: var(--rds-plank-h);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background-image:
+    /* 小口の木目（厚みの中の横線。周期を不揃いに） */
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 4px,
+      var(--rds-wood-grain) 4px 5px,
+      transparent 5px 9px,
+      var(--rds-wood-grain-soft) 9px 10px,
+      transparent 10px 15px,
+      var(--rds-wood-grain) 15px 16px
+    ),
+    /* 小口の明暗（上＝面取りで明るく、下＝影） */
+    linear-gradient(
+      180deg,
+      var(--rds-shelf-light) 0%,
+      var(--rds-shelf-light-soft) 30%,
+      transparent 52%,
+      var(--rds-shelf-shade-soft) 76%,
+      var(--rds-shelf-shade) 100%
+    );
+  box-shadow: 0 2px 6px var(--rds-wood-shadow);
+}
+
+/* 棚板の上面（面取り）。ここに本の底が乗る。 */
+.rds-case__plank::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--rds-shelf-light);
+  opacity: 0.85;
+}
+
+/* 棚板の手前の影（板の下に落ちる影）。 */
+.rds-case__plank::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 -4px;
+  height: 5px;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--rds-shelf-shade);
+  filter: blur(2px);
+}
+
+/* ---------- 本（背表紙） ---------- */
+
+/* z-index を 1 にして、本に重なり順の「順番」を持たせる。
+   こうしないと隣り合う本がそれぞれ重なり順のまとまりを作ったとき、
+   DOM の順（右の本が上）で決まってしまい、ホバー中の表紙やツールチップが
+   右隣の本の下に隠れる。ホバー中の本は inline で 30 に上げる（.is-hover の規則も用意）。
+   perspective はホバーで本を手前に起こす（translateZ / rotateY）ための視点。
+   本ごとに持たせるので、棚全体の重なり順（側板・ツールチップ）は変わらない。 */
+.rds-book {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  flex: 0 0 auto;
+  perspective: 1500px;
+}
+
+/* 本の足元に落ちる楕円の影（棚板に接地して見えるように）。背表紙より先に DOM に置き、
+   同じ重なり順のなかで先に描かれるようにする（背表紙はホバーで 21 に上がる）。 */
+.rds-book__shadow {
+  position: absolute;
+  left: 8%;
+  right: -3%;
+  bottom: -4px;
+  height: 16px;
+  background: radial-gradient(
+    ellipse at center,
+    var(--rds-shelf-deep) 0%,
+    var(--rds-shelf-shade-soft) 45%,
+    transparent 75%
+  );
+  filter: blur(3px);
+  opacity: 0.72;
+  pointer-events: none;
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    transform var(--duration-fast) var(--ease-standard);
+}
+
+/* ホバー（＝本を手に取る）と、クリックで抜き出すときは影を濃くして少し横へ伸ばす。 */
+.rds-book.is-hover .rds-book__shadow,
+.rds-book.is-pulled .rds-book__shadow {
+  opacity: 0.95;
+  transform: translateX(7px) scaleX(1.1);
+}
+
+.rds-book.is-hover,
+.rds-book.is-tip {
+  z-index: 30;
+}
+
+.rds-book.is-pulled {
+  z-index: 31;
+}
+
+/* ---------- 背表紙・表紙の色（16 色） ----------
+
+   背表紙・ホバーの表紙・抜き出し演出の表紙で同じ 16 色を使う。色相は書名のハッシュ
+   （`--rds-tone`）で決まるので、同じ本はいつも同じ色になる。
+   0=紺 1=青緑 2=青 3=赤紫 4=紫 5=水色 6=灰 7=緑
+   8=橙 9=深紅 10=藍 11=空色 12=梅 13=若草 14=茶金 15=鈍色
+   色は tokens.css の変数だけを color-mix() で混ぜて作る（生の色は書かない）。 */
+
+.rds-spine.is-tone-0,
+.rds-opening__book.is-tone-0,
+.rds-preview.is-tone-0 {
+  background: linear-gradient(170deg, var(--accent-600), var(--accent-800));
+}
+
+.rds-spine.is-tone-1,
+.rds-opening__book.is-tone-1,
+.rds-preview.is-tone-1 {
+  background: linear-gradient(170deg, var(--primary-600), var(--primary-700));
+}
+
+.rds-spine.is-tone-2,
+.rds-opening__book.is-tone-2,
+.rds-preview.is-tone-2 {
+  background: linear-gradient(170deg, var(--subject-english), var(--accent-700));
+}
+
+.rds-spine.is-tone-3,
+.rds-opening__book.is-tone-3,
+.rds-preview.is-tone-3 {
+  background: linear-gradient(170deg, var(--subject-japanese), var(--accent-800));
+}
+
+.rds-spine.is-tone-4,
+.rds-opening__book.is-tone-4,
+.rds-preview.is-tone-4 {
+  background: linear-gradient(170deg, var(--subject-math), var(--accent-700));
+}
+
+.rds-spine.is-tone-5,
+.rds-opening__book.is-tone-5,
+.rds-preview.is-tone-5 {
+  background: linear-gradient(170deg, var(--subject-science), var(--info-600));
+}
+
+.rds-spine.is-tone-6,
+.rds-opening__book.is-tone-6,
+.rds-preview.is-tone-6 {
+  background: linear-gradient(170deg, var(--neutral-600), var(--neutral-900));
+}
+
+.rds-spine.is-tone-7,
+.rds-opening__book.is-tone-7,
+.rds-preview.is-tone-7 {
+  background: linear-gradient(170deg, var(--success-600), var(--primary-700));
+}
+
+.rds-spine.is-tone-8,
+.rds-opening__book.is-tone-8,
+.rds-preview.is-tone-8 {
+  background: linear-gradient(170deg, var(--warning-600), var(--danger-600));
+}
+
+.rds-spine.is-tone-9,
+.rds-opening__book.is-tone-9,
+.rds-preview.is-tone-9 {
+  background: linear-gradient(
+    170deg,
+    var(--danger-600),
+    color-mix(in srgb, var(--danger-600) 55%, var(--accent-900))
+  );
+}
+
+.rds-spine.is-tone-10,
+.rds-opening__book.is-tone-10,
+.rds-preview.is-tone-10 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--accent-700) 55%, var(--subject-math)),
+    var(--accent-900)
+  );
+}
+
+.rds-spine.is-tone-11,
+.rds-opening__book.is-tone-11,
+.rds-preview.is-tone-11 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--info-600) 55%, var(--primary-500)),
+    var(--info-600)
+  );
+}
+
+.rds-spine.is-tone-12,
+.rds-opening__book.is-tone-12,
+.rds-preview.is-tone-12 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--subject-japanese) 55%, var(--neutral-0)),
+    color-mix(in srgb, var(--subject-japanese) 72%, var(--accent-700))
+  );
+}
+
+.rds-spine.is-tone-13,
+.rds-opening__book.is-tone-13,
+.rds-preview.is-tone-13 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--success-600) 55%, var(--primary-400)),
+    var(--success-600)
+  );
+}
+
+.rds-spine.is-tone-14,
+.rds-opening__book.is-tone-14,
+.rds-preview.is-tone-14 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--warning-600) 72%, var(--accent-500)),
+    var(--accent-800)
+  );
+}
+
+.rds-spine.is-tone-15,
+.rds-opening__book.is-tone-15,
+.rds-preview.is-tone-15 {
+  background: linear-gradient(
+    170deg,
+    color-mix(in srgb, var(--neutral-500) 80%, var(--neutral-0)),
+    var(--neutral-800)
+  );
+}
+
+/* 背表紙。高さ・幅は書名から決まる値（--rds-spine-h / --rds-spine-w）を inline で受ける。
+   tone（色相）・light（明度の揺らぎ）・lean（傾き）も inline の値で、本ごとに変わる。
+   プロトタイプと同じく **縦書きにするのは書名だけ**（作者・飾りの記号・状態バッジは横書き）。
+   中の飾り（布目・内枠・リブ・記号・光沢）はすべて絶対配置なので、寸法には影響しない。 */
+.rds-spine {
+  position: relative;
+  display: block;
+  width: var(--rds-spine-w, 62px);
+  height: var(--rds-spine-h, 236px);
+  padding: 0;
+  /* 実写の棚の上では、白い細い枠のほうが本らしく見える（プロトタイプと同じ） */
+  border: 1px solid var(--rds-spine-edge);
+  border-radius: 2px 5px 3px 2px;
+  color: var(--color-text-on-inverse);
+  font-family: inherit;
+  text-align: center;
+  cursor: pointer;
+  /* 色相（--rds-tone）で彩度、ハッシュの別の桁（--rds-light）で明度をわずかに動かす。
+     同系色に見えないよう、色相そのものは CSS の 16 色で散らしてある。 */
+  filter: saturate(calc(0.9 + var(--rds-tone, 0) * 0.02)) brightness(calc(0.95 + var(--rds-light, 0)));
+  /* 本ごとにわずかに傾けて立てる（--rds-lean）。底を支点にするので足元は浮かない */
+  transform: rotateZ(var(--rds-lean, 0deg));
+  transform-origin: 50% 100%;
+  /* 棚に落ちる影 ＋ 背の丸み（左＝光、右＝影） */
+  box-shadow:
+    7px 10px 12px var(--rds-spine-shadow),
+    inset 5px 0 5px var(--rds-spine-light),
+    inset -6px 0 7px var(--rds-spine-shade);
+  transition:
+    transform var(--duration-base) var(--ease-standard),
+    box-shadow var(--duration-base) var(--ease-standard),
+    filter var(--duration-base) var(--ease-standard),
+    opacity var(--duration-base) var(--ease-standard);
+}
+
+/* 背表紙の質感（プロトタイプの重ね塗りのうち、布目と左右の丸みの 2 枚）。
+   色は塗らず半透明で重ねて、下の色（--rds-tone のグラデーション）を透かす。
+   1 枚目＝左端の光と右端の影（背の丸み）、2 枚目＝細かい布目。 */
+.rds-spine__grain {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-image:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--neutral-0) 18%, transparent) 0 3%,
+      transparent 10% 82%,
+      color-mix(in srgb, var(--neutral-900) 28%, transparent) 95%
+    ),
+    repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--neutral-0) 2.2%, transparent) 0 1px,
+      color-mix(in srgb, var(--neutral-900) 2.2%, transparent) 1px 3px
+    );
+  pointer-events: none;
+}
+
+/* 背表紙の内側の枠（段差）。左を明るく、右を暗くして、背表紙が浮き出て見えるようにする。 */
+.rds-spine__bevel {
+  position: absolute;
+  inset: 5px 6px 7px 5px;
+  border-radius: 2px;
+  border-left: 1px solid color-mix(in srgb, var(--neutral-0) 15%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--neutral-900) 25%, transparent);
+  pointer-events: none;
+}
+
+/* 背表紙のリブ（背の上下に入る細い帯）。上端と下端の 2 本。 */
+.rds-spine__rib {
+  position: absolute;
+  left: 5px;
+  right: 6px;
+  height: 7px;
+  border-top: 1px solid color-mix(in srgb, var(--neutral-0) 24%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--neutral-900) 28%, transparent);
+  pointer-events: none;
+}
+
+.rds-spine__rib--head {
+  top: 10px;
+}
+
+.rds-spine__rib--foot {
+  bottom: 12px;
+}
+
+/* 背表紙の書名（縦書き）と作者（横書き）。
+   書名は上端から下端までを取り、幅は左右の余白と枠線のぶん（26px）を残す
+   ＝ shelfLook.ts が幅を決めるときの `余白 + 列数 × 列の幅` と同じ値。 */
+.rds-spine__title {
+  position: absolute;
+  top: 26px;
+  bottom: 53px;
+  left: 50%;
+  max-width: calc(100% - 26px);
+  transform: translateX(-50%);
+  overflow: hidden;
+  /* 背表紙の書名は縦書き（2.0 の本棚と同じ向き） */
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  font-family: Georgia, 'Times New Roman', 'Yu Mincho', serif;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  text-shadow: 1px 0 1px color-mix(in srgb, var(--neutral-900) 55%, transparent);
+}
+
+/* 飾りの記号（表紙の意匠の代わり）。書名の下・作者の上に入れる。
+   （書名の枠の下端は 53px なので、記号の上端がそこへ届かない 38px に置く） */
+.rds-spine__mark {
+  position: absolute;
+  left: 50%;
+  bottom: 38px;
+  transform: translateX(-50%);
+  color: var(--rds-spine-ink);
+  font-size: var(--fs-md);
+  line-height: 1;
+  filter: drop-shadow(1px 0 1px color-mix(in srgb, var(--neutral-900) 55%, transparent));
+}
+
+.rds-spine__author {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 17px;
+  /* 書名の下端（53px）と自分の下端（17px）のあいだに収める（入らないぶんは省略する。
+     全文はツールチップで見られる）。 */
+  max-height: calc(53px - 17px - var(--sp-1));
+  overflow: hidden;
+  color: var(--rds-spine-ink);
+  font-family: Georgia, 'Times New Roman', 'Yu Mincho', serif;
+  font-size: var(--fs-xs);
+  line-height: 1.05;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-shadow: 1px 1px 1px color-mix(in srgb, var(--neutral-900) 65%, transparent);
+}
+
+/* 背表紙の光沢（ホバーで左から右へ抜ける光）。プロトタイプと同じ演出。 */
+.rds-spine__gloss {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.rds-spine__gloss::before {
+  content: '';
+  position: absolute;
+  top: -10%;
+  left: -42%;
+  width: 24%;
+  height: 125%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--neutral-0) 28%, transparent),
+    transparent
+  );
+  transform: rotate(7deg);
+  opacity: 0;
+  transition: left 0.48s ease, opacity var(--duration-fast) var(--ease-standard);
+}
+
+/* 状態バッジ（読書中）。背表紙の右上に出す（プロトタイプと同じ位置）。
+   書名の枠は上端 26px からなので、バッジが書名の 1 文字目に掛からないよう少し上げる。 */
+.rds-spine__badge {
+  position: absolute;
+  top: 6px;
+  right: -8px;
+  z-index: 4;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in srgb, var(--warning-600) 62%, var(--neutral-900));
+  border-radius: var(--radius-pill);
+  background: var(--rds-spine-ink);
+  color: color-mix(in srgb, var(--warning-600) 55%, var(--neutral-900));
+  font-family: inherit;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  line-height: 1.2;
+  box-shadow: 0 3px 6px color-mix(in srgb, var(--neutral-900) 30%, transparent);
+}
+
+/* 背表紙の「背」の筋（左端の明るい線）。実物の本らしさを出す。 */
+.rds-spine::before {
+  content: '';
+  position: absolute;
+  inset: 4px auto 4px 3px;
+  width: 1px;
+  background: var(--color-text-on-inverse);
+  opacity: 0.28;
+}
+
+/* 背表紙の柄（書名のハッシュで決まる 3 種類）。金のライン・縦縞・帯。
+   金は tokens.css の警告色と白を混ぜて作る（生の色は書かない）。 */
+.rds-spine::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+}
+
+.rds-spine.is-pattern-0::after {
+  inset: auto 6px calc(8% + var(--rds-tone, 0) * 0.3%) 6px;
+  height: 2px;
+  background: color-mix(in srgb, var(--warning-600) 35%, var(--neutral-0));
+  box-shadow: 0 -6px 0 color-mix(in srgb, var(--warning-600) 35%, var(--neutral-0));
+  opacity: 0.7;
+}
+
+.rds-spine.is-pattern-1::after {
+  inset: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent 0 7px,
+    var(--color-text-on-inverse) 7px 8px
+  );
+  opacity: 0.12;
+}
+
+.rds-spine.is-pattern-2::after {
+  inset: auto 0 16% 0;
+  height: 13%;
+  border-top: 2px solid color-mix(in srgb, var(--warning-600) 35%, var(--neutral-0));
+  border-bottom: 2px solid color-mix(in srgb, var(--warning-600) 35%, var(--neutral-0));
+  background: var(--color-text-on-inverse);
+  opacity: 0.18;
+}
+
+/* PDF 未登録の印（読めないことが分かるように淡くする） */
+.rds-spine.is-no-pdf {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+/* PDF 未登録の札。背表紙の左端に縦書きの細い札として出す。
+   書名は中央、状態バッジは右上なので、左端がいちばん空いている
+   （上端に横書きで置くと、狭い背表紙ではバッジと重なる）。 */
+.rds-spine__flag {
+  position: absolute;
+  top: 26px;
+  left: 2px;
+  max-height: calc(100% - 79px);
+  padding: 2px 1px;
+  overflow: hidden;
+  border: 1px dashed var(--color-text-on-inverse);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  letter-spacing: 0.04em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  opacity: 0.75;
+}
+
+/* ホバー／フォーカスで本が手前に起き上がる（プロトタイプと同じ動き）。
+   傾き（--rds-lean）は起こしたときに 0 に戻し、まっすぐ立たせる。 */
+.rds-book.is-hover .rds-spine,
+.rds-spine.is-hover,
+.rds-spine:focus-visible {
+  z-index: 21;
+  transform: translateY(-17px) translateZ(25px) rotateY(-10deg) rotateZ(0deg) scale(1.025);
+  filter: saturate(1.08) brightness(calc(1.04 + var(--rds-light, 0)));
+  box-shadow:
+    15px 20px 24px color-mix(in srgb, var(--neutral-900) 45%, transparent),
+    inset 5px 0 5px color-mix(in srgb, var(--neutral-0) 12%, transparent),
+    inset -6px 0 7px color-mix(in srgb, var(--neutral-900) 25%, transparent);
+  outline: none;
+}
+
+/* ホバー・フォーカスで背表紙の光沢が左から右へ抜ける。 */
+.rds-book.is-hover .rds-spine__gloss::before,
+.rds-spine.is-hover .rds-spine__gloss::before,
+.rds-spine:focus-visible .rds-spine__gloss::before {
+  left: 118%;
+  opacity: 1;
+}
+
+.rds-spine:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* クリックで本が抜き出される（この演出のあとで閲覧へ切り替わる） */
+.rds-book.is-pulled .rds-spine,
+.rds-spine.is-pulled {
+  z-index: 23;
+  animation: rds-pull var(--duration-slow) var(--ease-standard) forwards;
+}
+
+@keyframes rds-pull {
+  0% { transform: translateY(-17px) translateZ(25px) rotateY(-10deg) rotateZ(0deg) scale(1.025); }
+  55% { transform: translateY(-30px) translateZ(32px) rotateY(-6deg) scale(1.1); }
+  100% { transform: translateY(-48px) translateZ(40px) rotateY(-2deg) scale(1.16); opacity: 0.86; }
+}
+
+/* 棚に本が左から順に並んでいく（animation-delay は index でずらす） */
+.rds-case__board.is-dealing .rds-book {
+  animation: rds-deal var(--duration-slow) var(--ease-standard) both;
+  animation-delay: calc(var(--rds-index, 0) * 45ms);
+}
+
+@keyframes rds-deal {
+  from { opacity: 0; transform: translateX(-22px) translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- ホバーで浮かぶ「表紙と本の情報」のパネル（背表紙の横） ---------- */
+
+/* 表紙（165×236）と本の情報（難易度・言語・状態・進捗・標記・PDF 未登録）を 1 枚に
+   まとめた暗いガラスのパネル。以前は表紙とツールチップの 2 枚を別々に出していたが、
+   利用者の要望でこの 1 枚に統合した（情報は [data-rd-tip] の下にある）。
+   表紙がある本は img、無い本は頭文字の代替表示（どちらも [data-rd-cover-preview]）。
+   ホバーした本だけ描く（＝表紙画像はホバーするまで取りに行かない）ので、
+   transition ではなく animation で「ふわっと」出す。
+   「動きを減らす設定」では animation だけ切る（表紙と情報は出したままにする）。 */
+.rds-cover-panel {
+  position: absolute;
+  left: calc(100% + var(--sp-3));
+  bottom: var(--sp-2);
+  z-index: 24;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid color-mix(in srgb, var(--neutral-0) 15%, transparent);
+  border-radius: var(--radius-lg);
+  background-image: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--neutral-900) 78%, transparent) 0%,
+    color-mix(in srgb, var(--neutral-900) 91%, transparent) 100%
+  );
+  box-shadow: 0 18px 40px color-mix(in srgb, var(--neutral-900) 45%, transparent);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+  animation: rds-cover-panel-in var(--duration-base) var(--ease-standard) both;
+}
+
+/* 表紙の枠。表紙の上を光が左から右へ抜ける（プロトタイプと同じ演出）。 */
+.rds-cover-panel__frame {
+  position: relative;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 165px;
+  height: 236px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--neutral-900);
+  box-shadow: 0 13px 22px color-mix(in srgb, var(--neutral-900) 55%, transparent);
+}
+
+.rds-cover-panel__frame::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 0 35%,
+    color-mix(in srgb, var(--neutral-0) 13%, transparent) 48%,
+    transparent 58%
+  );
+  transform: translateX(-125%);
+  pointer-events: none;
+  /* パネルが出るたびに 1 回、表紙の上を光が通る */
+  animation: rds-cover-gloss 0.75s ease 0.12s 1 both;
+}
+
+/* パネルの文字（表紙の書名・作者・案内）。 */
+.rds-cover-panel__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  /* 情報が多いので、書名や元ファイル名が折り返しすぎない幅を取る（縦を詰める） */
+  width: 172px;
+  padding: var(--sp-2) var(--sp-1) 0;
+  color: var(--color-text-on-inverse);
+  text-align: left;
+}
+
+.rds-cover-panel__label {
+  margin-bottom: var(--sp-1);
+  color: var(--rds-spine-ink);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
+}
+
+.rds-cover-panel__title {
+  font-family: Georgia, 'Times New Roman', 'Yu Mincho', serif;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+  text-shadow: 1px 1px 1px color-mix(in srgb, var(--neutral-900) 55%, transparent);
+}
+
+.rds-cover-panel__author {
+  color: color-mix(in srgb, var(--neutral-0) 86%, var(--neutral-900));
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+/* 難易度・言語・状態のバッジ。暗いガラスの上なので、明るい側の色に寄せて読みやすくする
+   （色そのものは tokens.css の変数だけを color-mix() で混ぜて作る）。 */
+.rds-cover-panel__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-1);
+}
+
+.rds-cover-panel__badges .badge {
+  border-color: color-mix(in srgb, var(--neutral-0) 22%, transparent);
+  background: color-mix(in srgb, var(--neutral-0) 12%, transparent);
+  color: color-mix(in srgb, var(--neutral-0) 88%, var(--neutral-900));
+}
+
+/* 進捗（%）。ページ数より先に目に入るよう少し強くする（[data-rd-progress]）。 */
+.rds-cover-panel__progress {
+  margin-top: var(--sp-1);
+  color: var(--color-text-on-inverse);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-normal);
+}
+
+/* 標記の件数・PDF 未登録の案内。 */
+.rds-cover-panel__meta-row {
+  color: color-mix(in srgb, var(--neutral-0) 72%, transparent);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+}
+
+.rds-cover-panel__note {
+  color: color-mix(in srgb, var(--warning-600) 45%, var(--neutral-0));
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+.rds-cover-panel__help {
+  margin-top: var(--sp-2);
+  color: color-mix(in srgb, var(--neutral-0) 60%, transparent);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+}
+
+/* 表紙の画像（または頭文字の代替表示）。枠いっぱいに出す。 */
+.rds-preview {
+  /* 表紙（24）はツールチップ（22）とともに棚の中で上位（ホバー中の本＝21 より上） */
+  z-index: 24;
+  /* base.css の img の max-width: 100% に引っ張られて枠の幅まで潰れないようにする */
+  max-width: none;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px var(--radius-sm) var(--radius-sm) 2px;
+  background: var(--color-surface);
+  object-fit: cover;
+  pointer-events: none;
+}
+
+/* 表紙画像が無い本の代替表示（頭文字＋書名）。閲覧モードの表紙と同じ 3:4 の枠。 */
+.rds-preview--fallback {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2);
+  color: var(--color-text-on-inverse);
+  text-align: center;
+}
+
+.rds-preview__initial {
+  margin: auto;
+  font-size: var(--fs-4xl);
+  font-weight: var(--fw-bold);
+  line-height: 1;
+  opacity: 0.9;
+}
+
+.rds-preview__title {
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.rds-preview__author {
+  font-size: var(--fs-2xs);
+  opacity: 0.85;
+  overflow-wrap: anywhere;
+}
+
+@keyframes rds-cover-panel-in {
+  from { opacity: 0; transform: translateX(22px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes rds-cover-gloss {
+  from { transform: translateX(-125%); }
+  to { transform: translateX(125%); }
+}
+
+/* 棚の左端の本は表紙パネルを右に出す（左のサイドメニュー（248px・z-index 300）の下に
+   隠れないように）。既定も右だが、右端で左へ回り込む本との違いをここで明示しておく。 */
+.rds-book.is-tip-right .rds-cover-panel {
+  left: calc(100% + var(--sp-3));
+  right: auto;
+}
+
+/* 棚の右端の本は表紙パネルを左側に出す（画面の外へはみ出さないように）。 */
+.rds-book.is-preview-left .rds-cover-panel {
+  right: calc(100% + var(--sp-3));
+  left: auto;
+  animation-name: rds-cover-panel-in-left;
+}
+
+@keyframes rds-cover-panel-in-left {
+  from { opacity: 0; transform: translateX(-22px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- 抜き出して開く演出（表紙 → 本文） ---------- */
+
+.rds-opening {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  display: grid;
+  place-items: center;
+  background: var(--color-bg);
+  opacity: 0.92;
+  pointer-events: none;
+  animation: rds-opening-fade var(--duration-slow) var(--ease-standard) 1 forwards;
+}
+
+@keyframes rds-opening-fade {
+  0% { opacity: 0; }
+  35% { opacity: 0.94; }
+  100% { opacity: 0.94; }
+}
+
+.rds-opening__book {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 15rem;
+  height: 21rem;
+  padding: var(--sp-5);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 3px var(--radius-lg) var(--radius-lg) 3px;
+  color: var(--color-text-on-inverse);
+  box-shadow: var(--shadow-dialog);
+  animation: rds-opening-book var(--duration-slow) var(--ease-standard) 1 forwards;
+}
+
+@keyframes rds-opening-book {
+  0% { transform: translate(-38vw, 12vh) rotate(-9deg) scale(0.3); opacity: 0; }
+  55% { opacity: 1; }
+  100% { transform: translate(0, 0) rotate(0deg) scale(1); opacity: 1; }
+}
+
+.rds-opening__title {
+  margin: 0;
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.rds-opening__author {
+  margin: var(--sp-2) 0 0;
+  opacity: 0.85;
+  font-size: var(--fs-sm);
+}
+
+.rds-opening__cover {
+  width: 100%;
+  height: 100%;
+  /* 親（.rds-opening__book）いっぱいに出す（base.css の max-width: 100% は同じ値なので影響なし） */
+  max-width: none;
+  object-fit: cover;
+  border-radius: 2px var(--radius-md) var(--radius-md) 2px;
+}
+
+.rds-book-head__name {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.rds-book-head__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.rds-reader__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+@keyframes rds-open-in {
+  from { opacity: 0.4; transform: translateY(10px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+.rds-cover__img {
+  width: 100%;
+  border-radius: 2px var(--radius-md) var(--radius-md) 2px;
+}
+
+.rds-cover__title {
+  margin: 0;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.rds-cover__author {
+  margin: 0;
+  opacity: 0.85;
+  font-size: var(--fs-xs);
+}
+
+/* ツールバーの区切り線（本棚へ戻ると、ページ送りのあいだ）。 */
+.rds-toolbar__sep {
+  width: 1px;
+  height: 1.5rem;
+  background: var(--color-border);
+}
+
+/* ページ送りと拡大・縮小のあいだの余白（右端に読書記録を寄せる）。 */
+/* 倍率＋保存のまとまり。折り返しても右端に寄せる */
+.rds-toolbar__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+.rds-toolbar__gap {
+  flex: 1 1 auto;
+}
+
+.rds-color__button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: var(--control-sm);
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rds-color__button:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rds-color__swatch {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+}
+
+.rds-color__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.rds-color__popover {
+  position: absolute;
+  top: calc(100% + var(--sp-1));
+  right: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: repeat(5, auto);
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-md);
+}
+
+.rds-color__option {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.rds-color__option.is-active {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+}
+
+/* 本文の表示面。ページ（canvas）は縦横にはみ出してよいので、この枠の中でスクロールする
+   （高さ合わせのときは画面の高さに収まる大きさになり、ページ全体は伸びない）。
+   高さの上限は設けない（上限があると「高さに合わせる」の計算と食い違って、
+   枠の中で余計なスクロールが出る）。
+   標記ツールはページ（.rds-page-box）の中に浮かせるので、上の余白は要らない。 */
+.rds-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 24rem;
+  padding: var(--sp-4);
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.rds-help__title {
+  margin: 0 0 var(--sp-2);
+  color: var(--color-text-strong);
+  font-weight: var(--fw-semibold);
+}
+
+.rds-help__list {
+  margin: 0;
+  padding-left: var(--sp-5);
+}
+
+.rds-help__note {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-xs);
+}
+
+.rds-popup__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rds-popup__page {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.rds-popup__close {
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.rds-popup__word {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.rds-popup__content {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.rds-popup__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.rds-mark-group__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+}
+
+.rds-mark-group__label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.rds-mark-group__count {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.rds-mark-item__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rds-mark-item__meta {
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.rds-record__body {
+  min-width: 0;
+}
+
+.rds-record__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+}
+
+.rds-record__range {
+  color: var(--color-text-subtle);
+}
+
+/* 読書履歴（タブ）の書籍名。日時・ページ範囲と並ぶので少し強くする。 */
+.rds-record__book {
+  color: var(--color-text-strong);
+  font-weight: var(--fw-semibold);
+}
+
+/* 読書履歴（タブ）は行数が多くなるので、行の間隔を詰めて一覧性を上げる。 */
+.rds-history-list {
+  gap: var(--sp-1);
+}
+
+/* 読書履歴の絞り込み（ページ番号）は短い数値なので幅を抑える。 */
+.rds-history-page-no {
+  width: 7rem;
+}
+
+.rds-record__meta,
+.rds-record__memo {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-2xs);
+  overflow-wrap: anywhere;
+}
+
+.rds-record__remove {
+  margin-left: auto;
+}
+
+.rds-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+/* 調べています…／取れなかったときの案内。取れたときは空にする（下の欄に出す） */
+.rds-lookup__status {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.rds-lookup__status:empty {
+  display: none;
+}
+
+.rds-lookup__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin: 0;
+}
+
+.rds-lookup__row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.rds-lookup__label {
+  flex: 0 0 5rem;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 読み取り専用の欄（引き当てた内容。直したいときは下の内容欄で編集する） */
+.rds-lookup__value {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+
+.rds-lookup__note {
+  margin: 0;
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 狭い画面 ---------- */
+
+@media (max-width: 1100px) {
+  .rds-reader {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rds-cover {
+    max-width: 16rem;
+  }
+
+  /* 狭い画面では背表紙の横が画面外に出やすいので、表紙パネルをひと回り小さくする
+     （プロトタイプと同じく、文字は隠して表紙だけを見せる）。 */
+  .rds-cover-panel__frame {
+    width: 116px;
+    height: 166px;
+  }
+
+  .rds-cover-panel__meta {
+    display: none;
+  }
+}
+
+/* ---------- アニメーションを減らす設定のとき ---------- */
+
+/* 画面側でも is-dealing / is-pulled を付けないが、CSS でも念のため止める
+   （OS 設定の変更にその場で追従できるように）。
+   ホバーで出す表紙パネル（.rds-cover-panel）は情報なので出したままにする
+   （animation と transition だけ切る）。 */
+@media (prefers-reduced-motion: reduce) {
+  .rds-case__board.is-dealing .rds-book,
+  .rds-book.is-pulled .rds-spine,
+  .rds-spine.is-pulled,
+  .rds-reader.is-opening,
+  .rds-opening,
+  .rds-opening__book,
+  .rds-book.is-tip .rds-cover-panel,
+  .rds-cover-panel__frame::after {
+    animation: none;
+  }
+
+  .rds-spine,
+  .rds-book.is-hover .rds-spine,
+  .rds-spine.is-hover,
+  .rds-spine__gloss::before,
+  .rds-book__shadow,
+  .rds-cover-panel,
+  .rds-preview,
+  .rds-cover,
+  .rds-tool {
+    transition: none;
+  }
+
+  .rds-book.is-hover .rds-spine,
+  .rds-spine.is-hover,
+  .rds-spine:focus-visible {
+    transform: none;
+  }
+
+  /* 起き上がらないので、影も濃くしない（動きの代わりに影だけ動くと不自然） */
+  .rds-book.is-hover .rds-book__shadow,
+  .rds-book.is-pulled .rds-book__shadow {
+    transform: none;
+  }
+}
+
+/* 【自分の本棚】が空のときの案内（2026-09-14 の決定: 初期状態は空）。
+   図書館へ行って 1 冊ずつ入れてもらうための導線を一緒に出す。 */
+.rds-shelf__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+  text-align: center;
+}
+
+.rds-shelf__empty p {
+  margin: 0;
+  color: var(--color-text-muted);
+}

@@ -103,6 +103,8 @@ describe('AI呼出履歴', () => {
 
     expect(wrapper.get('.search-panel__title').text()).toContain('検索条件')
     expect(wrapper.findAll('.table-section__title').map((el) => el.text())).toEqual(['AI呼出履歴'])
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
     expect(wrapper.text()).toContain('全 2 件')
   })
 

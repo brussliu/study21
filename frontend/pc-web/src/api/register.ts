@@ -1,8 +1,11 @@
 import { HttpClient, type ApiResponse } from '@study21/web-shared'
 
 /**
- * 保護者・生徒アカウントの登録 / ログイン API（/api/user）。
+ * 保護者・生徒・管理者アカウントの登録 / ログイン API（/api/user）。
  * 型とエンドポイントは user-api の AccountController と対応する。
+ *
+ * 2026-09-14 の決定（Q8）: 管理者も user-api のログインを使う
+ * （読書管理の【全体書籍】を管理するため。管理者の有効期限は無期限なので `expiryDate` は null）。
  */
 
 export interface RegisterRequest {
@@ -36,9 +39,9 @@ export interface LoginResponse {
   accountId: number
   loginId: string
   displayName: string
-  accountType: 'GUARDIAN' | 'STUDENT'
-  /** 有効期限（yyyy-MM-dd） */
-  expiryDate: string
+  accountType: 'GUARDIAN' | 'STUDENT' | 'ADMIN'
+  /** 有効期限（yyyy-MM-dd）。管理者は無期限なので null */
+  expiryDate: string | null
 }
 
 const http = new HttpClient({ baseUrl: '/api/user' })

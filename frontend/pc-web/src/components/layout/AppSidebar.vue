@@ -17,7 +17,8 @@ const router = useRouter()
 const auth = useAuthStore()
 const theme = useThemeStore()
 
-const menu = computed(() => resolveMenu(props.area))
+// 読書管理の【書籍管理】はロールで出し分ける（生徒には出さない。決定 Q9）
+const menu = computed(() => resolveMenu(props.area, auth.role ?? undefined))
 const openGroups = ref<string[]>([])
 const currentPath = computed(() => route.path)
 

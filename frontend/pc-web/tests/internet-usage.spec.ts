@@ -138,6 +138,8 @@ describe('インターネット利用履歴', () => {
     expect(accessPanel.findAll('.search-panel__actions .btn').map((button) => button.text()))
       .toEqual(['検索', 'リセット'])
     expect(wrapper.find('.card.table-section').exists()).toBe(true)
+    // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
 
     // Web閲覧履歴にも同じカードがある
     await wrapper.findAll('.tabs__tab')[1].trigger('click')
@@ -146,6 +148,7 @@ describe('インターネット利用履歴', () => {
     expect(browsingPanel.get('.search-panel__title').text()).toContain('検索条件')
     expect(browsingPanel.findAll('.search-panel__actions .btn').map((button) => button.text()))
       .toEqual(['検索', 'リセット'])
+    expect(wrapper.get('.table-section__title').get('use').attributes('href')).toBe('#i-list')
   })
 
   it('タブ名に件数を出さない', async () => {

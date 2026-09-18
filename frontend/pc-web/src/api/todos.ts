@@ -35,10 +35,21 @@ export interface TodoListResult {
   doneCount: number
 }
 
+/** カレンダーのマスに出す 1 件（親子は問わない）。 */
+export interface TodoCalendarTask {
+  todoId: number
+  title: string
+  status: TodoStatusCode
+  priority: TodoPriorityCode
+  child: boolean
+}
+
 export interface TodoCalendarCell {
   dueDate: string
   openCount: number
   doneCount: number
+  /** その日が期限の TODO（未完了が先・優先度の高い順。サーバーが並べる）。 */
+  tasks: TodoCalendarTask[]
 }
 
 export interface TodoCalendarResult {

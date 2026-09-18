@@ -19,6 +19,8 @@ import '@/features/batch/batch.css'
  * 「バッチ実行履歴」に分けた（`BatchHistoryView.vue`）。
  * 2.1 で有効なのは batS01（プロキシサービス）だけで、実行のきっかけは
  * admin-api の起動時 1 回と、この画面の【再実行】の 2 つ。
+ * 種別 C（呼出）は他の処理が工程として呼ぶバッチなので、【再実行】ボタンは出さない
+ * （`canManualRerun=false`。判定はバックエンドの `BatchTaskDefinition#canManualRerun`）。
  */
 const toast = useToast()
 
@@ -114,7 +116,7 @@ onMounted(load)
 
     <div class="card table-section">
       <div class="table-section__head">
-        <h3 class="table-section__title">バッチ一覧（{{ activeTabTitle }}）</h3>
+        <h3 class="table-section__title"><AppIcon name="list" size="sm" /> バッチ一覧（{{ activeTabTitle }}）</h3>
         <span class="table-section__meta">全 {{ visibleRows.length }} 件</span>
       </div>
 
@@ -175,7 +177,10 @@ onMounted(load)
               </td>
               <td class="cell-muted">{{ row.latestStartTime ? formatIsoDateTime(row.latestStartTime) : '—' }}</td>
               <td>
+                <!-- 種別 C（呼出）は他の処理から呼ばれるバッチなので、ボタンごと出さない
+                     （canManualRerun=false。押せない灰色のボタンも残さない） -->
                 <button
+                  v-if="row.canManualRerun"
                   type="button"
                   class="btn btn--secondary btn--sm"
                   :disabled="busy || !row.canRerun"
@@ -184,6 +189,7 @@ onMounted(load)
                 >
                   <AppIcon name="play" size="sm" /> 再実行
                 </button>
+                <span v-else class="cell-muted">—</span>
               </td>
             </tr>
           </tbody>

@@ -1,0 +1,885 @@
+/* 読書管理（書籍管理・書籍閲覧）のレイアウト。
+   色は tokens.css の変数のみを使う（assets/prototype/*.css は変更しない）。 */
+
+.rd-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+.rd-page__loading,
+.rd-page__empty {
+  margin: 0;
+  padding: var(--sp-5);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* ---------- 分類（棚）のタブ ---------- */
+
+.rd-cats {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-5) 0;
+}
+
+/* 区分（公開範囲。2026-09-14 の追加）。管理者＝全体の本 / 保護者＝家庭の本 を切り替える。
+   見た目は分類タブ（.rd-cat）と同じ丸いボタンで、少しだけ小さい */
+.rd-scopes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-5) 0;
+}
+
+.rd-scope {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.rd-scope:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-text);
+}
+
+.rd-scope.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.rd-scopes__note {
+  font-size: var(--fs-xs);
+}
+
+/* 2 行目（左＝分類の丸いボタン、右＝冊数のサマリ）。
+   行の下には閲覧画面のタブ行（`reading-reader.css` の .rrd-tabs）と同じ区切り線を引く。
+   線はカード幅いっぱいに引きたいので、親（.rd-cats）の左右の余白ぶん外に広げ、
+   内側の余白は自分の padding で戻す */
+.rd-cats__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  margin: 0 calc(-1 * var(--sp-5));
+  padding: 0 var(--sp-5) var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.rd-cat-list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* 分類のボタン。見た目は閲覧画面の本棚タブ（`reading-reader.css` の .rrd-tab）と同じ:
+   丸い枠・選択中は主色で塗る（利用者の指示で設計システムの .tabs から変更した） */
+.rd-cat {
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.rd-cat:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rd-cat.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-weight: var(--fw-semibold);
+}
+
+/* 冊数のサマリは 2 行目の右端 */
+.rd-cats__summary {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* 1 行目（見出し）の右に置く操作 */
+.rd-shelf-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* ---------- 本棚（書籍管理） ----------
+   カードの見た目・並びは書籍閲覧画面の本棚タブ（`reading-reader.css` の `.rrd-book*`）に合わせる。
+   書籍管理にしか無いもの（置頂バッジ・全ページ数・操作アイコン・ダウンロード）だけを足す。 */
+
+.rd-shelf-section + .rd-shelf-section {
+  border-top: 1px solid var(--color-border);
+}
+
+/* 棚の見出し。見た目は閲覧画面の本棚タブ（`.rds-case__head`）に合わせる */
+.rd-shelf-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-4) var(--sp-5) 0;
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+/* 置頂の棚だけは目印（アイコン）を主色にして、普通の分類と見分けられるようにする */
+.rd-shelf-section__title.is-pinned {
+  color: var(--color-primary);
+}
+
+.rd-shelf-section__count {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular, 400);
+}
+
+/* 棚のグリッドとカードの余白・枠・角丸は読み手側（.rrd-shelf / .rrd-book）と同じ値。
+   カードを広く取る（2026-09-15 の指示。340px だと書名やバッジが折り返して縦に伸びる）。
+   1280/1680/1920 のどれでも横に溢れない範囲で広げる（読み手側の .rrd-shelf と同じ 420px） */
+.rd-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: var(--sp-4);
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.rd-book {
+  display: flex;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* 置頂中は左端に線を引く（書籍管理だけの印） */
+.rd-book.is-pinned {
+  border-color: var(--color-primary);
+  box-shadow: inset 3px 0 0 var(--color-primary);
+}
+
+/* 表紙（読み手側と同じ 136×190。実体が無い本は頭文字の代替表示） */
+.rd-book__cover {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 136px;
+  height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+}
+
+.rd-book__cover-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.rd-book__cover-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  height: 100%;
+  padding: var(--sp-1);
+  text-align: center;
+}
+
+.rd-book__cover-initial {
+  font-size: var(--fs-2xl);
+  font-weight: var(--fw-bold);
+}
+
+.rd-book__cover-note {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.2;
+}
+
+.rd-book__main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rd-book__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+
+.rd-book__title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rd-book__pin {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px var(--sp-2);
+  border-radius: var(--radius-full, 999px);
+  background: var(--color-primary-soft, var(--color-surface-alt));
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+}
+
+/* 作者は読み手側と同じく独立した 1 行 */
+.rd-book__author {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
+/* バッジ（難易度・言語・分類）＋ページ数。間隔は読み手側（gap: var(--sp-1)）と同じ */
+.rd-book__badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.rd-book__pages {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* 本文 PDF の状態（実体があればファイル名だけ／未登録は元ファイル名を添える） */
+.rd-book__pdf {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-success-soft);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.rd-book__pdf.is-missing {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-weight: var(--fw-medium);
+}
+
+.rd-progress {
+  position: relative;
+  flex: 1 1 auto;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.rd-progress__bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-primary);
+}
+
+.rd-book__tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.rd-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+/* カードの最後の行（左＝本文 PDF の状態、右＝操作アイコン）。
+   操作を別の行に置くとカードの下が間延びするので、メタ情報と同じ行に並べる
+   （左右の間隔は flex に任せ、アイコンは行の右端に寄せる） */
+.rd-book__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+/* メタ情報は 1 行に収める（長いファイル名は省略記号。全文は title で見せる）。
+   折り返すと行が高くなり、右のアイコンが行の真ん中に落ちてカードが伸びるため */
+.rd-book__foot .rd-book__pdf {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.rd-book__pdf-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* カードの操作はアイコンのみ（ダウンロード・修正・置頂・削除）。右端にまとめる */
+.rd-book__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+
+/* 操作アイコンは「淡い下地＋色付きのアイコン＋枠線」のチップにして、どの操作かひと目で分かるようにする。
+   色は tokens.css の変数だけを使う（暗色テーマは themes.css が変数を差し替えるので付いてくる）。
+   --rd-act を操作ごとに変えると、アイコン・下地・枠がまとめて同じ色になる */
+.rd-book__actions .btn--icon {
+  --rd-act: var(--color-text-muted);
+
+  width: var(--control-sm);
+  height: var(--control-sm);
+  border: 1px solid color-mix(in srgb, var(--rd-act) 32%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--rd-act) 10%, transparent);
+  color: var(--rd-act);
+}
+
+/* ダウンロード＝主色（読むための操作なのでいちばん目立つ色） */
+.rd-book__actions .btn--icon[data-rd-download] {
+  --rd-act: var(--color-primary);
+}
+
+/* 修正＝アクセント色（アプリ全体の「編集＝青」に合わせる） */
+.rd-book__actions .btn--icon[data-rd-edit] {
+  --rd-act: var(--color-info);
+}
+
+/* 置頂＝注意色（オレンジ）。ほかの操作と混ざらない色にする */
+.rd-book__actions .btn--icon[data-rd-pin] {
+  --rd-act: var(--color-warning);
+}
+
+/* 削除＝危険色（赤）。.is-danger と同じ色にして、全画面の見た目と揃える */
+.rd-book__actions .btn--icon[data-rd-delete] {
+  --rd-act: var(--color-danger);
+}
+
+/* ホバーはアイコンの色を保ったまま、下地と枠を濃くする（色が変わると意味が薄れる） */
+.rd-book__actions .btn--icon:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--rd-act) 22%, transparent);
+  border-color: color-mix(in srgb, var(--rd-act) 55%, transparent);
+  color: var(--rd-act);
+}
+
+/* 置頂中は下地を濃くし、枠を塗って「いま置頂されている」ことが分かるようにする */
+.rd-book__actions .btn--icon[data-rd-pin].is-active {
+  background: color-mix(in srgb, var(--color-warning) 28%, transparent);
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-warning) 18%, transparent);
+}
+
+/* 送信中などで押せないときは、色を落として下地も消す（押せる操作と見分けられるように） */
+.rd-book__actions .btn--icon:disabled {
+  background: transparent;
+  border-color: var(--color-border);
+  color: var(--color-text-subtle);
+  box-shadow: none;
+}
+
+/* ---------- ファイルの選択（書籍ダイアログ） ---------- */
+
+/* 本文 PDF・表紙のドロップゾーン（ネイティブの [ファイル選択] は出さず、枠全体で選べるようにする） */
+.rd-drop {
+  position: relative;
+  overflow: hidden;
+  margin-top: var(--sp-1);
+}
+
+.rd-drop__title {
+  color: var(--color-text);
+  font-weight: var(--fw-medium);
+}
+
+.rd-drop__note {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* input 自体は見えなくしてゾーン全体に重ねる（見た目は .dropzone の枠が担う） */
+.rd-drop__input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rd-drop__preview {
+  max-height: 160px;
+  max-width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  object-fit: contain;
+}
+
+/* ---------- タグ入力（登録・修正ダイアログ） ---------- */
+
+.rd-tag-input {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rd-tag-input__list {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  min-height: 1.75rem;
+}
+
+.rd-tag-input__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-xs);
+}
+
+.rd-tag-input__remove {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-subtle);
+  cursor: pointer;
+}
+
+.rd-tag-input__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rd-tag-suggestions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.rd-tag-suggestion {
+  padding: 1px var(--sp-2);
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rd-tag-suggestion:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* ---------- 標記（語彙・ハイライト・下線・メモ） ---------- */
+
+.rd-marks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rd-mark {
+  display: flex;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.rd-mark__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.rd-mark__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.rd-mark__word {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  word-break: break-word;
+}
+
+.rd-mark__page {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.rd-mark__content {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.rd-mark__actions {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+}
+
+/* ページの学習内容（閲覧画面の中央） */
+.rd-page-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 420px;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.rd-page-canvas__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.rd-page-canvas__page {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  color: var(--color-text-strong);
+}
+
+.rd-page-canvas__count {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- 閲覧画面のレイアウト ---------- */
+
+.rd-reader {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+.rd-reader.is-focus {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rd-reader.is-focus .rd-reader__rail,
+.rd-reader.is-focus .rd-reader__side {
+  display: none;
+}
+
+.rd-reader__rail,
+.rd-reader__side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* 書籍の選択（閲覧画面の左） */
+.rd-book-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 420px;
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+
+.rd-book-picker__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rd-book-picker__item:hover {
+  background: var(--color-surface-hover);
+}
+
+.rd-book-picker__item.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-surface-alt);
+}
+
+.rd-book-picker__title {
+  font-weight: var(--fw-medium);
+}
+
+.rd-book-picker__meta {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* ページレール */
+.rd-page-rail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  max-height: 300px;
+  overflow-y: auto;
+  padding: var(--sp-2);
+}
+
+.rd-page-chip {
+  position: relative;
+  min-width: 2.5rem;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rd-page-chip:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.rd-page-chip.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary, #fff);
+}
+
+/* 標記のあるページの印 */
+.rd-page-chip.has-mark::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-warning, #d9822b);
+}
+
+.rd-page-chip.is-active.has-mark::after {
+  background: var(--color-on-primary, #fff);
+}
+
+.rd-page-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.rd-page-nav__input {
+  width: 5.5rem;
+}
+
+/* 読書状況（閲覧画面の右） */
+.rd-status {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rd-status__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.rd-status__label {
+  color: var(--color-text-muted);
+}
+
+.rd-status__value {
+  color: var(--color-text-strong);
+  font-weight: var(--fw-medium);
+}
+
+/* 標記の追加フォーム */
+.rd-mark-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.rd-mark-form__types {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.rd-mark-type-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.rd-mark-type-btn.is-active {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+/* ダイアログ内のフォーム部品 */
+.rd-dialog-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.rd-dialog-grid .field--wide {
+  grid-column: 1 / -1;
+}
+
+/* 本文 PDF と表紙は同じ行に左右で並べる（ダイアログが縦長にならないように。狭い画面では縦に積む） */
+.rd-upload-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .rd-upload-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 選んだ（または登録済みの）ファイル名。目立つように濃い色・太字にする */
+.rd-file-state {
+  margin: var(--sp-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.rd-file-name {
+  color: var(--color-text-strong);
+  font-weight: var(--fw-semibold);
+}
+
+/* PDF から数えた総ページ数。入力欄をやめたので、ここを目立たせる */
+.rd-pdf-pages {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: var(--sp-2) 0 0;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft, var(--color-surface-alt));
+  color: var(--color-primary);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.rd-pdf-pages strong {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+}
+
+.rd-required {
+  margin-left: var(--sp-1);
+  color: var(--color-danger);
+  font-size: var(--fs-xs);
+}
+
+.rd-hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* 一覧（標記一覧ダイアログ・履歴）の見出し */
+.rd-list-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.rd-list-head__spacer {
+  margin-left: auto;
+}
+
+/* 読書履歴テーブルの操作列 */
+.rd-row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}

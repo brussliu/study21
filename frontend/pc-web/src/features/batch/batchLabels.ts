@@ -63,3 +63,62 @@ export function durationLabel(durationMs: number | null): string {
 export function optionsOf(labels: Record<string, string>): Array<{ value: string; label: string }> {
   return Object.entries(labels).map(([value, label]) => ({ value, label }))
 }
+
+/**
+ * 実行履歴の「対象」列のラベル（何を処理した行か）。
+ *
+ * バッチコードは**再利用される**（例: `batC52` は以前「AI 生図の AI 生成」、いまは「AI 画図助手」）ので、
+ * コードだけでは区別できない。バックエンドが `targetKind` / `targetId` を返せばそれを使い、
+ * まだ返さないときは **`要求内容`（生 JSON）から推定**する。
+ *
+ * ・`AI_FIGURE`      → 「AI生図 #164」
+ * ・`AI_ASSIST`      → 「画図助手 #12」
+ * ・`CLASSROOM_NOTE` → 「授業ノート #89」
+ * ・判別できない／未知 → 「—」（列は空欄のまま。表は壊さない）
+ */
+export const TARGET_KIND_LABELS: Record<string, string> = {
+  AI_FIGURE: 'AI生図',
+  AI_ASSIST: '画図助手',
+  CLASSROOM_NOTE: '授業ノート'
+}
+
+/** 要求内容（JSON 文字列）から対象の種別と ID を推定する（分からなければ null）。 */
+export function targetFromPayload(payload: string | null | undefined): { kind: string; id: number | null } | null {
+  if (payload === null || payload === undefined || payload.trim() === '') return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(payload)
+  } catch {
+    return null
+  }
+  if (parsed === null || typeof parsed !== 'object') return null
+  const record = parsed as Record<string, unknown>
+  const number = (value: unknown): number | null => (
+    typeof value === 'number' && Number.isFinite(value) ? value : null
+  )
+  const aiRequestId = number(record.aiRequestId)
+  if (aiRequestId !== null) return { kind: 'AI_FIGURE', id: aiRequestId }
+  const assistId = number(record.assistId)
+  if (assistId !== null) return { kind: 'AI_ASSIST', id: assistId }
+  const noteId = number(record.noteId)
+  if (noteId !== null) return { kind: 'CLASSROOM_NOTE', id: noteId }
+  return null
+}
+
+/**
+ * 実行履歴の「対象」の表示。
+ * `targetKind` が分からない行（古い行・対象が無いバッチ）は「—」。
+ */
+export function batchTargetLabel(row: {
+  targetKind?: string | null
+  targetId?: number | null
+  requestPayload?: string | null
+}): string {
+  const fromPayload = targetFromPayload(row.requestPayload)
+  const kind = row.targetKind ?? fromPayload?.kind ?? null
+  if (kind === null) return '—'
+  const label = TARGET_KIND_LABELS[kind]
+  if (label === undefined) return '—'
+  const id = row.targetId ?? fromPayload?.id ?? null
+  return id === null ? label : `${label} #${id}`
+}

@@ -22,13 +22,23 @@ export function frameworkMenu(area: AppArea): MenuItem[] {
   return [screen(area, `${area}-home`, 'ホーム', 'home', 'home')]
 }
 
-export function prototypeMenu(area: AppArea): MenuItem[] {
+export function prototypeMenu(area: AppArea, role?: Role): MenuItem[] {
   return [
     screen(area, 'mindmap', '思維導図', 'mindmap', 'grid'),
     screen(area, 'daily-report', '学習日報', 'daily-report', 'book'),
     screen(area, 'todo', 'TODO', 'todo', 'check-square'),
+    // 読書管理（親メニュー）。2.0 の英語読書を【書籍管理】と【書籍閲覧】に分けた。
+    // 【書籍管理】は管理者（全体書籍）と保護者（自分の家庭の本）だけの画面なので、
+    // 生徒には出さない（2026-09-14 の決定 Q9。ルートは残るが API は 403）。
+    screen(area, 'reading', '読書管理', 'reading-books', 'book', [
+      ...(canManageBooks(role)
+        ? [screen(area, 'reading-books', '書籍管理', 'reading-books', 'book')]
+        : []),
+      screen(area, 'reading-reader', '書籍閲覧', 'reading-reader', 'book-open'),
+      // 書籍閲覧2 は既存の書籍閲覧（バックアップとして残す）とは別の画面。
+      // 本棚を探す操作感（背表紙・ホバー・抜き出し）で読む。
+    ]),
     screen(area, 'english', '英語勉強', 'english', 'type', [
-      screen(area, 'english-reading', '読書管理', 'english-reading', 'book-open'),
       screen(area, 'english-reading-intensive', '英語読解・精読', 'english-reading-intensive', 'book'),
       screen(area, 'english-essay', '英作文AI添削', 'english-essay', 'edit'),
       screen(area, 'english-cloze', '英語穴埋め問題', 'english-cloze', 'filter'),
@@ -50,6 +60,9 @@ export function prototypeMenu(area: AppArea): MenuItem[] {
       screen(area, 'math-wrong', '誤問題集', 'math-wrong', 'alert'),
       screen(area, 'geometry', '図形管理', 'geometry', 'edit')
     ]),
+    // 授業録音 / AI 授業記録（授業の録音と書き起こし・AI ノート）。ページ（流れ）のみ。
+    // ロールの出し分けは未決定のため、まずは 3 エリア共通で出す（権限はバックエンドで守る）。
+    screen(area, 'classroom', '授業録音', 'classroom', 'mic'),
     screen(area, 'game', 'ゲーム', 'game', 'gamepad'),
     screen(area, 'testinfo', 'テスト情報管理', 'testinfo', 'clipboard'),
     screen(area, 'document', '資料管理', 'document', 'folder'),
@@ -78,6 +91,17 @@ export function prototypeMenu(area: AppArea): MenuItem[] {
 
 export const businessMenu: MenuItem[] = []
 
-export function resolveMenu(area: AppArea, _role?: Role): MenuItem[] {
-  return [...frameworkMenu(area), ...prototypeMenu(area)]
+/**
+ * 【書籍管理】（読書管理の子）を開けるロールか。
+ *
+ * 2026-09-14 の決定 Q9: 管理者＝全体書籍・保護者＝自分の家庭の本を管理する。
+ * 生徒は読むことと【自分の本棚】の出し入れだけなので、メニューに出さない。
+ * ロールが分からないとき（未ログイン・UI 確認）は出しておく（API 側が 403 で守る）。
+ */
+function canManageBooks(role?: Role): boolean {
+  return role === undefined || role === 'ADMIN' || role === 'GUARDIAN'
+}
+
+export function resolveMenu(area: AppArea, role?: Role): MenuItem[] {
+  return [...frameworkMenu(area), ...prototypeMenu(area, role)]
 }

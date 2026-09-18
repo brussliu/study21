@@ -31,6 +31,10 @@
 .setting-panel-head { margin-bottom: 16px; }
 .setting-panel-head h3 { margin: 0; padding-left: 10px; border-left: 4px solid var(--setting-green); color: var(--setting-ink); font-size: 18px; font-weight: 600; }
 .setting-panel-head p { margin: 6px 0 0 14px; color: var(--setting-muted); font-size: 11px; }
+/* 中身を外部コンポーネントが描く分類（AI生図 / AI授業記録）のマウント点。
+   ここへ Teleport でセクションが入る（項目はランタイムが描かない）。
+   セクション自身は単独で出すときの上余白を持つので、パネルの中では外して見出しの下へ詰める。 */
+.setting-panel__external > .card { margin-top: 0; }
 .setting-process-flow { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; padding: 12px; border: 1px solid var(--setting-line); border-radius: 8px; background: #f7f9fc; }
 .setting-process-flow > div { display: flex; min-height: 44px; align-items: center; justify-content: center; gap: 9px; border: 1px solid #d6e1ed; border-radius: 7px; background: #fff; color: var(--setting-ink); font-size: 12px; font-weight: 700; }
 .setting-process-flow > div { flex: 1 1 0; min-width: 0; }
@@ -45,7 +49,7 @@
 .setting-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; padding: 16px; }
 .setting-field { min-width: 0; }
 .setting-field.full { grid-column: 1 / -1; }
-.setting-field label.setting-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--setting-ink); font-size: 12px; font-weight: 600; }
+.setting-field .setting-label { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; color: var(--setting-ink); font-size: 12px; font-weight: 600; }
 .setting-field-key { color: #9aa8b7; font-family: Consolas, monospace; font-size: 9px; font-weight: 400; }
 .setting-control { width: 100%; min-height: 38px; padding: 0 11px; border: 1px solid #c7d2e3; border-radius: 8px; outline: none; background: #fff; color: var(--setting-ink); font-size: 13px; }
 textarea.setting-control { min-height: 150px; padding: 10px 12px; resize: vertical; font-family: Consolas, 'Yu Gothic UI', sans-serif; font-size: 12px; line-height: 1.6; }
@@ -651,7 +655,7 @@ textarea.setting-control { min-height: 150px; padding: 10px 12px; resize: vertic
 
 .setting-panel-head h3,
 .setting-batch-section-head h4,
-.setting-field label.setting-label,
+.setting-field .setting-label,
 .setting-toggle-copy strong,
 .setting-intensive-section-title {
   color: var(--color-text-strong);
