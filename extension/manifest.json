@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Study 2.1 ブラウザ記録",
+  "version": "2.1.0",
+  "description": "Study 2.1 の Web 閲覧履歴収集と単語帳を提供します。",
+  "permissions": [
+    "storage",
+    "tabs",
+    "history",
+    "alarms",
+    "contextMenus",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Study 2.1 ブラウザ記録",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_page": "settings.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

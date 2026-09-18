@@ -1,0 +1,284 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 24px 12px 48px;
+  background: #f6f9fc;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+  color: #223b57;
+}
+
+.wordbook-panel {
+  max-width: 1040px;
+  margin: 0 auto;
+  background: #fff;
+  border: 1px solid #d7e2ee;
+  border-radius: 8px;
+  padding: 20px 22px 24px;
+}
+
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+h1 {
+  margin: 0;
+  font-size: 21px;
+}
+
+h2 {
+  margin: 0 0 12px;
+  font-size: 15px;
+  color: #43596f;
+}
+
+p {
+  margin: 8px 0 0;
+  color: #607992;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+code {
+  background: #f1f6fb;
+  border: 1px solid #dde8f3;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 12px;
+  color: #2a68a8;
+}
+
+.count-area {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.count-badge {
+  background: #eef5fc;
+  border: 1px solid #cfe0f2;
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #2a68a8;
+}
+
+.count-sub {
+  font-size: 12px;
+  color: #607992;
+}
+
+.form-section {
+  margin-top: 22px;
+  border-top: 1px solid #e6eef7;
+  padding-top: 18px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.field.wide {
+  grid-column: 1 / -1;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f7894;
+}
+
+.required {
+  margin-left: 4px;
+  color: #b24141;
+  font-size: 11px;
+}
+
+input[type="text"] {
+  width: 100%;
+  border: 1px solid #c8d7e6;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+input[type="text"]:focus {
+  outline: none;
+  border-color: #7aa6d6;
+  box-shadow: 0 0 0 3px rgba(66, 126, 191, 0.15);
+}
+
+.actions {
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+button {
+  min-width: 110px;
+  border: 1px solid #c6d6e6;
+  border-radius: 8px;
+  background: #fff;
+  color: #223b57;
+  padding: 9px 14px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+button.primary {
+  border-color: #2a68a8;
+  background: linear-gradient(180deg, #3b82c8 0%, #2f6fb2 100%);
+  color: #fff;
+}
+
+button:hover {
+  filter: brightness(0.98);
+}
+
+button.link {
+  min-width: 0;
+  border-color: #e6b6b6;
+  color: #b24141;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.list-section {
+  margin-top: 26px;
+  border-top: 1px solid #e6eef7;
+  padding-top: 18px;
+}
+
+.search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.search-row label {
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+.search-row input {
+  max-width: 360px;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+  border: 1px solid #e2ebf5;
+  border-radius: 8px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+thead th {
+  background: #f4f8fc;
+  color: #5f7894;
+  font-size: 12px;
+  text-align: left;
+  padding: 9px 10px;
+  border-bottom: 1px solid #e2ebf5;
+  white-space: nowrap;
+}
+
+tbody td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #eef3f9;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.col-word {
+  width: 16%;
+}
+
+.col-meaning {
+  width: 20%;
+}
+
+.col-memo {
+  width: 20%;
+}
+
+.col-source {
+  width: 22%;
+}
+
+.col-created {
+  width: 14%;
+}
+
+.col-action {
+  width: 8%;
+  text-align: right;
+}
+
+td.word-cell {
+  font-weight: 700;
+}
+
+td.created-cell {
+  white-space: nowrap;
+  color: #607992;
+  font-size: 12px;
+}
+
+td.source-cell a {
+  color: #2a68a8;
+  text-decoration: none;
+  word-break: break-all;
+}
+
+td.source-cell a:hover {
+  text-decoration: underline;
+}
+
+td.action-cell {
+  text-align: right;
+}
+
+.empty-message {
+  margin: 14px 2px 0;
+  color: #7b8ea3;
+  font-size: 13px;
+}
+
+.status {
+  margin-top: 16px;
+  min-height: 20px;
+  font-size: 13px;
+  color: #255f2c;
+  white-space: pre-wrap;
+}
+
+.status.error {
+  color: #b24141;
+}
+
+.status.info {
+  color: #607992;
+}

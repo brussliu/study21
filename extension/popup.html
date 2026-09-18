@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Study 2.1 ブラウザ記録</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main class="popup-panel">
+    <header class="popup-header">
+      <h1>Study 2.1 ブラウザ記録</h1>
+      <p>Web 閲覧履歴の送信状況を確認できます。</p>
+    </header>
+
+    <section class="status-block">
+      <div class="status-row">
+        <span class="status-label">接続状態</span>
+        <span id="connectionState" class="badge badge-unset">未設定</span>
+      </div>
+      <p id="connectionMessage" class="status-message"></p>
+    </section>
+
+    <section class="info-block">
+      <div class="info-row">
+        <span class="info-label">送信待ち</span>
+        <span id="pendingCount" class="info-value">0 件</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">最終送信</span>
+        <span id="lastSentAt" class="info-value">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">記録</span>
+        <span id="recordingState" class="info-value">ON</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">端末 ID</span>
+        <span id="deviceId" class="info-value mono">—</span>
+      </div>
+      <div class="info-row">
+        <span class="info-label">API URL</span>
+        <span id="apiBaseUrl" class="info-value mono">—</span>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="openSettingsBtn" class="primary" type="button">設定を開く</button>
+      <button id="openWordbookBtn" type="button">単語帳を開く</button>
+    </div>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>

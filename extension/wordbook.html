@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Study 2.1 単語帳</title>
+  <link rel="stylesheet" href="wordbook.css" />
+</head>
+<body>
+  <main class="wordbook-panel">
+    <header>
+      <div class="title-row">
+        <h1>Study 2.1 単語帳</h1>
+        <div class="count-area">
+          <span id="totalCount" class="count-badge">0 件</span>
+          <span id="filteredCount" class="count-sub"></span>
+        </div>
+      </div>
+      <p>
+        単語帳はこのブラウザ内（<code>chrome.storage.local</code>）にのみ保存されます。
+        サーバーへは送信しません。
+      </p>
+    </header>
+
+    <section class="form-section">
+      <h2>単語を追加</h2>
+      <div class="form-grid">
+        <div class="field">
+          <label for="wordInput">英単語 <span class="required">必須</span></label>
+          <input id="wordInput" type="text" placeholder="例: environment" autocomplete="off" />
+        </div>
+        <div class="field">
+          <label for="meaningInput">意味</label>
+          <input id="meaningInput" type="text" placeholder="例: 環境" autocomplete="off" />
+        </div>
+        <div class="field wide">
+          <label for="memoInput">メモ</label>
+          <input id="memoInput" type="text" placeholder="例: 第 3 章で出題" autocomplete="off" />
+        </div>
+        <div class="field wide">
+          <label for="sourceUrlInput">登録元 URL</label>
+          <input id="sourceUrlInput" type="text" placeholder="例: https://example.com/article" autocomplete="off" />
+        </div>
+      </div>
+      <div class="actions">
+        <button id="addBtn" class="primary" type="button">追加</button>
+        <button id="clearBtn" type="button">入力をクリア</button>
+        <button id="exportCsvBtn" type="button">CSV エクスポート</button>
+      </div>
+    </section>
+
+    <section class="list-section">
+      <div class="search-row">
+        <label for="searchInput">検索</label>
+        <input id="searchInput" type="text" placeholder="英単語・意味・メモで絞り込み" autocomplete="off" />
+      </div>
+
+      <div class="table-wrapper">
+        <table id="wordTable">
+          <thead>
+            <tr>
+              <th class="col-word">英単語</th>
+              <th class="col-meaning">意味</th>
+              <th class="col-memo">メモ</th>
+              <th class="col-source">登録元 URL</th>
+              <th class="col-created">登録日時</th>
+              <th class="col-action">操作</th>
+            </tr>
+          </thead>
+          <tbody id="wordTableBody"></tbody>
+        </table>
+      </div>
+
+      <p id="emptyMessage" class="empty-message">登録された単語はありません。</p>
+    </section>
+
+    <div id="status" class="status"></div>
+  </main>
+
+  <script src="wordbook.js"></script>
+</body>
+</html>

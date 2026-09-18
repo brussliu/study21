@@ -1,0 +1,151 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 12px;
+  width: 340px;
+  background: #f6f9fc;
+  font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+  color: #223b57;
+}
+
+.popup-panel {
+  background: #fff;
+  border: 1px solid #d7e2ee;
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.popup-header h1 {
+  margin: 0 0 6px;
+  font-size: 17px;
+}
+
+.popup-header p {
+  margin: 0 0 12px;
+  color: #607992;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.status-block {
+  border: 1px solid #e2ebf5;
+  border-radius: 8px;
+  background: #f9fbfe;
+  padding: 10px 12px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.status-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #5f7894;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.badge-ok {
+  background: #e8f5ea;
+  border-color: #a9d8b1;
+  color: #255f2c;
+}
+
+.badge-error {
+  background: #fdeeee;
+  border-color: #e6b6b6;
+  color: #b24141;
+}
+
+.badge-unset {
+  background: #fdf6e6;
+  border-color: #e6d5a8;
+  color: #8a6a15;
+}
+
+.status-message {
+  margin: 6px 0 0;
+  min-height: 16px;
+  font-size: 12px;
+  color: #607992;
+  word-break: break-all;
+}
+
+.info-block {
+  margin-top: 12px;
+}
+
+.info-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 13px;
+  border-bottom: 1px dashed #eef3f9;
+}
+
+.info-row:last-child {
+  border-bottom: none;
+}
+
+.info-label {
+  flex: 0 0 auto;
+  color: #5f7894;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.info-value {
+  flex: 1 1 auto;
+  text-align: right;
+  word-break: break-all;
+}
+
+.info-value.mono {
+  font-family: "Consolas", "Menlo", monospace;
+  font-size: 11px;
+  color: #43596f;
+}
+
+.actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+}
+
+button {
+  flex: 1 1 0;
+  border: 1px solid #c6d6e6;
+  border-radius: 8px;
+  background: #fff;
+  color: #223b57;
+  padding: 9px 10px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+button.primary {
+  border-color: #2a68a8;
+  background: linear-gradient(180deg, #3b82c8 0%, #2f6fb2 100%);
+  color: #fff;
+}
+
+button:hover {
+  filter: brightness(0.98);
+}
