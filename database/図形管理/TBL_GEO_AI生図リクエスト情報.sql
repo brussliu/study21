@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS public."GEO_AI生図リクエスト情報" (
     "エラーコード"       VARCHAR(100) NULL,
     "エラーメッセージ"   TEXT         NULL,
 
-    -- ---- 実行したバッチへの参照（batC51 / batC52 / batC53） ----
+    -- ---- 実行したバッチへの参照（AI 生成 = batC51-A〜D。前処理・検証はバッチではないので NULL） ----
     "前処理実行ID"       BIGINT       NULL,
     "AI実行ID"           BIGINT       NULL,
     "確定実行ID"         BIGINT       NULL,
