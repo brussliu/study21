@@ -748,6 +748,8 @@ batC51-C 文章の条件から作図 / batC51-D 文章と図を合わせて作�
   で 4 つが別々に登録されることを固定した）。
 - **歴史的な batC51 は A として扱う**（モード欄が無い要求・実行履歴）。結果種別は当時の
   `利用者区分`（FIGURE → GEOMETRY / FUNCTION → GRAPH / MIXED → MIXED）から読み替える。
+  ※ このうち **裸の `batC51`（バッチコード）は 2026-09-19 に削除した**（下の項）。
+  残るのは「`作図モード` が NULL の要求を A として扱う」規則で、こちらは今も生きている。
 - **出力 DTO はモードごとに独立**（`BatC51AResultDto`〜`D`）。共通項目は `FigureOutputDto` が持ち、
   作図の構造（点・線・円・関数・曲線・定義域・表示範囲）は `FigureParts` に集約する。
   プロンプトの「出力形式」も設定ページの Data TAB も**この DTO から生成**する（定義を書き写さない）。
@@ -926,7 +928,7 @@ batC51-C 文章の条件から作図 / batC51-D 文章と図を合わせて作�
 
 **決めたこと**: バッチ一覧（`views/batch/BatchListView.vue`）で、**種別 C（呼出）の行には
 【再実行】ボタンを出さない**（押せない灰色のボタンも残さない。操作の列は「—」）。
-判定はバックエンドが行い、行の `canManualRerun`（＝`BatchTaskDefinition#canManualReRun()`）で返す。
+判定はバックエンドが行い、行の `canManualRerun`（＝`BatchTaskDefinition#canManualRerun()`）で返す。
 `POST /api/admin/batch/tasks/{code}/rerun` も種別 C を拒否する。
 行の `canRerun`（ボタンを押せるか＝業務処理のハンドラがあるか）とは**別のフラグ**にした。
 
@@ -941,3 +943,32 @@ batC51-C 文章の条件から作図 / batC51-D 文章と図を合わせて作�
   押せないと読めてしっくりこない。**種別で出し分ける**（どちらもボタンを出さない）。
 - 画面側の出し分けだけに依存しない（2.1 の方針。有効／無効の切替も同じ）。API を直接叩かれても
   種別 C は走らない。他の処理からの呼出（`BatchService#rerunStep`）は種別に関係なく従来どおり。
+
+## なぜモードが無い時代の裸の batC51 を削除したか（2026-09-19 改修）
+
+**決めたこと**: AI 生図の AI 生成は**作図モードごとの 4 バッチ**（`batC51-A`〜`D`）だけにし、
+モードが無い時代の**裸の `batC51` はバッチ定義・ハンドラごと削除**した（利用者の指示
+「batC51 がもう使われていないなら削除する」）。あわせて、裸のコードのためだけにあった互換の入口も消した:
+
+- `BatchTaskRegistry` の定義行、`AiFigureGenerateBatchHandler`（`taskCode()="batC51"`）
+- `AiFigureGenerateStep#run(BatchExecutionEntity)`（モードを指定しない入口）
+- `AiFigurePipelineService#LEGACY_BATCH_CODE`（**未使用の定数**だった）
+- `AiResponseDtos` の `batC51 → BatC51ResultDto` の 1 行
+- `FigureMode#of("batC51")` → A の別名（定数は接頭辞の `TASK_CODE_PREFIX` に改名。値は `batC51` のまま）
+
+**なぜ**:
+
+- **実行の入口が無くなっていた**。流水線は `FigureMode.of(要求.作図モード).orElse(A).taskCode()` で
+  モード別のコードを必ず使う（裸のコードは誰も実行しない）。唯一の入口だった画面の【再実行】も、
+  種別 C のボタンを外した（上の項）ことで閉じた。残っていた `LEGACY_BATCH_CODE` は参照ゼロの定数だった。
+- **DB にもう依存が無い**。`GEO_AI生図リクエスト情報` の `作図モード` は
+  `CHECK (NULL OR 'A'〜'D')` なので、裸の `batC51` が要求行に入ることはない
+  （`BAT_バッチコントロール情報` にも裸の行は無い。あるのは `batC51-A`〜`D` の 4 行だけ）。
+  `BAT_AI呼出履歴情報` にも `batC51` の行は無い。
+- **消さなかったもの**（履歴は資産なので残す）: `BAT_バッチ実行履歴情報` の 59 行（2026-09-15〜16）は
+  そのまま。実行履歴の画面は**コードをそのまま表示**し、絞り込み候補は履歴の実データから作るので、
+  定義行を消しても過去の行は今までどおり見える（`tests/batch-code-reuse.spec.ts` が固定）。
+  `BatC51ResultDto` も残す（`GeometryAiResponseParser` が AI 応答を読む共通の型として使い続ける）。
+- **残した規則**: `作図モード` が NULL の要求は**今までどおり A として処理する**
+  （`FigureMode.of(null)` → 空 → `orElse(A)`、`findGenerateTarget("A")` は NULL の行も拾う）。
+  消したのは「裸のバッチコードを A に読み替える」互換だけで、モード欄が無い時代の**要求**の扱いは変えない。
