@@ -6,9 +6,17 @@ COPY frontend/package.json frontend/package-lock.json frontend/tsconfig.base.jso
 COPY frontend/packages/web-shared ./packages/web-shared
 COPY frontend/pc-web ./pc-web
 COPY frontend/mobile-web ./mobile-web
+# ブラウザ拡張（extension/）も一緒に入れて、配布パッケージ（zip）をビルド中に作る。
+# こうすると「デプロイするたびに最新の zip が配られる」が自動で保証される
+# （2.0 は手作業で zip を作って置いていた）。
+COPY extension ./extension
 RUN npm ci --no-audit --no-fund
 RUN npm run build -w pc-web
 RUN npm run build -w mobile-web
+
+# 配布パッケージ（/downloads/study21-extension.zip と、版を出すための .json）。
+# pc-web の public/ に置かず dist/ へ直接出すのは、 dist が nginx のドキュメントルートだから。
+RUN node extension/build-zip.mjs --out /app/pc-web/dist/downloads/study21-extension.zip
 
 # 阶段2：nginx 托管两个前端 + 反向代理两个后端
 FROM nginx:1.27-alpine

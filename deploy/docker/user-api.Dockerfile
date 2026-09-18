@@ -4,7 +4,7 @@ FROM maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY backend ./backend
 WORKDIR /build/backend
-RUN mvn -B -pl user-api -am clean package -DskipTests
+RUN mvn -B -pl user-api -am clean package -Dmaven.test.skip=true
 
 # 阶段2：JRE 运行环境
 FROM eclipse-temurin:21-jre
