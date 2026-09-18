@@ -10,8 +10,34 @@ spring:
     driver-class-name: org.postgresql.Driver
   servlet:
     multipart:
-      max-file-size: 20MB
-      max-request-size: 100MB
+      # 読書管理の本文 PDF は 200MB まで（契約）。資料管理の添付（数 MB）もこの上限で通る。
+      # 配備先（nginx）の client_max_body_size も同じかそれ以上にする必要がある。
+      max-file-size: 200MB
+      max-request-size: 210MB
+  # セッション（ログイン状態）は Redis に置く。アプリを再起動してもコンテナを作り直しても
+  # ログインしたままになる（Tomcat のメモリだと再起動のたびに全員ログアウトする）。
+  # アプリ側のコードは変えていない（HttpSession の実装が差し替わるだけ）。
+  data:
+    redis:
+      # 既定は NAS ホストの Redis。コンテナの中では compose が STUDY21_REDIS_HOST=redis を渡す
+      host: ${STUDY21_REDIS_HOST:192.168.0.100}
+      port: ${STUDY21_REDIS_PORT:6379}
+      password: ${STUDY21_REDIS_PASSWORD:}
+      timeout: 3s
+      connect-timeout: 3s
+  session:
+    store-type: redis
+    # 有効期限は 60 分（最後のアクセスから数える。既定は 30 分）
+    timeout: 60m
+    redis:
+      # admin-api と同じ Redis を使うので、鍵が混ざらないように分ける
+      namespace: study21:session:user
+      flush-mode: on_save
+      save-mode: on_set_attribute
+      # 索引つきリポジトリ（repository-type=indexed）を使わないので keyspace 通知は不要。
+      # 「none」にしておくと起動時に Redis へ CONFIG SET を投げない（権限の要らない Redis でも動く）。
+      repository-type: default
+      configure-action: none
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -20,6 +46,18 @@ mybatis:
 
 server:
   port: ${USER_API_PORT:8082}
+  servlet:
+    session:
+      # セッションの有効期限（spring.session.timeout と同じ 60 分）
+      timeout: 60m
+      cookie:
+        # 既定の JSESSIONID のままだと admin-api と同じ名前になり、同じオリジン（nginx）で
+        # 管理者と一般ユーザーのクッキーが互いを上書きしてしまうため、サービスごとに分ける
+        name: STUDY21_USER_SESSION
+        http-only: true
+        same-site: lax
+        # ブラウザを閉じるとクッキーは消える（サーバー側は 60 分残る）。
+        # ブラウザを閉じても復帰させたいときは max-age: 60m を付ける。
 
 management:
   endpoints:
@@ -44,10 +82,37 @@ study21:
   documents:
     storage-root: "${STUDY21_DOCUMENT_STORAGE_ROOT:${user.dir}/data/documents}"
     legacy-storage-root: "${STUDY2_DOCUMENT_STORAGE_ROOT:}"
+  reading:
+    # 読書管理が取り込んだ本文 PDF・表紙（books/<書籍番号>/。DB には相対パスだけを入れる）
+    storage-root: "${STUDY21_READING_STORAGE_ROOT:${user.dir}/data/reading}"
+    # 2.0 の webapps/file/ENGLISH_READING ツリー。空＝無効（実体が無いので GET は 404・読取専用）
+    legacy-storage-root: "${STUDY2_READING_STORAGE_ROOT:}"
+    # 語彙・読みの引き当て（外部の無料辞書・翻訳 API。2.0 の api/word/translateByAi 相当）
+    dictionary:
+      # false にすると一切通信しない（完全オフラインの配備・検証用）。取れないときは 200 で null を返す
+      enabled: "${STUDY21_READING_DICTIONARY_ENABLED:true}"
+      # 1 リクエストのタイムアウト（契約: 5 秒）
+      timeout: "${STUDY21_READING_DICTIONARY_TIMEOUT:5s}"
+      user-agent: "Study21-Reading/1.0"
   temp-files:
     storage-root: "${STUDY21_TEMPFILE_STORAGE_ROOT:${user.dir}/data/temp-files}"
   test-files:
     storage-root: "${STUDY21_TESTFILE_STORAGE_ROOT:${user.dir}/data/test-files}"
+  geometry-ai:
+    # AI 生図の画像（元画像と切り抜き画像）の置き場。
+    # admin-api のバッチ（batC51/52/53）も同じ場所を読み書きするので、
+    # 配備では両サービスに同じボリュームを割り当てる（docker-compose.yml を参照）。
+    storage-root: "${STUDY21_GEOMETRY_AI_STORAGE_ROOT:${user.dir}/data/geometry-ai}"
+    # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
+    stub: "${STUDY21_GEOMETRY_AI_STUB:false}"
+  classroom:
+    # 授業録音の音声（分塊を追記した 1 本の webm）の置き場。
+    # admin-api のバッチ（batR02 の掃除）も同じ場所を読むので、配備では両サービスに
+    # 同じボリュームを割り当てる（geometry-ai と同じ考え方）。
+    storage-root: "${STUDY21_CLASSROOM_STORAGE_ROOT:${user.dir}/data/classroom}"
+  classroom-ai:
+    # true にすると STT を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
+    stub: "${STUDY21_CLASSROOM_AI_STUB:false}"
   study-monitor:
     # 学習状況モニターのスナップショット画像の置き場
     # （DB の 保存パス は、この下からの相対パス。例: 20260726/snapshot_000045.jpg）

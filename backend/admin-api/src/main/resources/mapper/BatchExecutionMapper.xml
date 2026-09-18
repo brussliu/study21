@@ -83,6 +83,17 @@
          LIMIT 1
     </select>
 
+    <!--
+      AI 生図の工程ごとの実行を要求から引く（要求内容 = {"aiRequestId": N}）。
+      JSONB の ->> で数値にするため、比較は文字列ではなく数値へ寄せる。
+    -->
+    <select id="findByRequestAiRequestId" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "要求内容" ->> 'aiRequestId' = CAST(#{aiRequestId} AS text)
+         ORDER BY "実行ID" ASC
+    </select>
+
     <select id="findRecent" resultMap="ExecutionMap">
         SELECT <include refid="ExecutionColumns"/>
           FROM public."BAT_バッチ実行履歴情報"

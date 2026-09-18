@@ -37,6 +37,7 @@ public class BatchController {
     /**
      * バッチの【再実行】。実行履歴に 1 行追加し、業務処理をその場で実行する。
      * 有効／無効に関係なく実行できる（無効は「定時実行しない」の意味）。
+     * 種別 C（呼出）は他の処理から呼ばれるバッチなので拒否する（一覧にもボタンを出さない）。
      */
     @PostMapping("/tasks/{batchCode}/rerun")
     public ApiResponse<Map<String, Object>> rerun(

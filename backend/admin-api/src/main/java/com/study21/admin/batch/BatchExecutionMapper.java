@@ -30,6 +30,12 @@ public interface BatchExecutionMapper {
 
     BatchExecutionEntity findRunningByBatchCode(@Param("batchCode") String batchCode);
 
+    /**
+     * 要求内容（JSONB）の aiRequestId で実行履歴を引く（AI 生図の工程ごとの状況）。
+     * 古い順（batC51 → 52 → 53 の順）に返す。
+     */
+    List<BatchExecutionEntity> findByRequestAiRequestId(@Param("aiRequestId") long aiRequestId);
+
     List<BatchExecutionEntity> findRecent(@Param("batchCode") String batchCode, @Param("limit") int limit);
 
     /**

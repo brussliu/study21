@@ -279,6 +279,39 @@ class NetTerminalServiceImplTest {
         verify(terminalMapper).updateModes(List.of(1L, 2L), "K", GUARDIAN_ID);
     }
 
+    /* ---------- 削除 ---------- */
+
+    @Test
+    void deleteRemovesTheTerminal() {
+        when(terminalMapper.delete(9L)).thenReturn(1);
+
+        NetTerminalModels.TerminalMutationResult result = service.delete(guardian(), 9L);
+
+        assertThat(result.message()).contains("削除しました");
+        assertThat(result.updatedCount()).isEqualTo(1);
+        verify(terminalMapper).delete(9L);
+    }
+
+    @Test
+    void deleteIsRejectedWhenTheTerminalDoesNotExist() {
+        when(terminalMapper.delete(999L)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.delete(guardian(), 999L))
+                .isInstanceOf(NotFoundException.class)
+                .hasMessageContaining("対象端末が存在しません");
+    }
+
+    @Test
+    void deleteRequiresLoginAndAValidId() {
+        assertThatThrownBy(() -> service.delete(null, 9L))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("ログインが必要です");
+        assertThatThrownBy(() -> service.delete(guardian(), 0L))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("端末を指定してください");
+        verify(terminalMapper, never()).delete(anyLong());
+    }
+
     @Test
     void searchValidatesModeAndStatusFilters() {
         assertThatThrownBy(() -> service.search(guardian(),

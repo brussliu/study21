@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomPresetMapper">
+
+    <resultMap id="PresetMap" type="com.study21.user.classroom.ClassroomPresetEntity">
+        <id     property="presetId"     column="前置詞ID"/>
+        <result property="scope"        column="スコープ"/>
+        <result property="createdBy"    column="登録者アカウントID"/>
+        <result property="name"         column="プリセット名"/>
+        <result property="text"         column="前置詞テキスト"/>
+        <result property="displayOrder" column="表示順"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <!-- GLOBAL → 自分のスコープ の順、表示順で出す -->
+    <select id="findVisible" resultMap="PresetMap">
+        SELECT "前置詞ID", "スコープ", "登録者アカウントID", "プリセット名", "前置詞テキスト", "表示順", "登録日時", "更新日時"
+          FROM public."CR_前置詞プリセット情報"
+         WHERE "スコープ" = 'GLOBAL'
+            OR ("スコープ" IN ('FAMILY','STUDENT') AND "登録者アカウントID" = #{accountId})
+         ORDER BY CASE "スコープ" WHEN 'GLOBAL' THEN 0 ELSE 1 END, "表示順", "前置詞ID"
+    </select>
+
+    <select id="findById" resultMap="PresetMap">
+        SELECT "前置詞ID", "スコープ", "登録者アカウントID", "プリセット名", "前置詞テキスト", "表示順", "登録日時", "更新日時"
+          FROM public."CR_前置詞プリセット情報"
+         WHERE "前置詞ID" = #{presetId}
+    </select>
+</mapper>

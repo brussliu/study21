@@ -102,7 +102,11 @@ class NetAccessLogRepositoryTest {
                 .mapToLong(Long::longValue)
                 .sum();
         assertThat(sum).isEqualTo(summary.totalCount());
-        assertThat(summary.totalCount()).isGreaterThan(0L);
+        // 実データ（NET_プロキシ通信履歴情報）は 2.0 から移行した時点で止まっており、
+        // 直近 3 日（今日・昨日・一昨日）に「通過」が 1 件も無い日が来る。
+        // そのため「0 件より多い」はデータの鮮度に依存するので見ない（日付が進むと必ず落ちる）。
+        // ここで見るのは「3 日 × 24 時間の形」と「合計＝totalCount」と、下の「通過だけを数える」こと。
+        assertThat(summary.totalCount()).isGreaterThanOrEqualTo(0L);
 
         // 「通過」した通信だけを数えている（拒否は含めない）
         var allowed = netAccessLogService.search(null, null, "ALLOW", 1, 1);

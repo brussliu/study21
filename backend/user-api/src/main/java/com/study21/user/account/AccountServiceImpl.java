@@ -86,7 +86,9 @@ public class AccountServiceImpl implements AccountService {
     @Override
     public LoginResponse login(LoginRequest request) {
         String loginId = normalizeEmail(request.getLoginId());
-        AccountEntity account = accountMapper.findByLoginId(loginId);
+        // ログインだけは管理者（ADMIN）も認証する。パスワード再設定は一般ユーザーの
+        // 経路のまま（`findByLoginId`）。管理者のパスワードは管理側で扱う。
+        AccountEntity account = accountMapper.findByLoginIdForLogin(loginId);
 
         // 存在しない場合もパスワード不一致の場合も同じメッセージ（ID の存在を漏らさない）
         if (account == null || !passwordEncoder.matches(request.getPassword(), account.getPasswordHash())) {
@@ -97,23 +99,26 @@ public class AccountServiceImpl implements AccountService {
         }
         AccountType type = AccountType.fromCode(account.getAccountType());
         if (type == null) {
-            // user-api は一般ユーザー（保護者・生徒）専用。未知種別や管理者を認証しない。
+            // 未知の種別は認証しない（ID の存在も漏らさない）。
             throw new UnauthenticatedException("メールアドレスまたはパスワードが正しくありません。");
         }
         Date expiry = account.getExpiryDate();
-        if (expiry == null) {
-            // 一般ユーザーの有効期限は必須。壊れたアカウントを無期限として扱わない。
-            throw new UnauthenticatedException("このアカウントは利用できません。管理者にお問い合わせください。");
-        }
-        if (expiry.toLocalDate().isBefore(LocalDate.now())) {
-            throw new UnauthenticatedException("利用期限が切れています。更新手続き（有料）が必要です。");
+        // 管理者は無期限（有効期限なし）で運用する。一般ユーザーは有効期限が必須で、
+        // 壊れたアカウントを無期限として扱わない。
+        if (type != AccountType.ADMIN) {
+            if (expiry == null) {
+                throw new UnauthenticatedException("このアカウントは利用できません。管理者にお問い合わせください。");
+            }
+            if (expiry.toLocalDate().isBefore(LocalDate.now())) {
+                throw new UnauthenticatedException("利用期限が切れています。更新手続き（有料）が必要です。");
+            }
         }
 
         String displayName = String.join(" ",
                 account.getSei() == null ? "" : account.getSei(),
                 account.getMei() == null ? "" : account.getMei()).trim();
         return new LoginResponse(account.getAccountId(), account.getLoginId(), displayName,
-                type, expiry.toLocalDate());
+                type, expiry == null ? null : expiry.toLocalDate());
     }
 
     /** アカウントエンティティを組み立てる（パスワードは BCrypt ハッシュ化）。 */

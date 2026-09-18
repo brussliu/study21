@@ -1,10 +1,17 @@
 package com.study21.admin.controller;
 
+import com.study21.admin.ai.AiConnectionTester;
+import com.study21.admin.ai.SttConnectionTester;
+import com.study21.admin.geometryai.dto.AiResponseDtos;
+import com.study21.admin.geometryai.dto.AiResponseSchemaService;
 import com.study21.admin.setting.SettingsService;
 import com.study21.common.core.api.ApiResponse;
+import com.study21.common.core.exception.ValidationException;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.LinkedHashMap;
@@ -25,9 +32,64 @@ import java.util.Map;
 public class SettingPageController {
 
     private final SettingsService settingsService;
+    private final AiResponseSchemaService schemaService;
+    private final AiConnectionTester connectionTester;
+    private final SttConnectionTester sttConnectionTester;
 
-    public SettingPageController(SettingsService settingsService) {
+    public SettingPageController(SettingsService settingsService, AiResponseSchemaService schemaService,
+                                 AiConnectionTester connectionTester, SttConnectionTester sttConnectionTester) {
         this.settingsService = settingsService;
+        this.schemaService = schemaService;
+        this.connectionTester = connectionTester;
+        this.sttConnectionTester = sttConnectionTester;
+    }
+
+    /**
+     * AIモデルページの【接続テスト】：URL・API Key・モデル名で本当に呼べるかを 1 回だけ確かめる。
+     *
+     * <p>画面は保存前の入力値（モデル1・API Key・URL）をそのまま送る。接続できなかった場合は
+     * 200 の本文で {@code ok=false} と理由を返す（設定の不備は 400）。</p>
+     */
+    @PostMapping("/testAi")
+    public ApiResponse<Map<String, Object>> testAi(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(connectionTester.test(
+                stringOf(request.get("provider")),
+                stringOf(request.get("model")),
+                stringOf(request.get("url")),
+                request.get("apiKey") == null ? null : String.valueOf(request.get("apiKey"))));
+    }
+
+    /**
+     * AIモデルページの**音声認識（STT）の【接続テスト】**：無音を 1 回送って設定を確かめる。
+     *
+     * <p>対象は Google Speech-to-Text と Alibaba Paraformer-Realtime-V2（どちらも「AIモデル」ページの
+     * 専用タブ）。チャットの【接続テスト】と同じく、保存前の入力値をそのまま受け取る。</p>
+     */
+    @PostMapping("/testStt")
+    public ApiResponse<Map<String, Object>> testStt(@RequestBody Map<String, Object> request) {
+        return ApiResponse.ok(sttConnectionTester.test(
+                stringOf(request.get("provider")),
+                stringOf(request.get("model")),
+                stringOf(request.get("url")),
+                request.get("apiKey") == null ? null : String.valueOf(request.get("apiKey"))));
+    }
+
+    /**
+     * AI 出力データ構造（DTO）の JSON Schema を返す（設定ページの **Data TAB** 用）。
+     *
+     * <p>DTO が唯一の定義なので、スキーマは実行時に生成する（DB や JS に固定の JSON を持たない）。
+     * 画面はこれを使って「項目構造」と「JSON Schema」を表示する（見るだけ。編集はしない）。
+     * DTO を直せば、この API の応答もプロンプトへ注入する出力形式も同時に変わる。</p>
+     */
+    @GetMapping("/ai-response-schema")
+    public ApiResponse<Map<String, Object>> aiResponseSchema(@RequestParam("task") String taskCode) {
+        Class<?> dtoClass = AiResponseDtos.dtoOf(taskCode).orElseThrow(() ->
+                new ValidationException("AI 出力 DTO が未登録です: " + taskCode));
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("taskCode", taskCode);
+        data.put("dto", dtoClass.getSimpleName());
+        data.put("schema", schemaService.schemaOf(dtoClass));
+        return ApiResponse.ok(data);
     }
 
     /**

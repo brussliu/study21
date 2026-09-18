@@ -106,7 +106,52 @@ public class BatchServiceImpl implements BatchService {
     @Override
     @Transactional
     public Map<String, Object> rerun(String batchCode, String operator) {
-        return execute(batchCode, "C", normalize(operator), "画面から再実行しました");
+        BatchTaskDefinition task = registry.findByCode(batchCode);
+        // 種別 C（呼出）は画面からは起動しない。他の処理が工程として呼ぶバッチなので、
+        // 一覧に【再実行】ボタンを出さない（画面側の出し分けだけに依存しない。下の rerunStep は通す）
+        if (task != null && !task.canManualRerun()) {
+            throw new ValidationException("呼出（種別 C）のバッチは画面から実行できません: " + batchCode);
+        }
+        return execute(batchCode, "C", normalize(operator), "画面から再実行しました", null);
+    }
+
+    @Override
+    @Transactional
+    public Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson) {
+        return execute(batchCode, "C", normalize(operator), "AI 生図のパイプラインから実行しました",
+                requestPayloadJson);
+    }
+
+    @Override
+    public List<Map<String, Object>> executionsOfRequest(long aiRequestId) {
+        List<Map<String, Object>> rows = new ArrayList<>();
+        for (BatchExecutionEntity execution : executionMapper.findByRequestAiRequestId(aiRequestId)) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("executionId", execution.getExecutionId());
+            row.put("batchCode", execution.getBatchCode());
+            row.put("status", execution.getStatus());
+            row.put("statusLabel", statusLabelOf(execution.getStatus()));
+            row.put("message", execution.getMessage());
+            row.put("errorDetail", execution.getErrorDetail());
+            row.put("requestPayload", execution.getRequestPayload());
+            row.put("startTime", execution.getStartTime());
+            row.put("endTime", execution.getEndTime());
+            row.put("durationMs", execution.getDurationMs());
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /** 実行の状態の日本語ラベル（既存の画面と同じ値を使う）。 */
+    private static String statusLabelOf(String status) {
+        if (status == null) {
+            return null;
+        }
+        try {
+            return BatchExecutionStatus.valueOf(status).label();
+        } catch (IllegalArgumentException cause) {
+            return status;
+        }
     }
 
     @Override
@@ -129,13 +174,14 @@ public class BatchServiceImpl implements BatchService {
     @Override
     @Transactional
     public Map<String, Object> runOnStartup(String batchCode) {
-        return execute(batchCode, "S", STARTUP_CODE, "admin-api の起動時に実行しました");
+        return execute(batchCode, "S", STARTUP_CODE, "admin-api の起動時に実行しました", null);
     }
 
     /**
      * 実行の共通処理: 定義確認 → 設定検証 → 二重起動チェック → 実行 → 履歴の更新。
      */
-    private Map<String, Object> execute(String batchCode, String triggerType, String requestedByCode, String reason) {
+    private Map<String, Object> execute(String batchCode, String triggerType, String requestedByCode, String reason,
+                                        String requestPayloadJson) {
         BatchTaskDefinition task = registry.findByCode(batchCode);
         if (task == null) {
             throw new NotFoundException("バッチタスクが見つかりません: " + batchCode);
@@ -167,6 +213,8 @@ public class BatchServiceImpl implements BatchService {
             record.setRequestedByCode(requestedByCode);
             record.setStartTime(LocalDateTime.now().toString());
             record.setMessage(reason);
+            // 要求内容（JSONB）。AI 生図は {"aiRequestId": N} を入れて、工程ごとの実行を要求に結び付ける
+            record.setRequestPayload(requestPayloadJson);
             executionMapper.insert(record);
 
             long startedAt = System.currentTimeMillis();
@@ -205,8 +253,11 @@ public class BatchServiceImpl implements BatchService {
         String search = blankToNull(keyword);
 
         long total = executionMapper.countHistory(code, state, search);
-        List<BatchExecutionEntity> items = executionMapper.searchHistory(code, state, search,
-                safeSize, (safePage - 1) * safeSize);
+        List<Map<String, Object>> items = executionMapper.searchHistory(code, state, search,
+                safeSize, (safePage - 1) * safeSize)
+                .stream()
+                .map(BatchServiceImpl::toExecutionRow)
+                .toList();
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("items", items);
@@ -267,6 +318,32 @@ public class BatchServiceImpl implements BatchService {
         result.put("models", aiCallLogMapper.findDistinctModels());
         result.put("results", List.of("SUCCESS", "FAILURE"));
         return result;
+    }
+
+    /** 実行履歴の 1 行（既存の列 + 対象情報 targetKind / targetId / targetKey）。 */
+    private static Map<String, Object> toExecutionRow(BatchExecutionEntity entity) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("executionId", entity.getExecutionId());
+        row.put("batchCode", entity.getBatchCode());
+        row.put("batchType", entity.getBatchType());
+        row.put("triggerType", entity.getTriggerType());
+        row.put("status", entity.getStatus());
+        row.put("requestPayload", entity.getRequestPayload());
+        row.put("requestedByAccountId", entity.getRequestedByAccountId());
+        row.put("requestedByCode", entity.getRequestedByCode());
+        row.put("scheduleTime", entity.getScheduleTime());
+        row.put("startTime", entity.getStartTime());
+        row.put("endTime", entity.getEndTime());
+        row.put("durationMs", entity.getDurationMs());
+        row.put("message", entity.getMessage());
+        row.put("errorDetail", entity.getErrorDetail());
+        row.put("createdAt", entity.getCreatedAt());
+        row.put("updatedAt", entity.getUpdatedAt());
+        BatchExecutionTarget.Target target = BatchExecutionTarget.parse(entity.getRequestPayload());
+        row.put("targetKind", target.targetKind());
+        row.put("targetId", target.targetId());
+        row.put("targetKey", target.targetKey());
+        return row;
     }
 
     /** 一覧・詳細で共通の 1 行（本文は呼び出し側で足す）。 */
@@ -342,7 +419,13 @@ public class BatchServiceImpl implements BatchService {
         row.put("activeVersion", control == null ? null : control.getVersion());
         row.put("lastRunAt", control == null ? null : control.getLastRunAt());
         row.put("canToggleActive", task.canToggleActive());
-        row.put("canRerun", handlers.containsKey(task.taskCode()));
+        // 一覧の【再実行】の出し分けは 2 つのフラグで決める:
+        //   canManualRerun = ボタンを出すか（種別 C は出さない）
+        //   canRerun       = そのボタンを押せるか（業務処理のハンドラが未実装なら押せない）
+        // 注: canRerun=false は「この一覧のボタンが押せない」の意味で、他の処理からの呼出
+        // （rerunStep）まで禁じるものではない
+        row.put("canManualRerun", task.canManualRerun());
+        row.put("canRerun", task.canManualRerun() && handlers.containsKey(task.taskCode()));
         row.put("runsOnStartup", task.taskType() == BatchTaskType.S);
         row.put("loopEveryMinutes", task.loopEveryMinutes());
         row.put("minuteOfHour", task.minuteOfHour());

@@ -33,7 +33,7 @@ public interface TodoMapper {
 
     long countByStatus(@Param("accountId") long accountId, @Param("status") String status);
 
-    List<TodoModels.CalendarCell> countByDueDate(@Param("accountId") long accountId,
+    List<TodoModels.CalendarTaskRow> listByDueDate(@Param("accountId") long accountId,
                                                  @Param("from") java.time.LocalDate from,
                                                  @Param("to") java.time.LocalDate to);
 

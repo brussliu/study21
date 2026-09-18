@@ -106,6 +106,12 @@
         </if>
     </update>
 
+    <!-- 端末を削除する（物理削除） -->
+    <delete id="delete">
+        DELETE FROM public."NET_端末コントロール情報"
+         WHERE "端末ID" = #{terminalId}
+    </delete>
+
     <update id="updateMode">
         UPDATE public."NET_端末コントロール情報"
            SET "端末モード" = #{terminalMode},

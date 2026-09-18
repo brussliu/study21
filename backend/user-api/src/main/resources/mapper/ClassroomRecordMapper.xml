@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomRecordMapper">
+
+    <resultMap id="RecordMap" type="com.study21.user.classroom.ClassroomRecordEntity">
+        <id     property="recordId"          column="授業記録ID"/>
+        <result property="recordNo"          column="授業記録番号"/>
+        <result property="createdBy"         column="登録者アカウントID"/>
+        <result property="studentId"         column="学生ID"/>
+        <result property="familyId"          column="家族ID"/>
+        <result property="title"             column="授業名"/>
+        <result property="subject"           column="科目"/>
+        <result property="languageMode"      column="言語モード"/>
+        <result property="presetId"          column="前置詞ID"/>
+        <result property="presetText"        column="前置詞テキスト"/>
+        <result property="status"            column="状態"/>
+        <result property="startTime"         column="開始時刻"/>
+        <result property="endTime"           column="終了時刻"/>
+        <result property="audioPath"         column="録音ファイル保存先"/>
+        <result property="audioName"         column="保存ファイル名"/>
+        <result property="audioMime"         column="録音MIME"/>
+        <result property="audioSize"         column="録音ファイルサイズ"/>
+        <result property="durationSeconds"   column="録音時間秒"/>
+        <result property="transcribedChars"  column="転写済み文字数"/>
+        <result property="summaryJson"       column="最終まとめJSON"/>
+        <result property="retentionDeadline" column="保持期限"/>
+        <result property="version"           column="バージョン"/>
+        <result property="updatedBy"         column="更新者アカウントID"/>
+        <result property="sourceCode"        column="登録元コード"/>
+        <result property="updateSourceCode"  column="更新元コード"/>
+        <result property="createdAt"         column="登録日時"/>
+        <result property="updatedAt"         column="更新日時"/>
+    </resultMap>
+
+    <!-- 一覧では重い列（最終まとめJSON・前置詞テキスト）を読まない -->
+    <!-- 科目は一覧にも出す独立した列（読み忘れると画面で常に空になる。実測で 1 度やった） -->
+    <sql id="ListColumns">
+        "授業記録ID", "授業記録番号", "登録者アカウントID", "学生ID", "家族ID",
+        "授業名", "科目", "言語モード", "前置詞ID", "状態", "開始時刻", "終了時刻",
+        "録音ファイル保存先", "保存ファイル名", "録音MIME", "録音ファイルサイズ",
+        "録音時間秒", "転写済み文字数", "保持期限",
+        "バージョン", "更新者アカウントID", "登録元コード", "更新元コード", "登録日時", "更新日時"
+    </sql>
+
+    <sql id="AllColumns">
+        <include refid="ListColumns"/>,
+        "前置詞テキスト", "最終まとめJSON"::text AS "最終まとめJSON"
+    </sql>
+
+    <insert id="insert" parameterType="com.study21.user.classroom.ClassroomRecordEntity"
+            useGeneratedKeys="true" keyProperty="recordId">
+        INSERT INTO public."CR_授業記録情報" (
+            "授業記録番号", "登録者アカウントID", "学生ID", "家族ID", "授業名", "科目", "言語モード",
+            "前置詞ID", "前置詞テキスト", "状態", "転写済み文字数",
+            "バージョン", "登録元コード"
+        ) VALUES (
+            #{recordNo}, #{createdBy}, #{studentId}, #{familyId}, #{title}, #{subject}, #{languageMode},
+            #{presetId}, #{presetText}, #{status}, 0,
+            1, COALESCE(#{sourceCode}, 'APP')
+        )
+    </insert>
+
+    <select id="findById" resultMap="RecordMap">
+        SELECT <include refid="AllColumns"/>
+          FROM public."CR_授業記録情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <select id="findByNo" resultMap="RecordMap">
+        SELECT <include refid="AllColumns"/>
+          FROM public."CR_授業記録情報"
+         WHERE "授業記録番号" = #{recordNo}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."CR_授業記録情報"
+        <where>
+            <if test="owner != null">
+                AND "登録者アカウントID" = #{owner}
+            </if>
+            <if test="familyId != null">
+                AND "家族ID" = #{familyId}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態" = #{status}
+            </if>
+        </where>
+    </select>
+
+    <select id="search" resultMap="RecordMap">
+        SELECT <include refid="ListColumns"/>
+          FROM public."CR_授業記録情報"
+        <where>
+            <if test="owner != null">
+                AND "登録者アカウントID" = #{owner}
+            </if>
+            <if test="familyId != null">
+                AND "家族ID" = #{familyId}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態" = #{status}
+            </if>
+        </where>
+         ORDER BY "登録日時" DESC, "授業記録ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="countTodayByAccount" resultType="long">
+        SELECT count(*)
+          FROM public."CR_授業記録情報"
+         WHERE "登録者アカウントID" = #{accountId}
+           AND "登録日時" &gt;= CURRENT_DATE
+    </select>
+
+    <update id="updateStarted">
+        UPDATE public."CR_授業記録情報"
+           SET "状態"             = 'RECORDING',
+               "開始時刻"         = COALESCE("開始時刻", CURRENT_TIMESTAMP),
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateAudio">
+        UPDATE public."CR_授業記録情報"
+           SET "録音ファイル保存先" = #{path},
+               "保存ファイル名"     = #{name},
+               "録音MIME"           = #{mime},
+               "録音ファイルサイズ" = #{size},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"       = 'APP',
+               "更新日時"           = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+    </update>
+
+    <update id="addTranscribedChars">
+        UPDATE public."CR_授業記録情報"
+           SET "転写済み文字数" = "転写済み文字数" + #{chars},
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+    </update>
+
+    <update id="updateEnded">
+        UPDATE public."CR_授業記録情報"
+           SET "状態"             = 'STOPPED',
+               "終了時刻"         = COALESCE("終了時刻", CURRENT_TIMESTAMP),
+               "録音時間秒"       = #{durationSeconds},
+               "保持期限"         = CURRENT_DATE + #{retentionDays},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."CR_授業記録情報"
+         WHERE "授業記録ID" = #{recordId}
+    </delete>
+</mapper>

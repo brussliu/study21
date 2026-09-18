@@ -24,6 +24,9 @@ public interface NetTerminalService {
     NetTerminalModels.TerminalMutationResult update(UserPrincipal user, long terminalId,
                                                     NetTerminalModels.TerminalSaveRequest request);
 
+    /** 端末を削除する（物理削除。一覧から消える。2.0 には無かった操作）。 */
+    NetTerminalModels.TerminalMutationResult delete(UserPrincipal user, long terminalId);
+
     /** 1 台のモードを変更する。 */
     NetTerminalModels.TerminalMutationResult updateMode(UserPrincipal user, long terminalId,
                                                        NetTerminalModels.ModeChangeRequest request);

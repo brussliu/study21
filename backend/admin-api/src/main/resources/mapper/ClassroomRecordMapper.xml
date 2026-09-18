@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.classroomai.ClassroomRecordMapper">
+
+    <resultMap id="RecordMap" type="com.study21.admin.classroomai.ClassroomRecordEntity">
+        <id     property="recordId"          column="授業記録ID"/>
+        <result property="recordNo"          column="授業記録番号"/>
+        <result property="languageMode"      column="言語モード"/>
+        <result property="createdBy"         column="登録者アカウントID"/>
+        <result property="status"            column="状態"/>
+        <result property="summaryJson"       column="最終まとめJSON"/>
+        <result property="audioPath"         column="録音ファイル保存先"/>
+        <result property="audioName"         column="保存ファイル名"/>
+        <result property="audioMime"         column="録音MIME"/>
+        <result property="retentionDeadline" column="保持期限"/>
+        <result property="version"           column="バージョン"/>
+        <result property="createdAt"         column="登録日時"/>
+        <result property="updatedAt"         column="更新日時"/>
+    </resultMap>
+
+    <select id="findById" resultMap="RecordMap">
+        SELECT "授業記録ID", "授業記録番号", "言語モード", "登録者アカウントID", "状態",
+               "最終まとめJSON"::text AS "最終まとめJSON",
+               "録音ファイル保存先", "保存ファイル名", "録音MIME", "保持期限", "バージョン",
+               "登録日時", "更新日時"
+          FROM public."CR_授業記録情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <update id="updateSummaryCompleted">
+        UPDATE public."CR_授業記録情報"
+           SET "最終まとめJSON" = #{summaryJson}::jsonb,
+               "状態"           = 'COMPLETED',
+               "更新元コード"   = 'BATCH',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+    </update>
+
+    <select id="findRetentionTargets" resultMap="RecordMap">
+        SELECT "授業記録ID", "授業記録番号", "言語モード", "登録者アカウントID", "状態",
+               "録音ファイル保存先", "保存ファイル名", "録音MIME", "保持期限", "バージョン",
+               "登録日時", "更新日時"
+          FROM public."CR_授業記録情報"
+         WHERE "保持期限" IS NOT NULL
+           AND "保持期限" &lt; CURRENT_DATE - (#{retentionDays} - 1)
+           AND "録音ファイル保存先" IS NOT NULL
+           AND "保存ファイル名" IS NOT NULL
+         ORDER BY "保持期限", "授業記録ID"
+         LIMIT #{limit}
+    </select>
+
+    <update id="clearAudioFiles">
+        UPDATE public."CR_授業記録情報"
+           SET "録音ファイル保存先" = NULL,
+               "保存ファイル名"     = NULL,
+               "録音MIME"           = NULL,
+               "録音ファイルサイズ" = NULL,
+               "更新元コード"       = 'BATCH',
+               "更新日時"           = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+    </update>
+</mapper>

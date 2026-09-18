@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.geometryai.GeometryAiAssistMapper">
+
+    <resultMap id="AssistMap" type="com.study21.admin.geometryai.GeometryAiAssistEntity">
+        <id     property="assistId"      column="画図指示ID"/>
+        <result property="figureId"      column="図形ID"/>
+        <result property="instruction"   column="指示文"/>
+        <result property="beforeXml"     column="指示前XML"/>
+        <result property="objectsSummary" column="作図オブジェクト"/>
+        <result property="failureDetail"  column="失敗の内容"/>
+        <result property="commands"      column="生成コマンド"/>
+        <result property="commandCount"  column="生成コマンド数"/>
+        <result property="applyKind"     column="適用区分"/>
+        <result property="mode"          column="反映区分"/>
+        <result property="description"   column="説明"/>
+        <result property="aiCallId"      column="AI呼出履歴ID"/>
+        <result property="status"        column="生成状態"/>
+        <result property="retryCount"    column="再試行回数"/>
+        <result property="errorCode"     column="エラーコード"/>
+        <result property="errorMessage"  column="エラーメッセージ"/>
+        <result property="createdBy"     column="登録者アカウントID"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+    </resultMap>
+
+    <sql id="AssistColumns">
+        "画図指示ID", "図形ID", "指示文", "指示前XML", "作図オブジェクト", "失敗の内容",
+        "生成コマンド", "生成コマンド数",
+        "適用区分", "反映区分", "説明", "AI呼出履歴ID", "生成状態", "再試行回数",
+        "エラーコード", "エラーメッセージ", "登録者アカウントID", "登録日時", "更新日時"
+    </sql>
+
+    <select id="findById" resultMap="AssistMap">
+        SELECT <include refid="AssistColumns"/>
+          FROM public."GEO_AI画図指示情報"
+         WHERE "画図指示ID" = #{assistId}
+    </select>
+
+    <select id="findPendingTarget" resultMap="AssistMap">
+        SELECT <include refid="AssistColumns"/>
+          FROM public."GEO_AI画図指示情報"
+         WHERE "生成状態" IN ('PENDING','GENERATING')
+         ORDER BY "登録日時", "画図指示ID"
+         LIMIT 1
+    </select>
+
+    <update id="markGenerating">
+        UPDATE public."GEO_AI画図指示情報"
+           SET "生成状態"     = 'GENERATING',
+               "更新元コード" = 'BATCH',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "画図指示ID" = #{assistId}
+           AND "生成状態" IN ('PENDING','GENERATING')
+    </update>
+
+    <update id="updateReady">
+        UPDATE public."GEO_AI画図指示情報"
+           SET "生成状態"       = 'READY',
+               "生成コマンド"   = #{commands},
+               "生成コマンド数" = #{commandCount},
+               "説明"           = #{description},
+               "AI呼出履歴ID"   = #{aiCallId},
+               "エラーコード"   = NULL,
+               "エラーメッセージ" = NULL,
+               "更新元コード"   = 'BATCH',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "画図指示ID" = #{assistId}
+           AND "生成状態" = 'GENERATING'
+    </update>
+
+    <update id="updateFailed">
+        UPDATE public."GEO_AI画図指示情報"
+           SET "生成状態"       = 'FAILED',
+               "エラーコード"   = #{errorCode},
+               "エラーメッセージ" = #{errorMessage},
+               "再試行回数"     = "再試行回数" + 1,
+               "更新元コード"   = 'BATCH',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "画図指示ID" = #{assistId}
+           AND "生成状態" = 'GENERATING'
+    </update>
+</mapper>

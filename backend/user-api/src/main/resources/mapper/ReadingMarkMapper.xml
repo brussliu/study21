@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingMarkMapper">
+
+    <!-- 標記（RED_標記情報）。語彙・ハイライト・下線・メモ・手書き（PDF に重ねる）。 -->
+    <resultMap id="MarkMap" type="com.study21.user.reading.ReadingMarkEntity">
+        <id     property="markId"      column="標記ID"/>
+        <result property="bookId"      column="書籍ID"/>
+        <result property="pageNo"      column="ページ番号"/>
+        <result property="markType"    column="標記種別"/>
+        <result property="targetText"  column="対象文字"/>
+        <result property="content"     column="標記内容"/>
+        <result property="color"       column="色"/>
+        <!-- PDF に重ねる座標（正規化 0〜1。NUMERIC(10,6) を BigDecimal で受ける） -->
+        <result property="positionX"   column="位置X"/>
+        <result property="positionY"   column="位置Y"/>
+        <result property="width"       column="幅"/>
+        <result property="height"      column="高さ"/>
+        <result property="drawingData" column="描画データ"/>
+        <result property="orderNo"     column="表示順"/>
+        <result property="createdAt"   column="登録日時"/>
+    </resultMap>
+
+    <sql id="MarkColumns">
+        m."標記ID", m."書籍ID", m."ページ番号", m."標記種別", m."対象文字", m."標記内容",
+        m."色", m."位置X", m."位置Y", m."幅", m."高さ", m."描画データ", m."表示順", m."登録日時"
+    </sql>
+
+    <sql id="MarkWhere">
+        WHERE m."書籍ID" = #{bookId}
+        <if test="pageNo != null">
+            AND m."ページ番号" = #{pageNo}
+        </if>
+        <if test="markType != null and markType != ''">
+            AND m."標記種別" = #{markType}
+        </if>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."RED_標記情報" m
+        <include refid="MarkWhere"/>
+    </select>
+
+    <!-- ページ順（同じページの中は 表示順） -->
+    <select id="list" resultMap="MarkMap">
+        SELECT <include refid="MarkColumns"/>
+          FROM public."RED_標記情報" m
+        <include refid="MarkWhere"/>
+         ORDER BY m."ページ番号" ASC, m."表示順" ASC, m."標記ID" ASC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findById" resultMap="MarkMap">
+        SELECT <include refid="MarkColumns"/>
+          FROM public."RED_標記情報" m
+         WHERE m."標記ID" = #{markId}
+    </select>
+
+    <!-- 標記が付いているページ（ページレールの印に使う。重複なし・ページ順） -->
+    <select id="markedPages" resultType="int">
+        SELECT DISTINCT m."ページ番号"
+          FROM public."RED_標記情報" m
+         WHERE m."書籍ID" = #{bookId}
+         ORDER BY 1
+    </select>
+
+    <select id="nextOrderNo" resultType="int">
+        SELECT COALESCE(max(m."表示順"), 0) + 1
+          FROM public."RED_標記情報" m
+         WHERE m."書籍ID" = #{bookId}
+           AND m."ページ番号" = #{pageNo}
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.reading.ReadingMarkEntity"
+            useGeneratedKeys="true" keyProperty="markId">
+        INSERT INTO public."RED_標記情報" (
+            "書籍ID", "ページ番号", "標記種別", "対象文字", "標記内容", "色",
+            "位置X", "位置Y", "幅", "高さ", "描画データ", "表示順",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{bookId}, #{pageNo}, #{markType}, #{targetText}, #{content}, #{color},
+            #{positionX}, #{positionY}, #{width}, #{height}, #{drawingData}, #{orderNo},
+            #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <delete id="delete">
+        DELETE FROM public."RED_標記情報" WHERE "標記ID" = #{markId}
+    </delete>
+
+    <delete id="deleteByBook">
+        DELETE FROM public."RED_標記情報" WHERE "書籍ID" = #{bookId}
+    </delete>
+</mapper>

@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingDictionaryMapper">
+
+    <!-- 語彙・読みの引き当て結果のキャッシュ（RED_語彙辞書情報）。 -->
+    <resultMap id="DictionaryMap" type="com.study21.user.reading.ReadingDictionaryEntity">
+        <id     property="dictionaryId" column="辞書ID"/>
+        <result property="language"     column="言語"/>
+        <result property="headword"     column="見出し語"/>
+        <result property="japanese"     column="日本語訳"/>
+        <result property="chinese"      column="中国語訳"/>
+        <result property="pinyin"       column="ピンイン"/>
+        <result property="explanation"  column="解説"/>
+        <result property="source"       column="取得元コード"/>
+        <result property="fetchedAt"    column="取得日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <sql id="DictionaryColumns">
+        d."辞書ID", d."言語", d."見出し語", d."日本語訳", d."中国語訳", d."ピンイン", d."解説",
+        d."取得元コード", d."取得日時", d."更新日時"
+    </sql>
+
+    <select id="find" resultMap="DictionaryMap">
+        SELECT <include refid="DictionaryColumns"/>
+          FROM public."RED_語彙辞書情報" d
+         WHERE d."言語" = #{language}
+           AND d."見出し語" = #{headword}
+    </select>
+
+    <!--
+        登録・更新。今回取れなかった項目（NULL）で既存の値を消さないよう COALESCE で残す
+        （例: ExcelAPI が落ちていて中国語だけ取れた再取得でも、前の日本語訳を失わない）。
+    -->
+    <insert id="upsert" parameterType="com.study21.user.reading.ReadingDictionaryEntity">
+        INSERT INTO public."RED_語彙辞書情報" (
+            "言語", "見出し語", "日本語訳", "中国語訳", "ピンイン", "解説", "取得元コード"
+        ) VALUES (
+            #{language}, #{headword}, #{japanese}, #{chinese}, #{pinyin}, #{explanation}, #{source}
+        )
+        ON CONFLICT ("言語", "見出し語") DO UPDATE SET
+            "日本語訳"     = COALESCE(EXCLUDED."日本語訳", "RED_語彙辞書情報"."日本語訳"),
+            "中国語訳"     = COALESCE(EXCLUDED."中国語訳", "RED_語彙辞書情報"."中国語訳"),
+            "ピンイン"     = COALESCE(EXCLUDED."ピンイン", "RED_語彙辞書情報"."ピンイン"),
+            "解説"         = COALESCE(EXCLUDED."解説", "RED_語彙辞書情報"."解説"),
+            "取得元コード" = EXCLUDED."取得元コード",
+            "取得日時"     = CURRENT_TIMESTAMP,
+            "更新日時"     = CURRENT_TIMESTAMP
+    </insert>
+
+    <delete id="delete">
+        DELETE FROM public."RED_語彙辞書情報"
+         WHERE "言語" = #{language}
+           AND "見出し語" = #{headword}
+    </delete>
+</mapper>

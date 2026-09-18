@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.browserext.BrowserConnectionMapper">
+
+    <!-- ブラウザ拡張と 2.1 をつなぐ接続コード（1 アカウント = 1 行）。 -->
+    <resultMap id="ConnectionMap" type="com.study21.user.browserext.BrowserConnectionEntity">
+        <id     property="connectionId" column="接続ID"/>
+        <result property="accountId"    column="利用者アカウントID"/>
+        <result property="token"        column="接続トークン"/>
+        <result property="status"       column="状態コード"/>
+        <result property="lastUsedAt"   column="最終使用日時"/>
+        <result property="version"      column="バージョン"/>
+        <result property="createdAt"    column="登録日時"/>
+    </resultMap>
+
+    <sql id="ConnectionColumns">
+        "接続ID", "利用者アカウントID", "接続トークン", "状態コード", "最終使用日時", "バージョン", "登録日時"
+    </sql>
+
+    <select id="findByAccountId" resultMap="ConnectionMap">
+        SELECT <include refid="ConnectionColumns"/>
+          FROM public."NET_ブラウザ接続情報"
+         WHERE "利用者アカウントID" = #{accountId}
+    </select>
+
+    <select id="findActiveByToken" resultMap="ConnectionMap">
+        SELECT <include refid="ConnectionColumns"/>
+          FROM public."NET_ブラウザ接続情報"
+         WHERE "接続トークン" = #{token}
+           AND "状態コード" = 'ACTIVE'
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.browserext.BrowserConnectionEntity">
+        INSERT INTO public."NET_ブラウザ接続情報" (
+            "利用者アカウントID", "接続トークン", "状態コード", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{accountId}, #{token}, 'ACTIVE', #{accountId}, 'APP'
+        )
+    </insert>
+
+    <update id="updateToken">
+        UPDATE public."NET_ブラウザ接続情報"
+           SET "接続トークン"       = #{token},
+               "更新者アカウントID" = #{updatedByAccountId},
+               "更新元コード"       = 'APP',
+               "バージョン"         = "バージョン" + 1,
+               "更新日時"           = CURRENT_TIMESTAMP
+         WHERE "接続ID" = #{connectionId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="touch">
+        UPDATE public."NET_ブラウザ接続情報"
+           SET "最終使用日時" = #{usedAt},
+               "更新元コード" = 'BROWSER',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "接続ID" = #{connectionId}
+    </update>
+</mapper>

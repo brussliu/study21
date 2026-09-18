@@ -30,7 +30,7 @@ class AccountServiceImplTest {
     @Test
     void studentCanLoginWithNormalizedEmail() {
         AccountEntity account = activeAccount("student@example.com", "STUDENT");
-        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("student@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
         LoginResponse response = service.login(loginRequest(" Student@Example.com ", "secret123"));
@@ -40,13 +40,14 @@ class AccountServiceImplTest {
         assertThat(response.getDisplayName()).isEqualTo("山田 太郎");
         assertThat(response.getAccountType()).isEqualTo(AccountType.STUDENT);
         assertThat(response.getExpiryDate()).isEqualTo(LocalDate.now().plusDays(1));
-        verify(accountMapper).findByLoginId("student@example.com");
+        // ログインは管理者も返す検索を使う（パスワード再設定などの画面は findByLoginId のまま）
+        verify(accountMapper).findByLoginIdForLogin("student@example.com");
     }
 
     @Test
     void guardianCanLogin() {
         AccountEntity account = activeAccount("guardian@example.com", "GUARDIAN");
-        when(accountMapper.findByLoginId("guardian@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("guardian@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
         LoginResponse response = service.login(loginRequest("guardian@example.com", "secret123"));
@@ -57,7 +58,7 @@ class AccountServiceImplTest {
     @Test
     void invalidPasswordDoesNotRevealWhetherAccountExists() {
         AccountEntity account = activeAccount("student@example.com", "STUDENT");
-        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("student@example.com")).thenReturn(account);
         when(passwordEncoder.matches("wrong-password", "hash")).thenReturn(false);
 
         assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "wrong-password")))
@@ -69,7 +70,7 @@ class AccountServiceImplTest {
     void inactiveAccountCannotLogin() {
         AccountEntity account = activeAccount("student@example.com", "STUDENT");
         account.setStatus("0");
-        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("student@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
         assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
@@ -81,7 +82,7 @@ class AccountServiceImplTest {
     void expiredAccountCannotLogin() {
         AccountEntity account = activeAccount("student@example.com", "STUDENT");
         account.setExpiryDate(Date.valueOf(LocalDate.now().minusDays(1)));
-        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("student@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
         assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
@@ -93,7 +94,7 @@ class AccountServiceImplTest {
     void accountWithoutExpiryCannotBecomeUnlimitedUser() {
         AccountEntity account = activeAccount("student@example.com", "STUDENT");
         account.setExpiryDate(null);
-        when(accountMapper.findByLoginId("student@example.com")).thenReturn(account);
+        when(accountMapper.findByLoginIdForLogin("student@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
         assertThatThrownBy(() -> service.login(loginRequest("student@example.com", "secret123")))
@@ -101,13 +102,31 @@ class AccountServiceImplTest {
                 .hasMessageContaining("利用できません");
     }
 
+    /**
+     * 管理者も user-api でログインできる（2026-09-14 の決定 Q8）。
+     * 有効期限を持たない（無期限）ので、期限の検査は一般ユーザーだけに行う。
+     */
     @Test
-    void unsupportedAccountTypeIsNotTreatedAsStudent() {
+    void adminCanLoginWithoutExpiry() {
         AccountEntity account = activeAccount("admin@example.com", "ADMIN");
-        when(accountMapper.findByLoginId("admin@example.com")).thenReturn(account);
+        account.setExpiryDate(null);
+        when(accountMapper.findByLoginIdForLogin("admin@example.com")).thenReturn(account);
         when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
 
-        assertThatThrownBy(() -> service.login(loginRequest("admin@example.com", "secret123")))
+        LoginResponse response = service.login(loginRequest("admin@example.com", "secret123"));
+
+        assertThat(response.getAccountType()).isEqualTo(AccountType.ADMIN);
+        assertThat(response.getExpiryDate()).as("管理者は無期限").isNull();
+    }
+
+    /** 未知の種別は認証しない（ID の存在も漏らさない）。 */
+    @Test
+    void unknownAccountTypeIsRejected() {
+        AccountEntity account = activeAccount("someone@example.com", "TEACHER");
+        when(accountMapper.findByLoginIdForLogin("someone@example.com")).thenReturn(account);
+        when(passwordEncoder.matches("secret123", "hash")).thenReturn(true);
+
+        assertThatThrownBy(() -> service.login(loginRequest("someone@example.com", "secret123")))
                 .isInstanceOf(UnauthenticatedException.class)
                 .hasMessage("メールアドレスまたはパスワードが正しくありません。");
     }

@@ -42,6 +42,10 @@ public interface NetTerminalMapper {
                @Param("updatedByAccountId") Long updatedByAccountId);
 
     /** 1 台のモードを変更する（楽観的ロックのため変更前バージョンも照合する）。 */
+    /** 端末を削除する（存在しなければ 0 件）。 */
+    int delete(@Param("terminalId") long terminalId);
+
+    /** モードを 1 台変更する（版が合わなければ 0 件）。 */
     int updateMode(@Param("terminalId") long terminalId,
                    @Param("terminalMode") String terminalMode,
                    @Param("version") Integer version,

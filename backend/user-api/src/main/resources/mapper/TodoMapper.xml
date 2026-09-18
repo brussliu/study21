@@ -85,15 +85,21 @@
          WHERE "アカウントID" = #{accountId} AND "親TODOID" IS NULL AND "状態コード" = #{status}
     </select>
 
-    <select id="countByDueDate" resultType="com.study21.user.todo.TodoModels$CalendarCell">
-        SELECT "期限日" AS "dueDate",
-               COUNT(*) FILTER (WHERE "状態コード" &lt;&gt; 'DONE')::int AS "openCount",
-               COUNT(*) FILTER (WHERE "状態コード" = 'DONE')::int AS "doneCount"
+    <!--
+      カレンダーのマスに並べる TODO（親子とも）。
+      件数だけでなく中身（タイトル・状態・優先度）も返す。並べ替えはサービス側で行う。
+    -->
+    <select id="listByDueDate" resultType="com.study21.user.todo.TodoModels$CalendarTaskRow">
+        SELECT "期限日"       AS "dueDate",
+               "TODOID"      AS "todoId",
+               "タイトル"     AS "title",
+               "状態コード"   AS "status",
+               "優先度コード" AS "priority",
+               "親TODOID"    AS "parentTodoId"
           FROM public."COM_TODO情報"
          WHERE "アカウントID" = #{accountId}
            AND "期限日" BETWEEN #{from} AND #{to}
-         GROUP BY "期限日"
-         ORDER BY "期限日"
+         ORDER BY "期限日", "表示順", "TODOID"
     </select>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="todoId" keyColumn="TODOID">

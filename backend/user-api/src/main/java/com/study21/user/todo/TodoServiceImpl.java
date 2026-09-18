@@ -11,6 +11,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.sql.Timestamp;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Comparator;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
@@ -77,7 +80,45 @@ public class TodoServiceImpl implements TodoService {
         LocalDate from = month.atDay(1);
         LocalDate to = month.atEndOfMonth();
         return new TodoModels.CalendarResult(month.getYear(), month.getMonthValue(),
-                todoMapper.countByDueDate(user.accountId(), from, to));
+                buildCalendarCells(todoMapper.listByDueDate(user.accountId(), from, to)));
+    }
+
+    /**
+     * カレンダーのマスを組み立てる。
+     * 同じ日の TODO をまとめ、未完了を先・優先度の高い順に並べる（画面はその順に出す）。
+     * 期限日が NULL の行は SQL で除いているので、ここには来ない。
+     */
+    private static List<TodoModels.CalendarCell> buildCalendarCells(List<TodoModels.CalendarTaskRow> rows) {
+        Map<LocalDate, List<TodoModels.CalendarTaskRow>> byDate = new LinkedHashMap<>();
+        for (TodoModels.CalendarTaskRow row : rows) {
+            byDate.computeIfAbsent(row.dueDate(), key -> new ArrayList<>()).add(row);
+        }
+        List<TodoModels.CalendarCell> cells = new ArrayList<>();
+        for (Map.Entry<LocalDate, List<TodoModels.CalendarTaskRow>> entry : byDate.entrySet()) {
+            List<TodoModels.CalendarTaskRow> dayRows = entry.getValue();
+            dayRows.sort(Comparator
+                    .comparing((TodoModels.CalendarTaskRow row) -> "DONE".equals(row.status()) ? 1 : 0)
+                    .thenComparing(row -> priorityOrder(row.priority()))
+                    .thenComparing(TodoModels.CalendarTaskRow::todoId));
+            long open = dayRows.stream().filter(row -> !"DONE".equals(row.status())).count();
+            long done = dayRows.size() - open;
+            List<TodoModels.CalendarTask> tasks = dayRows.stream()
+                    .map(row -> new TodoModels.CalendarTask(row.todoId(), row.title(), row.status(),
+                            row.priority(), row.parentTodoId() != null))
+                    .toList();
+            cells.add(new TodoModels.CalendarCell(entry.getKey(), open, done, tasks));
+        }
+        cells.sort(Comparator.comparing(TodoModels.CalendarCell::dueDate));
+        return cells;
+    }
+
+    /** 並び順のための優先度（高い順に小さな値）。 */
+    private static int priorityOrder(String priority) {
+        return switch (priority == null ? "NORMAL" : priority) {
+            case "HIGH" -> 0;
+            case "LOW" -> 2;
+            default -> 1;
+        };
     }
 
     @Override

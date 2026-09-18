@@ -1,6 +1,7 @@
 package com.study21.user.studymonitor;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import jakarta.validation.constraints.NotEmpty;
 
 import java.math.BigDecimal;
@@ -83,13 +84,19 @@ public final class StudyMonitorModels {
     public record ManualUpdate(long snapshotId, int version) {
     }
 
-    /** 判定結果の一括修正（2.0 と同じく修正理由は必須）。 */
+    /**
+     * 判定結果の修正。
+     *
+     * <p>修正理由は**任意**（ユーザーの指定。2026-09-13。詳細画面では必須にしない）。
+     * 空のときは DB に NULL で残す（「理由なし」と分かるように）。
+     * 一括変更の画面側は理由を必須にしているが、サーバーは空でも受け付ける。</p>
+     */
     public record ManualCorrectionRequest(
             @NotEmpty(message = "分析結果を変更する画像を選択してください。")
             List<ManualUpdate> updates,
             @NotBlank(message = "分析結果を選択してください。")
             String result,
-            @NotBlank(message = "修正理由を入力してください。")
+            @Size(max = 2000, message = "修正理由は2000文字以内で入力してください。")
             String reason) {
     }
 

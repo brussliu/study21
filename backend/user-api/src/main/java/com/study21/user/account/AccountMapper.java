@@ -12,8 +12,18 @@ public interface AccountMapper {
     /** アカウントを新規登録する（アカウントID は自動採番）。 */
     int insert(AccountEntity entity);
 
-    /** ログインID（メールアドレス・大文字小文字無視）で検索する。 */
+    /**
+     * ログインID（メールアドレス・大文字小文字無視）で検索する。
+     * **一般ユーザー（保護者・生徒）だけ**を返す（パスワード再設定などの画面向け）。
+     */
     AccountEntity findByLoginId(@Param("loginId") String loginId);
+
+    /**
+     * ログイン認証用の検索。`findByLoginId` と違って**管理者（ADMIN）も返す**
+     * （2026-09-14 の決定 Q8: 管理者も user-api のセッションを持ち、
+     * 読書管理の全体書籍を管理できるようにする）。
+     */
+    AccountEntity findByLoginIdForLogin(@Param("loginId") String loginId);
 
     /** 保護者アカウントに紐づく生徒アカウント（1 保護者 = 1 生徒の運用）。居なければ null。 */
     AccountEntity findStudentByGuardianId(@Param("guardianAccountId") long guardianAccountId);

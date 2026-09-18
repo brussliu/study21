@@ -118,7 +118,7 @@
         UPDATE public."MON_学習モニター画像分析情報"
            SET "手動修正フラグ" = '1',
                "手動修正結果コード" = #{resultCode},
-               "手動修正理由" = #{reason},
+               "手動修正理由" = #{reason,jdbcType=VARCHAR},
                "手動修正日時" = CURRENT_TIMESTAMP,
                "手動修正者アカウントID" = #{accountId},
                "最終採用段階コード" = 'MANUAL',

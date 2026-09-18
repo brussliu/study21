@@ -36,6 +36,12 @@ public class SecurityConfig {
                         // バッチ管理・システム設定（管理者機能）。
                         // 注: 本スケルトンは認証未実装のため当面許可。認証導入時は ADMIN ロール必須とする。
                         .requestMatchers("/api/admin/batch/**", "/api/admin/settings/**", "/api/admin/setting/**").permitAll()
+                        // 授業録音の前置詞プリセット管理（設定画面のサブパネル。GLOBAL スコープのみ）
+                        .requestMatchers("/api/admin/classroom-presets", "/api/admin/classroom-presets/**").permitAll()
+                        // AI 生図の起動（画面から 1 回だけ呼ぶ）。/api/admin/batch/** に含まれるが、
+                        // 「既存の要求行しか処理しない」ことを明示するために別に書いておく。
+                        // TODO 認証導入時は ADMIN ロールまたは当該要求の所有者に制限する（設計 §4.4）
+                        .requestMatchers("/api/admin/batch/geometry-ai", "/api/admin/batch/geometry-ai/**").permitAll()
                         .anyRequest().denyAll())
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(SecurityConfigUtil.jsonAuthenticationEntryPoint())

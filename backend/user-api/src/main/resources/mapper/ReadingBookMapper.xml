@@ -1,0 +1,379 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingBookMapper">
+
+    <!-- 読書管理の本（RED_書籍情報）。公開範囲（全体書籍 / 家庭の書籍）と、
+         アカウントごとの【自分の本棚】（RED_自分の本棚情報）で見え方が変わる。 -->
+    <resultMap id="BookMap" type="com.study21.user.reading.ReadingBookEntity">
+        <id     property="bookId"        column="書籍ID"/>
+        <result property="bookNo"        column="書籍番号"/>
+        <result property="subject"       column="教科"/>
+        <result property="language"      column="言語"/>
+        <result property="title"         column="書籍名"/>
+        <result property="author"        column="作者"/>
+        <result property="difficulty"    column="難易度"/>
+        <result property="status"        column="読書ステータス"/>
+        <result property="totalPages"    column="総ページ数"/>
+        <result property="currentPage"   column="現在ページ"/>
+        <result property="pinned"        column="置頂フラグ"/>
+        <result property="tags"          column="タグ"/>
+        <result property="summary"       column="概要"/>
+        <result property="note"          column="備考"/>
+        <result property="recentMinutes" column="最近の読書時間分"/>
+        <result property="totalMinutes"  column="累計読書時間分"/>
+        <result property="markCount"     column="累計標記件数"/>
+        <result property="lastReadAt"    column="最終読書日時"/>
+        <result property="version"       column="バージョン"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+        <!-- 公開範囲（GLOBAL=全体書籍 / FAMILY=家庭の書籍）と所有者の家庭 -->
+        <result property="scope"            column="公開範囲コード"/>
+        <result property="ownerFamilyId"    column="所有家族学生ID"/>
+        <result property="ownerFamilyLabel" column="所有者家庭名"/>
+        <result property="inMyShelf"        column="自分が本棚に入れているか"/>
+        <!-- 本棚の分類と、本文 PDF / 表紙の管理情報（実体の有無はサービスがストレージで判定） -->
+        <result property="categoryId"      column="分類ID"/>
+        <result property="categoryName"    column="分類名"/>
+        <result property="pdfFileId"       column="PDFファイルID"/>
+        <result property="pdfOriginalName" column="PDF元ファイル名称"/>
+        <result property="pdfStoredName"   column="PDF保存ファイル名"/>
+        <result property="pdfStoredPath"   column="PDF保存パス"/>
+        <result property="pdfMimeType"     column="PDF_MIME_TYPE"/>
+        <result property="pdfPageCount"    column="PDFページ数"/>
+        <result property="coverFileId"     column="COVERファイルID"/>
+        <result property="coverStoredName" column="COVER保存ファイル名"/>
+        <result property="coverStoredPath" column="COVER保存パス"/>
+        <result property="coverMimeType"   column="COVER_MIME_TYPE"/>
+    </resultMap>
+
+    <sql id="BookColumns">
+        b."書籍ID", b."書籍番号", b."教科", b."言語", b."書籍名", b."作者", b."難易度", b."読書ステータス",
+        b."総ページ数", b."現在ページ", b."置頂フラグ", b."タグ", b."概要", b."備考",
+        b."最近の読書時間分", b."累計読書時間分", b."累計標記件数", b."最終読書日時",
+        b."バージョン", b."登録日時", b."更新日時",
+        b."公開範囲コード", b."所有家族学生ID",
+        NULLIF(BTRIM(COALESCE(fam."姓", '') || ' ' || COALESCE(fam."名", '')), '') AS "所有者家庭名",
+        b."分類ID", c."分類名",
+        pf."ファイルID"     AS "PDFファイルID",
+        pf."元ファイル名称" AS "PDF元ファイル名称",
+        pf."保存ファイル名" AS "PDF保存ファイル名",
+        pf."保存パス"       AS "PDF保存パス",
+        pf."MIME_TYPE"      AS "PDF_MIME_TYPE",
+        pf."ページ数"       AS "PDFページ数",
+        vf."ファイルID"     AS "COVERファイルID",
+        vf."保存ファイル名" AS "COVER保存ファイル名",
+        vf."保存パス"       AS "COVER保存パス",
+        vf."MIME_TYPE"      AS "COVER_MIME_TYPE"
+    </sql>
+
+    <!-- 見ている本人が【自分の本棚】に入れているか（【本棚に入れる/外す】の出し分け） -->
+    <sql id="MyShelfFlag">
+        EXISTS (SELECT 1 FROM public."RED_自分の本棚情報" s
+                 WHERE s."書籍ID" = b."書籍ID" AND s."アカウントID" = #{accountId})
+            AS "自分が本棚に入れているか"
+    </sql>
+
+    <!-- 分類（棚）・PDF / 表紙・所有者の家庭を左結合する。行が無い本も一覧に出す -->
+    <sql id="BookFrom">
+        FROM public."RED_書籍情報" b
+        LEFT JOIN public."ACC_アカウント" fam
+               ON fam."アカウントID" = b."所有家族学生ID"
+        LEFT JOIN public."RED_書籍分類情報" c
+               ON c."分類ID" = b."分類ID"
+        LEFT JOIN public."RED_書籍ファイル情報" pf
+               ON pf."書籍ID" = b."書籍ID" AND pf."ファイル区分" = 'PDF'
+        LEFT JOIN public."RED_書籍ファイル情報" vf
+               ON vf."書籍ID" = b."書籍ID" AND vf."ファイル区分" = 'COVER'
+    </sql>
+
+    <!--
+        見える本の絞り込み（2026-09-14 の決定）。
+        ・既定（scope なし / ALL）… 全体書籍 ＋ 自分の家庭の書籍
+        ・GLOBAL … 全体書籍だけ（管理者はこれだけが見える。familyStudentId が null）
+        ・FAMILY … 自分の家庭の書籍だけ（家庭を持たない管理者では 0 件）
+        家庭（familyStudentId）はサービス層が 1 回だけ解決して渡す
+        （生徒＝自分のアカウントID / 保護者＝自分の生徒のアカウントID / 管理者＝null）。
+    -->
+    <sql id="BookScope">
+        <choose>
+            <when test="scope == 'GLOBAL'">
+                AND b."公開範囲コード" = 'GLOBAL'
+            </when>
+            <when test="scope == 'FAMILY'">
+                AND b."公開範囲コード" = 'FAMILY'
+                <choose>
+                    <when test="familyStudentId != null">
+                        AND b."所有家族学生ID" = #{familyStudentId}
+                    </when>
+                    <otherwise>
+                        AND 1 = 0
+                    </otherwise>
+                </choose>
+            </when>
+            <otherwise>
+                AND (b."公開範囲コード" = 'GLOBAL'
+                <if test="familyStudentId != null">
+                    OR b."所有家族学生ID" = #{familyStudentId}
+                </if>
+                    )
+            </otherwise>
+        </choose>
+    </sql>
+
+    <!-- 自分の本棚だけ（`GET /books?shelf=MINE`） -->
+    <sql id="MyShelfOnly">
+        <if test="myShelfOnly">
+            AND EXISTS (SELECT 1 FROM public."RED_自分の本棚情報" s
+                         WHERE s."書籍ID" = b."書籍ID" AND s."アカウントID" = #{accountId})
+        </if>
+    </sql>
+
+    <!-- 絞り込み。空の条件は無視する。categoryId は 0＝未分類のみ、正の値＝その分類 -->
+    <sql id="BookWhere">
+        <where>
+            <include refid="BookScope"/>
+            <include refid="MyShelfOnly"/>
+            <if test="keyword != null and keyword != ''">
+                AND (b."書籍名" ILIKE '%' || #{keyword} || '%'
+                     OR b."作者" ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(b."概要", '') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="difficulty != null and difficulty != ''">
+                AND b."難易度" = #{difficulty}
+            </if>
+            <if test="status != null and status != ''">
+                AND b."読書ステータス" = #{status}
+            </if>
+            <if test="tag != null and tag != ''">
+                AND COALESCE(b."タグ", '') ILIKE '%' || #{tag} || '%'
+            </if>
+            <if test="pinned != null">
+                AND b."置頂フラグ" = #{pinned}
+            </if>
+            <if test="categoryId != null and categoryId == 0">
+                AND b."分類ID" IS NULL
+            </if>
+            <if test="categoryId != null and categoryId > 0">
+                AND b."分類ID" = #{categoryId}
+            </if>
+            <if test="language != null and language != ''">
+                AND b."言語" = #{language}
+            </if>
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+        <include refid="BookFrom"/>
+        <include refid="BookWhere"/>
+    </select>
+
+    <!-- 置頂を先頭に、次に最後に読んだ順（2.0 の並びと同じ） -->
+    <select id="search" resultMap="BookMap">
+        SELECT <include refid="BookColumns"/>,
+               <include refid="MyShelfFlag"/>
+        <include refid="BookFrom"/>
+        <include refid="BookWhere"/>
+         ORDER BY b."置頂フラグ" DESC, b."最終読書日時" DESC NULLS LAST, b."書籍ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- サマリ（見出しの「全 N 冊」）。一覧と同じ可視条件を必ず当てる
+         （当て忘れると、画面の冊数だけが全体の件数になって食い違う）。 -->
+    <select id="totals" resultType="com.study21.user.reading.ReadingShelfTotals">
+        SELECT count(*)                                                            AS "bookCount",
+               count(*) FILTER (WHERE b."読書ステータス" = '読書中')                AS "readingCount",
+               count(*) FILTER (WHERE b."読書ステータス" = '読了')                  AS "finishedCount",
+               COALESCE(sum(b."累計読書時間分"), 0)                                AS "totalMinutes",
+               COALESCE(sum(b."累計標記件数"), 0)                                  AS "markCount",
+               count(*) FILTER (WHERE b."分類ID" IS NULL)                          AS "uncategorizedCount",
+               (SELECT count(*) FROM public."RED_自分の本棚情報" s
+                 WHERE s."アカウントID" = #{accountId})                            AS "myShelfCount"
+          FROM public."RED_書籍情報" b
+        <where>
+            <include refid="BookScope"/>
+            <include refid="MyShelfOnly"/>
+        </where>
+    </select>
+
+    <!-- 1 冊（可視判定はサービス層が行う。見えない本は 404 にする） -->
+    <select id="findById" resultMap="BookMap">
+        SELECT <include refid="BookColumns"/>
+        <include refid="BookFrom"/>
+         WHERE b."書籍ID" = #{bookId}
+    </select>
+
+    <!-- 書籍番号 の重複チェック（採番専用。可視条件は当てない＝全体で一意にする） -->
+    <select id="findByNo" resultMap="BookMap">
+        SELECT <include refid="BookColumns"/>
+        <include refid="BookFrom"/>
+         WHERE b."書籍番号" = #{bookNo}
+    </select>
+
+    <!-- 採番した 書籍番号 を返す -->
+    <insert id="insert" parameterType="com.study21.user.reading.ReadingBookEntity"
+            useGeneratedKeys="true" keyProperty="bookId">
+        INSERT INTO public."RED_書籍情報" (
+            "書籍番号", "教科", "言語", "書籍名", "作者", "難易度", "読書ステータス", "総ページ数", "現在ページ",
+            "置頂フラグ", "タグ", "概要", "備考", "分類ID", "公開範囲コード", "所有家族学生ID",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{bookNo}, #{subject}, #{language}, #{title}, #{author}, #{difficulty}, #{status}, #{totalPages},
+            #{currentPage}, #{pinned}, #{tags}, #{summary}, #{note}, #{categoryId}, #{scope}, #{ownerFamilyId},
+            #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <update id="update" parameterType="com.study21.user.reading.ReadingBookEntity">
+        UPDATE public."RED_書籍情報"
+           SET "言語"             = #{language},
+               "書籍名"           = #{title},
+               "作者"             = #{author},
+               "難易度"           = #{difficulty},
+               "読書ステータス"   = #{status},
+               "総ページ数"       = #{totalPages},
+               "現在ページ"       = #{currentPage},
+               "置頂フラグ"       = #{pinned},
+               "タグ"             = #{tags},
+               "概要"             = #{summary},
+               "備考"             = #{note},
+               "分類ID"           = #{categoryId},
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- PDF を上げたときに画面（pdf.js）が数えた総ページ数を反映し、現在ページを丸める -->
+    <update id="updateTotalPages">
+        UPDATE public."RED_書籍情報"
+           SET "総ページ数"       = #{totalPages},
+               "現在ページ"       = LEAST("現在ページ", #{totalPages}),
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+    </update>
+
+    <update id="updatePinned">
+        UPDATE public."RED_書籍情報"
+           SET "置頂フラグ"       = #{pinned},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateStatus">
+        UPDATE public."RED_書籍情報"
+           SET "読書ステータス"   = #{status},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- 読書記録を付けたとき（2.0 の updateBookByRecord と同じ規則） -->
+    <update id="updateAfterRecord">
+        UPDATE public."RED_書籍情報"
+           SET "現在ページ"       = #{currentPage},
+               "読書ステータス"   = #{status},
+               "最近の読書時間分" = #{minutes},
+               "累計読書時間分"   = "累計読書時間分" + #{minutes},
+               "最終読書日時"     = #{readAt},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+    </update>
+
+    <update id="refreshMarkCount">
+        UPDATE public."RED_書籍情報"
+           SET "累計標記件数"     = (SELECT count(*) FROM public."RED_標記情報" m WHERE m."書籍ID" = #{bookId}),
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+    </update>
+
+    <!-- 読書の進捗を最初の状態に戻す（【標記クリア】で標記の全削除と一緒に行う）。
+         現在ページは DDL の CHECK（>= 1）に合わせて 1 にする。読書記録（履歴）は消さない。 -->
+    <update id="resetProgress">
+        UPDATE public."RED_書籍情報"
+           SET "現在ページ"       = 1,
+               "読書ステータス"   = '未着手',
+               "最近の読書時間分" = 0,
+               "累計読書時間分"   = 0,
+               "最終読書日時"     = NULL,
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "書籍ID" = #{bookId}
+    </update>
+
+    <!-- 履歴を消したあとの数え直し（残った記録から） -->
+    <update id="refreshRecordSummary">
+        UPDATE public."RED_書籍情報" b
+           SET "累計読書時間分"   = COALESCE(s."合計分", 0),
+               "最近の読書時間分" = COALESCE(s."最新分", 0),
+               "最終読書日時"     = s."最新日時",
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = b."バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+          FROM (
+                SELECT COALESCE(sum("読書時間分"), 0) AS "合計分",
+                       max("読書日時") AS "最新日時",
+                       COALESCE((SELECT r2."読書時間分"
+                                   FROM public."RED_読書記録情報" r2
+                                  WHERE r2."書籍ID" = #{bookId}
+                                  ORDER BY r2."読書日時" DESC, r2."記録ID" DESC
+                                  LIMIT 1), 0) AS "最新分"
+                  FROM public."RED_読書記録情報"
+                 WHERE "書籍ID" = #{bookId}
+               ) s
+         WHERE b."書籍ID" = #{bookId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."RED_書籍情報" WHERE "書籍ID" = #{bookId}
+    </delete>
+
+    <!-- ================= 【自分の本棚】（RED_自分の本棚情報） =================
+         本そのものは RED_書籍情報。ここは「誰がどの本を持っているか」だけを持つ。
+         触るのは**呼び出した本人の行だけ**（他人のアカウントID は受け取らない）。 -->
+
+    <!-- 【本棚に入れる】。すでに入っていれば何もしない（冪等） -->
+    <insert id="insertShelf">
+        INSERT INTO public."RED_自分の本棚情報" ("アカウントID", "書籍ID", "登録者アカウントID", "登録元コード")
+        VALUES (#{accountId}, #{bookId}, #{operator}, 'APP')
+        ON CONFLICT ("アカウントID", "書籍ID") DO NOTHING
+    </insert>
+
+    <!-- 【本棚から外す】。入っていなければ何もしない（冪等） -->
+    <delete id="deleteShelf">
+        DELETE FROM public."RED_自分の本棚情報"
+         WHERE "アカウントID" = #{accountId}
+           AND "書籍ID" = #{bookId}
+    </delete>
+
+    <select id="existsShelf" resultType="boolean">
+        SELECT EXISTS (SELECT 1 FROM public."RED_自分の本棚情報" s
+                        WHERE s."アカウントID" = #{accountId}
+                          AND s."書籍ID" = #{bookId})
+    </select>
+
+    <select id="countShelf" resultType="long">
+        SELECT count(*) FROM public."RED_自分の本棚情報" s WHERE s."アカウントID" = #{accountId}
+    </select>
+</mapper>

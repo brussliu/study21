@@ -2,6 +2,7 @@ package com.study21.admin.setting;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 統一システム設定読み取りサービス。
@@ -25,6 +26,15 @@ public interface SettingsService {
      * GLOBAL 設定を 1 件読み取り、必須検証する。欠落・空は例外。
      */
     String requireGlobal(String taskCode, String pageCode, String settingKey);
+
+    /**
+     * GLOBAL 設定を 1 件読む（**任意項目**。未設定・空なら空を返す）。
+     *
+     * <p>「未設定なら共通の設定を継承する」項目（AI 生図のモード別プロンプト・モード別のモデル
+     * パラメータなど）のためにある。{@link #requireGlobal} は欠落を例外にするので、
+     * 継承を許す項目には使えない。</p>
+     */
+    Optional<String> findGlobal(String pageCode, String settingKey);
 
     /**
      * 作用域・所属オブジェクトで設定値を一覧取得する。

@@ -1,0 +1,259 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.geometry.GeometryAiRequestMapper">
+
+    <!-- AI 生図の要求（GEO_AI生図リクエスト情報）。画像の中身は持たない（パス + ファイル名） -->
+    <resultMap id="AiRequestMap" type="com.study21.user.geometry.GeometryAiRequestEntity">
+        <id     property="requestId"    column="生図リクエストID"/>
+        <result property="requestNo"    column="要求番号"/>
+        <result property="statusCode"   column="状態コード"/>
+        <result property="originalPath" column="元画像パス"/>
+        <result property="originalName" column="元画像名称"/>
+        <result property="originalMime" column="元画像MIME"/>
+        <result property="originalSize" column="元画像サイズ"/>
+        <result property="originalWidth"  column="元画像幅"/>
+        <result property="originalHeight" column="元画像高さ"/>
+        <result property="croppedPath"  column="切抜画像パス"/>
+        <result property="croppedName"  column="切抜画像名称"/>
+        <result property="croppedSize"  column="切抜画像サイズ"/>
+        <result property="croppedWidth" column="切抜画像幅"/>
+        <result property="croppedHeight" column="切抜画像高さ"/>
+        <result property="cropX"        column="切抜範囲X"/>
+        <result property="cropY"        column="切抜範囲Y"/>
+        <result property="cropW"        column="切抜範囲幅"/>
+        <result property="cropH"        column="切抜範囲高さ"/>
+        <result property="mode"         column="作図モード"/>
+        <result property="requestedOutputType" column="結果種別要求"/>
+        <result property="resolvedOutputType"  column="結果種別確定"/>
+        <result property="supplementsJson"     column="補充パラメータ"/>
+        <result property="settingsSnapshotJson" column="設定スナップショット"/>
+        <result property="outcome"      column="判定"/>
+        <result property="questionsJson" column="確認質問"/>
+        <result property="userKind"     column="利用者区分"/>
+        <result property="userSubKind"  column="利用者図形種"/>
+        <result property="aiKind"       column="AI区分"/>
+        <result property="figureType"   column="作図種別"/>
+        <result property="note"         column="利用者指示"/>
+        <result property="prompt"       column="送信プロンプト"/>
+        <result property="commands"     column="生成コマンド"/>
+        <result property="commandCount" column="生成コマンド数"/>
+        <result property="proposalJson" column="提案JSON"/>
+        <result property="validationError" column="検証エラー内容"/>
+        <result property="aiCallId"     column="AI呼出履歴ID"/>
+        <result property="retryCount"   column="再試行回数"/>
+        <result property="failedStage"  column="失敗工程コード"/>
+        <result property="errorCode"    column="エラーコード"/>
+        <result property="errorMessage" column="エラーメッセージ"/>
+        <result property="preprocessExecutionId" column="前処理実行ID"/>
+        <result property="aiExecutionId" column="AI実行ID"/>
+        <result property="validateExecutionId" column="確定実行ID"/>
+        <result property="figureId"     column="図形ID"/>
+        <result property="version"      column="バージョン"/>
+        <result property="createdBy"    column="登録者アカウントID"/>
+        <result property="updatedBy"    column="更新者アカウントID"/>
+        <result property="sourceCode"   column="登録元コード"/>
+        <result property="updateSourceCode" column="更新元コード"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <!-- 一覧では重い列（生成コマンド・送信プロンプト・提案JSON）を読まない -->
+    <sql id="AiRequestListColumns">
+        "生図リクエストID", "要求番号", "状態コード",
+        "作図モード", "結果種別要求", "結果種別確定", "判定", "確認質問", "切抜画像名称",
+        "利用者区分", "利用者図形種", "AI区分", "作図種別",
+        "利用者指示", "失敗工程コード", "エラーコード", "エラーメッセージ", "図形ID", "再試行回数",
+        "バージョン", "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+        "登録日時", "更新日時"
+    </sql>
+
+    <sql id="AiRequestColumns">
+        "生図リクエストID", "要求番号", "状態コード",
+        "元画像パス", "元画像名称", "元画像MIME", "元画像サイズ", "元画像幅", "元画像高さ",
+        "切抜画像パス", "切抜画像名称", "切抜画像サイズ", "切抜画像幅", "切抜画像高さ",
+        "切抜範囲X", "切抜範囲Y", "切抜範囲幅", "切抜範囲高さ",
+        "作図モード", "結果種別要求", "結果種別確定", "補充パラメータ", "設定スナップショット",
+        "判定", "確認質問",
+        "利用者区分", "利用者図形種", "AI区分", "作図種別",
+        "利用者指示", "送信プロンプト", "生成コマンド", "生成コマンド数", "提案JSON", "検証エラー内容",
+        "AI呼出履歴ID", "再試行回数", "失敗工程コード", "エラーコード", "エラーメッセージ",
+        "前処理実行ID", "AI実行ID", "確定実行ID", "図形ID",
+        "バージョン", "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+        "登録日時", "更新日時"
+    </sql>
+
+    <insert id="insert" parameterType="com.study21.user.geometry.GeometryAiRequestEntity"
+            useGeneratedKeys="true" keyProperty="requestId">
+        INSERT INTO public."GEO_AI生図リクエスト情報" (
+            "要求番号", "状態コード",
+            "元画像パス", "元画像名称", "元画像MIME", "元画像サイズ", "元画像幅", "元画像高さ",
+            "切抜範囲X", "切抜範囲Y", "切抜範囲幅", "切抜範囲高さ",
+            "作図モード", "結果種別要求", "補充パラメータ", "設定スナップショット",
+            "利用者区分", "利用者図形種", "作図種別", "利用者指示",
+            "再試行回数", "バージョン", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{requestNo}, #{statusCode},
+            #{originalPath}, #{originalName}, #{originalMime}, #{originalSize}, #{originalWidth}, #{originalHeight},
+            #{cropX}, #{cropY}, #{cropW}, #{cropH},
+            #{mode}, #{requestedOutputType}, CAST(#{supplementsJson} AS jsonb),
+            CAST(#{settingsSnapshotJson} AS jsonb),
+            #{userKind}, #{userSubKind}, #{figureType}, #{note},
+            0, 1, #{createdBy}, #{sourceCode}
+        )
+    </insert>
+
+    <select id="findById" resultMap="AiRequestMap">
+        SELECT <include refid="AiRequestColumns"/>
+          FROM public."GEO_AI生図リクエスト情報"
+         WHERE "生図リクエストID" = #{requestId}
+    </select>
+
+    <select id="findByNo" resultMap="AiRequestMap">
+        SELECT <include refid="AiRequestColumns"/>
+          FROM public."GEO_AI生図リクエスト情報"
+         WHERE "要求番号" = #{requestNo}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."GEO_AI生図リクエスト情報"
+        <where>
+            <if test="createdBy != null">
+                AND "登録者アカウントID" = #{createdBy}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態コード" = #{status}
+            </if>
+        </where>
+    </select>
+
+    <select id="search" resultMap="AiRequestMap">
+        SELECT <include refid="AiRequestListColumns"/>
+          FROM public."GEO_AI生図リクエスト情報"
+        <where>
+            <if test="createdBy != null">
+                AND "登録者アカウントID" = #{createdBy}
+            </if>
+            <if test="status != null and status != ''">
+                AND "状態コード" = #{status}
+            </if>
+        </where>
+         ORDER BY "登録日時" DESC, "生図リクエストID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 図形管理の一覧に出すタスク（処理中と最近のもの）。保存済（REGISTERED）は出さない -->
+    <select id="findTasks" resultMap="AiRequestMap">
+        SELECT <include refid="AiRequestListColumns"/>
+          FROM public."GEO_AI生図リクエスト情報"
+        <where>
+            <if test="createdBy != null">
+                AND "登録者アカウントID" = #{createdBy}
+            </if>
+            AND "状態コード" &lt;&gt; 'REGISTERED'
+        </where>
+         ORDER BY "登録日時" DESC, "生図リクエストID" DESC
+         LIMIT #{limit}
+    </select>
+
+    <select id="countTodayByAccount" resultType="long">
+        SELECT count(*)
+          FROM public."GEO_AI生図リクエスト情報"
+         WHERE "登録者アカウントID" = #{accountId}
+           AND "登録日時" &gt;= CURRENT_DATE
+    </select>
+
+    <update id="updateRegistered">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "状態コード"       = 'REGISTERED',
+               "図形ID"           = #{figureId},
+               "失敗工程コード"   = NULL,
+               "エラーコード"     = NULL,
+               "エラーメッセージ" = NULL,
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = #{sourceCode},
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateCancelled">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "状態コード"       = 'CANCELLED',
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = #{sourceCode},
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!--
+      条件を直して送り直す（追加入力待ち・失敗）。同じ要求行を使い回すので、一覧に二重に並ばず、
+      図形も 1 つしかできない。画像（元画像）はそのまま使い、読み取る範囲だけ作り直す。
+      設定スナップショットは**そのときの有効な設定で固定し直す**（利用者が明示的に送り直すので、
+      直した設定を拾わせる。待ち行列に並んでいる間は変わらない）。
+    -->
+    <update id="updateResubmitted" parameterType="com.study21.user.geometry.GeometryAiRequestEntity">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "状態コード"       = 'QUEUED',
+               "切抜範囲X"        = #{cropX},
+               "切抜範囲Y"        = #{cropY},
+               "切抜範囲幅"       = #{cropW},
+               "切抜範囲高さ"     = #{cropH},
+               "作図モード"       = #{mode},
+               "結果種別要求"     = #{requestedOutputType},
+               "補充パラメータ"   = CAST(#{supplementsJson} AS jsonb),
+               "設定スナップショット" = CAST(#{settingsSnapshotJson} AS jsonb),
+               "利用者区分"       = #{userKind},
+               "利用者図形種"     = #{userSubKind},
+               "作図種別"         = #{figureType},
+               "利用者指示"       = #{note},
+               "生成コマンド"     = NULL,
+               "生成コマンド数"   = NULL,
+               "提案JSON"         = NULL,
+               "検証エラー内容"   = NULL,
+               "AI呼出履歴ID"     = NULL,
+               "AI区分"           = NULL,
+               "結果種別確定"     = NULL,
+               "判定"             = NULL,
+               "確認質問"         = NULL,
+               "失敗工程コード"   = NULL,
+               "エラーコード"     = NULL,
+               "エラーメッセージ" = NULL,
+               "再試行回数"       = "再試行回数" + 1,
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = #{updateSourceCode},
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- 【もう一度生成】: AI の成果物（生成コマンド・検証結果・失敗の記録）を消して前処理済みへ戻す -->
+    <update id="updateRetried" parameterType="com.study21.user.geometry.GeometryAiRequestEntity">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "状態コード"       = 'PREPROCESSED',
+               "設定スナップショット" = CAST(#{settingsSnapshotJson} AS jsonb),
+               "生成コマンド"     = NULL,
+               "生成コマンド数"   = NULL,
+               "提案JSON"         = NULL,
+               "検証エラー内容"   = NULL,
+               "AI呼出履歴ID"     = NULL,
+               "AI区分"           = NULL,
+               "結果種別確定"     = NULL,
+               "判定"             = NULL,
+               "確認質問"         = NULL,
+               "失敗工程コード"   = NULL,
+               "エラーコード"     = NULL,
+               "エラーメッセージ" = NULL,
+               "再試行回数"       = "再試行回数" + 1,
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = #{updateSourceCode},
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+    </update>
+</mapper>

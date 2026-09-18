@@ -1,5 +1,9 @@
 package com.study21.admin.batch;
 
+import com.study21.admin.classroomai.ClassroomAiNoteStep;
+import com.study21.admin.geometryai.AiAssistGenerateStep;
+import com.study21.admin.geometryai.AiFigureGenerateStep;
+import com.study21.admin.geometryai.dto.FigureMode;
 import com.study21.admin.setting.SettingRequirement;
 import org.springframework.stereotype.Component;
 
@@ -179,6 +183,40 @@ public class BatchTaskRegistry {
                 "STUDY_MONITOR_FIRST_AI_PROVIDER", "STUDY_MONITOR_FIRST_SYSTEM_PROMPT",
                 "STUDY_MONITOR_FIRST_USER_PROMPT"));
 
+        // ---- 図形管理（AI生図 / AI画図助手）----
+        // 利用者の指示で、AI 生図の流水線は「前処理（通常コード）→ batC51（AI 生成）→ 検証（通常コード）」
+        // に変更した。バッチとして登録するのは AI 生成の batC51 だけ（前処理・検証はバッチではない）。
+        // AI 画図助手もバッチ（batC52）として実行する（依頼 → その場で即時実行）。
+        // 種別 C（呼出）＝画面から随時実行する。S（起動時）にはしない（起動時に AI を呼ばない）。
+        // 必須設定は**工程クラスが宣言したもの**を使う（定義と実装が食い違わないように）
+        // AI 生図の AI 生成は**モードごとに 1 バッチ**（batC51-A〜D）。連字符つきの接尾辞は
+        // 既存の batC15-1〜3 と同じ扱い（バッチコードの列は VARCHAR(20) で収まる）。
+        // 必須設定はモード共通の分（モード別のプロンプト・モデルパラメータは「未設定なら共通を継承」）
+        for (FigureMode mode : FigureMode.values()) {
+            list.add(new BatchTaskDefinition(mode.taskCode(), BatchTaskType.C,
+                    "AI生図 " + mode.label() + "（GeoGebra コマンド生成）", false, null, null,
+                    "GEOMETRY_AI", AiFigureGenerateStep.REQUIRED_SETTINGS));
+        }
+        // 歴史的な batC51（モードが無い時代の要求・実行履歴）用の入口。要求行が無いときは
+        // モード A の生成待ちを拾う（利用者の指示: 歴史的な要求は A として扱う）
+        list.add(new BatchTaskDefinition(FigureMode.LEGACY_TASK_CODE, BatchTaskType.C,
+                "AI生図 AI生成（歴史的なコード。モード A として処理）", false, null, null,
+                "GEOMETRY_AI", AiFigureGenerateStep.REQUIRED_SETTINGS));
+        list.add(new BatchTaskDefinition("batC52", BatchTaskType.C,
+                "AI画図助手 生成", false, null, null,
+                "GEOMETRY_AI", AiAssistGenerateStep.REQUIRED_SETTINGS));
+
+        // ---- 授業録音 / AI 授業記録 ----
+        // フェーズ分析（batC61）と最終まとめ（batC62）。種別 C（画面から随時実行）。
+        // 起動は admin-api の薄い入口（ClassroomAiPipelineService）がノートの種別で 61 か 62 を呼ぶ。
+        // 必須設定は工程クラス（ClassroomAiNoteStep）が宣言したものを使う（定義と実装が食い違わないように）
+        list.add(new BatchTaskDefinition("batC61", BatchTaskType.C,
+                "授業ノート フェーズ分析", false, null, null,
+                "CLASSROOM_AI", ClassroomAiNoteStep.PHASE_REQUIRED_SETTINGS));
+        list.add(new BatchTaskDefinition("batC62", BatchTaskType.C,
+                "授業ノート 最終まとめ生成", false, null, null,
+                "CLASSROOM_AI", ClassroomAiNoteStep.SUMMARY_REQUIRED_SETTINGS));
+
         // ---- システム ----
         // batS01: 2.0 の batL01（プロキシサービス）を改名したもの。種別 S =
         // admin-api の起動時に 1 回だけ実行し、あとは画面の【再実行】で動かす。
@@ -187,7 +225,10 @@ public class BatchTaskRegistry {
                 true, null, null, "SYSTEM", List.of()));
         list.add(new BatchTaskDefinition("batR01", BatchTaskType.R, "「STY_日次情報」テーブル生成処理",
                 false, null, null, "SYSTEM", List.of()));
-        list.add(new BatchTaskDefinition("batR02", BatchTaskType.R, "バッチ実行履歴・上網履歴クリーンアップ処理",
+        // batR02 は 2.1 で「AI 生図の画像（保持日数を過ぎたもの）の削除」を実装した。
+        // 実行履歴・上網履歴の削除は今後の実装（定義と名前はその用途のまま）。
+        list.add(new BatchTaskDefinition("batR02", BatchTaskType.R,
+                "バッチ実行履歴・上網履歴クリーンアップ処理（AI生図の画像も削除）",
                 false, null, null, "SYSTEM", List.of()));
         list.add(new BatchTaskDefinition("batR03", BatchTaskType.R, "インターネット利用終了（23:30）",
                 false, null, null, "SYSTEM", List.of()));

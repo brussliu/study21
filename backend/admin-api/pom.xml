@@ -65,6 +65,40 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        <!--
+          AI（LLM）の呼び出しは LangChain4j を使う（AI 画図助手 batC52 から移行）。
+          OpenAI 互換の chat/completions を叩くので langchain4j-open-ai だけで足りる
+          （qwen / doubao / deepseek / chatgpt はすべて OpenAI 互換の URL が設定済み）。
+          HTTP の実体は langchain4j-http-client-jdk（JDK の java.net.http.HttpClient）が
+          推移的に入る。バージョンは親 pom の langchain4j-bom が決める。
+        -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+        </dependency>
+        <!--
+          AI の出力データ構造（DTO）と、そこから JSON Schema を自動生成する仕組み。
+          - swagger-annotations-jakarta … DTO の全フィールドに付ける @Schema(description=...)
+          - victools jsonschema-generator … DTO → JSON Schema（説明・required・enum・入れ子・List）
+          生成結果は「プロンプトへの出力形式の注入」と「設定ページの Data TAB」の両方で使う
+          （DTO が唯一の定義。プロンプトや DB に JSON Schema を二重管理しない）。
+        -->
+        <dependency>
+            <groupId>io.swagger.core.v3</groupId>
+            <artifactId>swagger-annotations-jakarta</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-generator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-module-swagger-2</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.github.victools</groupId>
+            <artifactId>jsonschema-module-jackson</artifactId>
+        </dependency>
         <!-- PostgreSQL JDBC -->
         <dependency>
             <groupId>org.postgresql</groupId>

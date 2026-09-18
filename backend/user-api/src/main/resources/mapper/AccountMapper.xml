@@ -36,6 +36,7 @@
              #{termsAgreedAt}, #{createdBy}, #{updatedBy}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     </insert>
 
+    <!-- 一般ユーザー（保護者・生徒）だけ。パスワード再設定などの画面向け。 -->
     <select id="findByLoginId" resultMap="AccountMap">
         SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
                "姓", "名", "姓かな", "名かな", "学年", "電話番号", "メール通知", "リマインダー通知",
@@ -44,6 +45,19 @@
           FROM public."ACC_アカウント"
          WHERE LOWER("ログインID") = LOWER(#{loginId})
            AND "アカウント種別" IN ('GUARDIAN', 'STUDENT')
+    </select>
+
+    <!-- ログイン認証用。管理者（ADMIN）も返す（決定 Q8）。
+         管理者は有効期限を持たない（NULL）ので、期限の検査はサービス側で
+         一般ユーザーだけに行う。 -->
+    <select id="findByLoginIdForLogin" resultMap="AccountMap">
+        SELECT "アカウントID", "ログインID", "パスワードハッシュ", "アカウント種別", "状態",
+               "姓", "名", "姓かな", "名かな", "学年", "電話番号", "メール通知", "リマインダー通知",
+               "保護者ID", "有効期限",
+               "利用規約同意日時", "登録ID", "更新ID", "登録日時", "更新日時"
+          FROM public."ACC_アカウント"
+         WHERE LOWER("ログインID") = LOWER(#{loginId})
+           AND "アカウント種別" IN ('GUARDIAN', 'STUDENT', 'ADMIN')
     </select>
 
     <select id="findStudentByGuardianId" resultMap="AccountMap">

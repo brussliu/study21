@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.geometry.GeometryMapper">
+
+    <!-- 図形管理（GEO_図形情報）。GeoGebra の作図データとサムネイルを持つ。 -->
+    <resultMap id="FigureMap" type="com.study21.user.geometry.GeometryEntity">
+        <id     property="figureId"     column="図形ID"/>
+        <result property="figureNo"     column="図形番号"/>
+        <result property="subject"      column="教科"/>
+        <result property="figureType"   column="図形種別"/>
+        <result property="kind"         column="登録区分"/>
+        <result property="title"        column="図形名"/>
+        <result property="memo"         column="メモ"/>
+        <result property="tags"         column="タグ"/>
+        <result property="construction" column="GeoGebraXML"/>
+        <result property="thumbnail"    column="サムネイル画像"/>
+        <result property="displayOrder" column="表示順"/>
+        <result property="statusCode"   column="状態コード"/>
+        <result property="version"      column="バージョン"/>
+        <result property="hasThumbnail" column="hasThumbnail"/>
+        <result property="constructionLength" column="constructionLength"/>
+        <result property="sourceCode"   column="登録元コード"/>
+        <result property="createdBy"    column="登録者アカウントID"/>
+        <result property="updatedBy"    column="更新者アカウントID"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <!-- 一覧では XML とサムネイルの中身は返さず、長さと有無だけ返す（重いため） -->
+    <sql id="FigureListColumns">
+        f."図形ID", f."図形番号", f."教科", f."図形種別", f."登録区分", f."図形名", f."メモ", f."タグ",
+        f."表示順", f."状態コード", f."バージョン", f."登録者アカウントID", f."更新者アカウントID",
+        f."登録日時", f."更新日時",
+        (f."サムネイル画像" IS NOT NULL AND f."サムネイル画像" &lt;&gt; '') AS "hasThumbnail",
+        length(COALESCE(f."GeoGebraXML", '')) AS "constructionLength"
+    </sql>
+
+    <sql id="FigureColumns">
+        f."図形ID", f."図形番号", f."教科", f."図形種別", f."登録区分", f."図形名", f."メモ", f."タグ",
+        f."GeoGebraXML", f."サムネイル画像", f."表示順", f."状態コード", f."バージョン",
+        f."登録元コード", f."登録者アカウントID", f."更新者アカウントID", f."登録日時", f."更新日時"
+    </sql>
+
+    <!-- 絞り込み。キーワードは 図形名・メモ・タグ の部分一致。 -->
+    <sql id="FigureWhere">
+        <where>
+            <if test="!includeDeleted">
+                AND f."状態コード" = 'ACTIVE'
+            </if>
+            <if test="keyword != null and keyword != ''">
+                AND (f."図形名" ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(f."メモ", '') ILIKE '%' || #{keyword} || '%'
+                     OR COALESCE(f."タグ", '') ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="figureType != null and figureType != ''">
+                AND f."図形種別" = #{figureType}
+            </if>
+            <if test="tag != null and tag != ''">
+                AND COALESCE(f."タグ", '') ILIKE '%' || #{tag} || '%'
+            </if>
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."GEO_図形情報" f
+        <include refid="FigureWhere"/>
+    </select>
+
+    <select id="search" resultMap="FigureMap">
+        SELECT <include refid="FigureListColumns"/>
+          FROM public."GEO_図形情報" f
+        <include refid="FigureWhere"/>
+         ORDER BY
+        <choose>
+            <when test="sort == 'createdDesc'">f."登録日時" DESC NULLS LAST, f."図形ID" DESC</when>
+            <when test="sort == 'titleAsc'">f."図形名" ASC, f."表示順" ASC, f."図形ID" ASC</when>
+            <otherwise>f."更新日時" DESC NULLS LAST, f."図形ID" DESC</otherwise>
+        </choose>
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="totals" resultType="com.study21.user.geometry.GeometryTotalsEntity">
+        SELECT count(*) FILTER (WHERE f."状態コード" = 'ACTIVE')                    AS "figureCount",
+               count(*) FILTER (WHERE f."状態コード" = 'ACTIVE'
+                                  AND f."図形種別" = 'geometry')                    AS "geometryCount",
+               count(*) FILTER (WHERE f."状態コード" = 'ACTIVE'
+                                  AND f."図形種別" = 'function')                    AS "functionCount",
+               count(*) FILTER (WHERE f."状態コード" = 'DELETED')                   AS "deletedCount"
+          FROM public."GEO_図形情報" f
+    </select>
+
+    <!-- タグは '|' 区切り。分解して件数を数える -->
+    <select id="tagSuggestions" resultType="com.study21.user.geometry.GeometryTagEntity">
+        SELECT btrim(tag) AS "tag", count(*) AS "tagCount"
+          FROM public."GEO_図形情報" f,
+               regexp_split_to_table(COALESCE(f."タグ", ''), '\|') AS tag
+         WHERE btrim(tag) &lt;&gt; ''
+        <if test="!includeDeleted">
+           AND f."状態コード" = 'ACTIVE'
+        </if>
+         GROUP BY btrim(tag)
+         ORDER BY count(*) DESC, btrim(tag) ASC
+         LIMIT 50
+    </select>
+
+    <select id="findById" resultMap="FigureMap">
+        SELECT <include refid="FigureColumns"/>
+          FROM public."GEO_図形情報" f
+         WHERE f."図形ID" = #{figureId}
+    </select>
+
+    <select id="findByNo" resultType="com.study21.user.geometry.GeometryEntity">
+        SELECT "図形ID" AS "figureId", "図形番号" AS "figureNo"
+          FROM public."GEO_図形情報"
+         WHERE "図形番号" = #{figureNo}
+         LIMIT 1
+    </select>
+
+    <select id="nextDisplayOrder" resultType="int">
+        SELECT COALESCE(max(f."表示順"), 0) + 1 FROM public."GEO_図形情報" f
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.geometry.GeometryEntity"
+            useGeneratedKeys="true" keyProperty="figureId">
+        INSERT INTO public."GEO_図形情報" (
+            "図形番号", "教科", "図形種別", "登録区分", "図形名", "メモ", "タグ",
+            "GeoGebraXML", "サムネイル画像", "表示順", "状態コード",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{figureNo}, #{subject}, #{figureType}, #{kind}, #{title}, #{memo}, #{tags},
+            #{construction}, #{thumbnail}, #{displayOrder}, 'ACTIVE',
+            #{createdBy}, COALESCE(#{sourceCode}, 'APP')
+        )
+    </insert>
+
+    <update id="update" parameterType="com.study21.user.geometry.GeometryEntity">
+        UPDATE public."GEO_図形情報"
+           SET "図形名"           = #{title},
+               "図形種別"         = #{figureType},
+               "メモ"             = #{memo},
+               "タグ"             = #{tags},
+               "GeoGebraXML"      = #{construction},
+               "サムネイル画像"   = #{thumbnail},
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "図形ID" = #{figureId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateDisplayOrder">
+        UPDATE public."GEO_図形情報"
+           SET "表示順"           = #{displayOrder},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "図形ID" = #{figureId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- 論理削除（2.0 の 削除FLG='1' 相当） -->
+    <update id="softDelete">
+        UPDATE public."GEO_図形情報"
+           SET "状態コード"       = 'DELETED',
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "図形ID" = #{figureId}
+    </update>
+</mapper>

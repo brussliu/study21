@@ -30,6 +30,10 @@ public class AiCallLogEntity {
     private Integer inputTokens;
     private Integer outputTokens;
     private Integer totalTokens;
+    /** 記録した人（AI 生図は要求行の 登録者アカウントID。バッチは null） */
+    private Long createdBy;
+    /** 登録元コード（BATCH=バッチ / APP=画面からの同期呼び出し） */
+    private String sourceCode;
 
     public Long getCallId() {
         return callId;
@@ -189,5 +193,21 @@ public class AiCallLogEntity {
 
     public void setTotalTokens(Integer totalTokens) {
         this.totalTokens = totalTokens;
+    }
+
+    public Long getCreatedBy() {
+        return createdBy;
+    }
+
+    public void setCreatedBy(Long createdBy) {
+        this.createdBy = createdBy;
+    }
+
+    public String getSourceCode() {
+        return sourceCode;
+    }
+
+    public void setSourceCode(String sourceCode) {
+        this.sourceCode = sourceCode;
     }
 }

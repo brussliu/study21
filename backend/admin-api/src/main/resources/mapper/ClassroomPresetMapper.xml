@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.classroomai.ClassroomPresetMapper">
+
+    <resultMap id="PresetMap" type="com.study21.admin.classroomai.ClassroomPresetEntity">
+        <id     property="presetId"     column="前置詞ID"/>
+        <result property="scope"        column="スコープ"/>
+        <result property="createdBy"    column="登録者アカウントID"/>
+        <result property="name"         column="プリセット名"/>
+        <result property="text"         column="前置詞テキスト"/>
+        <result property="displayOrder" column="表示順"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <select id="findGlobal" resultMap="PresetMap">
+        SELECT "前置詞ID", "スコープ", "登録者アカウントID", "プリセット名", "前置詞テキスト", "表示順",
+               "登録日時", "更新日時"
+          FROM public."CR_前置詞プリセット情報"
+         WHERE "スコープ" = 'GLOBAL'
+         ORDER BY "表示順", "前置詞ID"
+    </select>
+
+    <select id="findById" resultMap="PresetMap">
+        SELECT "前置詞ID", "スコープ", "登録者アカウントID", "プリセット名", "前置詞テキスト", "表示順",
+               "登録日時", "更新日時"
+          FROM public."CR_前置詞プリセット情報"
+         WHERE "前置詞ID" = #{presetId}
+    </select>
+
+    <insert id="insert" parameterType="com.study21.admin.classroomai.ClassroomPresetEntity"
+            useGeneratedKeys="true" keyProperty="presetId">
+        INSERT INTO public."CR_前置詞プリセット情報" (
+            "スコープ", "登録者アカウントID", "プリセット名", "前置詞テキスト", "表示順"
+        ) VALUES (
+            'GLOBAL', NULL, #{name}, #{text}, #{displayOrder}
+        )
+    </insert>
+
+    <update id="updateGlobal">
+        UPDATE public."CR_前置詞プリセット情報"
+           SET "プリセット名"   = #{name},
+               "前置詞テキスト" = #{text},
+               "表示順"         = #{displayOrder},
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "前置詞ID" = #{presetId}
+           AND "スコープ" = 'GLOBAL'
+    </update>
+
+    <!-- 削除は FK（CR_授業記録情報.前置詞ID → ON DELETE SET NULL）が既存記録を NULL 化してくれる -->
+    <delete id="deleteGlobal">
+        DELETE FROM public."CR_前置詞プリセット情報"
+         WHERE "前置詞ID" = #{presetId}
+           AND "スコープ" = 'GLOBAL'
+    </delete>
+</mapper>

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingCategoryMapper">
+
+    <!-- 本棚の分類マスタ（RED_書籍分類情報）。
+         `所有家族学生ID` が NULL＝全体の分類（管理者が作り全家庭に見える）、
+         値が入っていればその家庭だけの分類（2026-09-14 の決定）。 -->
+    <resultMap id="CategoryMap" type="com.study21.user.reading.ReadingCategoryEntity">
+        <id     property="categoryId"    column="分類ID"/>
+        <result property="name"          column="分類名"/>
+        <result property="displayOrder"  column="表示順"/>
+        <result property="description"   column="説明"/>
+        <result property="bookCount"     column="bookCount"/>
+        <result property="ownerFamilyId" column="所有家族学生ID"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+    </resultMap>
+
+    <sql id="CategoryColumns">
+        c."分類ID", c."分類名", c."表示順", c."説明", c."所有家族学生ID", c."登録日時", c."更新日時"
+    </sql>
+
+    <!-- 見える分類: 全体の分類（所有家族学生ID が NULL）、または自分の家庭の分類 -->
+    <sql id="CategoryScope">
+        AND (c."所有家族学生ID" IS NULL
+        <if test="familyStudentId != null">
+            OR c."所有家族学生ID" = #{familyStudentId}
+        </if>
+            )
+    </sql>
+
+    <!-- 見える本: 全体書籍、または自分の家庭の書籍（本の一覧の可視条件と同じ） -->
+    <sql id="VisibleBook">
+        AND (b."公開範囲コード" = 'GLOBAL'
+        <if test="familyStudentId != null">
+            OR b."所有家族学生ID" = #{familyStudentId}
+        </if>
+            )
+    </sql>
+
+    <!-- 見える分類を 表示順 → 分類ID の順に。冊数は「見える本だけ」を数える
+         （見えない本まで数えると、本棚の一覧とタブの冊数が食い違う） -->
+    <select id="list" resultMap="CategoryMap">
+        SELECT <include refid="CategoryColumns"/>,
+               count(b."書籍ID") AS "bookCount"
+          FROM public."RED_書籍分類情報" c
+          LEFT JOIN public."RED_書籍情報" b
+                 ON b."分類ID" = c."分類ID"
+                <include refid="VisibleBook"/>
+         WHERE 1 = 1
+           <include refid="CategoryScope"/>
+         GROUP BY c."分類ID"
+         ORDER BY c."表示順" ASC, c."分類ID" ASC
+    </select>
+
+    <select id="findById" resultMap="CategoryMap">
+        SELECT <include refid="CategoryColumns"/>,
+               (SELECT count(*) FROM public."RED_書籍情報" b
+                 WHERE b."分類ID" = c."分類ID"
+                 <include refid="VisibleBook"/>) AS "bookCount"
+          FROM public."RED_書籍分類情報" c
+         WHERE c."分類ID" = #{categoryId}
+           <include refid="CategoryScope"/>
+    </select>
+
+    <!-- 名前の重複チェック（同じ持ち主の中で。修正のときは自分自身を除く） -->
+    <select id="findByName" resultMap="CategoryMap">
+        SELECT <include refid="CategoryColumns"/>,
+               0 AS "bookCount"
+          FROM public."RED_書籍分類情報" c
+         WHERE c."分類名" = #{name}
+        <choose>
+            <when test="ownerFamilyId != null">
+                AND c."所有家族学生ID" = #{ownerFamilyId}
+            </when>
+            <otherwise>
+                AND c."所有家族学生ID" IS NULL
+            </otherwise>
+        </choose>
+        <if test="excludeId != null">
+            AND c."分類ID" &lt;&gt; #{excludeId}
+        </if>
+         LIMIT 1
+    </select>
+
+    <!-- 表示順を省略したときは、同じ持ち主の中で末尾に足す -->
+    <select id="nextDisplayOrder" resultType="int">
+        SELECT COALESCE(max(c."表示順"), 0) + 1
+          FROM public."RED_書籍分類情報" c
+        <where>
+            <choose>
+                <when test="ownerFamilyId != null">
+                    c."所有家族学生ID" = #{ownerFamilyId}
+                </when>
+                <otherwise>
+                    c."所有家族学生ID" IS NULL
+                </otherwise>
+            </choose>
+        </where>
+    </select>
+
+    <select id="countBooks" resultType="long">
+        SELECT count(*)
+          FROM public."RED_書籍情報" b
+         WHERE b."分類ID" = #{categoryId}
+           <include refid="VisibleBook"/>
+    </select>
+
+    <!-- 採番した 分類ID を返す -->
+    <insert id="insert" parameterType="com.study21.user.reading.ReadingCategoryEntity"
+            useGeneratedKeys="true" keyProperty="categoryId">
+        INSERT INTO public."RED_書籍分類情報" (
+            "分類名", "表示順", "説明", "所有家族学生ID", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{name}, #{displayOrder}, #{description}, #{ownerFamilyId}, #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <update id="update" parameterType="com.study21.user.reading.ReadingCategoryEntity">
+        UPDATE public."RED_書籍分類情報"
+           SET "分類名"           = #{name},
+               "表示順"           = #{displayOrder},
+               "説明"             = #{description},
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = 'APP',
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "分類ID" = #{categoryId}
+    </update>
+
+    <!-- 本は消さない（RED_書籍情報.分類ID が ON DELETE SET NULL で NULL に戻る） -->
+    <delete id="delete">
+        DELETE FROM public."RED_書籍分類情報" WHERE "分類ID" = #{categoryId}
+    </delete>
+</mapper>

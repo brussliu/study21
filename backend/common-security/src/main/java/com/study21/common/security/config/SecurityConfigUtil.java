@@ -40,6 +40,21 @@ public final class SecurityConfigUtil {
     }
 
     public static CorsConfigurationSource corsConfigurationSource(List<String> allowedOrigins) {
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", corsConfiguration(allowedOrigins));
+        return source;
+    }
+
+    /**
+     * 画面（ブラウザ）からのリクエスト用の CORS 設定。
+     *
+     * <p>パスごとに設定を変えたいとき（例: ブラウザ拡張からの受信 API だけ別扱いにする）は
+     * これを使って {@link UrlBasedCorsConfigurationSource} へ自分で登録する。
+     * 注意: 複数の設定が同じパスに当たる場合、Spring は「一番詳しいパターン」ではなく
+     * <b>先に登録した方</b>を返す（{@code UrlBasedCorsConfigurationSource} は登録順に照合する）。
+     * 個別のパスは {@code "/**"} より先に登録すること。</p>
+     */
+    public static CorsConfiguration corsConfiguration(List<String> allowedOrigins) {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(allowedOrigins);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
@@ -47,10 +62,7 @@ public final class SecurityConfigUtil {
         // セッションCookieを利用するため。allowedOrigins は明示リストであり "*" は許可しない。
         configuration.setAllowCredentials(true);
         configuration.setMaxAge(3600L);
-
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        source.registerCorsConfiguration("/**", configuration);
-        return source;
+        return configuration;
     }
 
     private static void writeError(HttpServletResponse response, HttpStatus status, ErrorCode code) throws IOException {

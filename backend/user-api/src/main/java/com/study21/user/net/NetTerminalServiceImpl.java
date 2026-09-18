@@ -116,6 +116,21 @@ public class NetTerminalServiceImpl implements NetTerminalService {
 
     @Override
     @Transactional
+    public NetTerminalModels.TerminalMutationResult delete(UserPrincipal user, long terminalId) {
+        requireLogin(user);
+        if (terminalId <= 0) {
+            throw new ValidationException("端末を指定してください。");
+        }
+        if (terminalMapper.delete(terminalId) == 0) {
+            throw new NotFoundException("対象端末が存在しません。");
+        }
+        // 2.0 はモード変更で batL01（プロキシ再起動）を起動していたが、2.1 は batS01 が
+        // admin-api の起動時に立ち上げるため、削除でも再起動しない（DB 更新のみ）。
+        return new NetTerminalModels.TerminalMutationResult("端末を削除しました。", 1, 1);
+    }
+
+    @Override
+    @Transactional
     public NetTerminalModels.TerminalMutationResult updateMode(UserPrincipal user, long terminalId,
                                                               NetTerminalModels.ModeChangeRequest request) {
         requireLogin(user);

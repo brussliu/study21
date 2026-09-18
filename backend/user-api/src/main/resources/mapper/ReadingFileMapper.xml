@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingFileMapper">
+
+    <!-- 書籍の本文 PDF・表紙画像の管理情報（RED_書籍ファイル情報）。実体はストレージ側。 -->
+    <resultMap id="FileMap" type="com.study21.user.reading.ReadingFileEntity">
+        <id     property="fileId"       column="ファイルID"/>
+        <result property="bookId"       column="書籍ID"/>
+        <result property="fileKind"     column="ファイル区分"/>
+        <result property="originalName" column="元ファイル名称"/>
+        <result property="storedName"   column="保存ファイル名"/>
+        <result property="storedPath"   column="保存パス"/>
+        <result property="mimeType"     column="MIME_TYPE"/>
+        <result property="fileSize"     column="ファイルサイズ"/>
+        <result property="pageCount"    column="ページ数"/>
+        <result property="createdBy"    column="登録者アカウントID"/>
+        <result property="updatedBy"    column="更新者アカウントID"/>
+        <result property="createdAt"    column="登録日時"/>
+        <result property="updatedAt"    column="更新日時"/>
+    </resultMap>
+
+    <sql id="FileColumns">
+        f."ファイルID", f."書籍ID", f."ファイル区分", f."元ファイル名称", f."保存ファイル名",
+        f."保存パス", f."MIME_TYPE", f."ファイルサイズ", f."ページ数",
+        f."登録者アカウントID", f."更新者アカウントID", f."登録日時", f."更新日時"
+    </sql>
+
+    <select id="find" resultMap="FileMap">
+        SELECT <include refid="FileColumns"/>
+          FROM public."RED_書籍ファイル情報" f
+         WHERE f."書籍ID" = #{bookId}
+           AND f."ファイル区分" = #{fileKind}
+    </select>
+
+    <select id="findByBook" resultMap="FileMap">
+        SELECT <include refid="FileColumns"/>
+          FROM public."RED_書籍ファイル情報" f
+         WHERE f."書籍ID" = #{bookId}
+         ORDER BY f."ファイル区分" ASC, f."ファイルID" ASC
+    </select>
+
+    <!-- 区分ごとの**見える**本の全件（本棚のサマリ「PDF 登録済み」の集計に使う）。
+         2026-09-14 の追加: 一覧と同じ可視条件を当てないと、他家庭の本の PDF まで
+         数えてしまい「全 N 冊」と食い違う。 -->
+    <select id="findByKind" resultMap="FileMap">
+        SELECT <include refid="FileColumns"/>
+          FROM public."RED_書籍ファイル情報" f
+          JOIN public."RED_書籍情報" b ON b."書籍ID" = f."書籍ID"
+         WHERE f."ファイル区分" = #{fileKind}
+        <include refid="com.study21.user.reading.ReadingBookMapper.BookScope"/>
+        <include refid="com.study21.user.reading.ReadingBookMapper.MyShelfOnly"/>
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.reading.ReadingFileEntity"
+            useGeneratedKeys="true" keyProperty="fileId">
+        INSERT INTO public."RED_書籍ファイル情報" (
+            "書籍ID", "ファイル区分", "元ファイル名称", "保存ファイル名", "保存パス", "MIME_TYPE",
+            "ファイルサイズ", "ページ数", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{bookId}, #{fileKind}, #{originalName}, #{storedName}, #{storedPath}, #{mimeType},
+            #{fileSize}, #{pageCount}, #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <!-- 差し替え。登録元コード・登録日時・登録者 は残す（いつ誰が最初に上げたかを消さない） -->
+    <update id="update" parameterType="com.study21.user.reading.ReadingFileEntity">
+        UPDATE public."RED_書籍ファイル情報"
+           SET "元ファイル名称"   = #{originalName},
+               "保存ファイル名"   = #{storedName},
+               "保存パス"         = #{storedPath},
+               "MIME_TYPE"        = #{mimeType},
+               "ファイルサイズ"   = #{fileSize},
+               "ページ数"         = #{pageCount},
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = 'APP',
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "ファイルID" = #{fileId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."RED_書籍ファイル情報" WHERE "ファイルID" = #{fileId}
+    </delete>
+
+    <delete id="deleteByBook">
+        DELETE FROM public."RED_書籍ファイル情報" WHERE "書籍ID" = #{bookId}
+    </delete>
+</mapper>

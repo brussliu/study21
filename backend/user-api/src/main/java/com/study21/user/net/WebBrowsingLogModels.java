@@ -49,4 +49,30 @@ public final class WebBrowsingLogModels {
             int size,
             int totalPages) {
     }
+
+    /**
+     * 登録する 1 イベント（ブラウザ拡張から受信したものを、そのまま INSERT できる形にしたもの）。
+     *
+     * @param eventKey 拡張が付ける一意な ID（UUID）。再送で二重登録しないための鍵
+     */
+    public record NewEvent(
+            String eventKey,
+            String eventType,
+            String url,
+            String domain,
+            String pageTitle,
+            String referrerUrl,
+            String faviconUrl,
+            String transitionType,
+            Long tabId,
+            Long windowId,
+            String sessionId,
+            /** '1'=アクティブなタブだった / '0'=非アクティブ */
+            String activeFlag,
+            /** '1'=ブラウザ履歴の同期で入った行 / '0'=リアルタイムのイベント */
+            String historySyncFlag,
+            Timestamp visitedAt,
+            Integer staySeconds,
+            Integer viewCount) {
+    }
 }

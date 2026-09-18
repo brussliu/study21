@@ -55,7 +55,25 @@ public final class TodoModels {
     }
 
     /** 期限日ごとの件数（カレンダー）。 */
-    public record CalendarCell(LocalDate dueDate, long openCount, long doneCount) {
+    /** カレンダー用の 1 行（SQL の結果。親子は問わない）。 */
+    public record CalendarTaskRow(
+            LocalDate dueDate,
+            long todoId,
+            String title,
+            String status,
+            String priority,
+            Long parentTodoId) {
+    }
+
+    /** カレンダーのマスに出す 1 件（親子は問わない。child は親 TODO の子かどうか）。 */
+    public record CalendarTask(long todoId, String title, String status, String priority, boolean child) {
+    }
+
+    /**
+     * カレンダーのマス（1 日 = 1 セル）。
+     * 件数だけでなく**その日の TODO の中身**も返す（画面のマスに並べるため）。
+     */
+    public record CalendarCell(LocalDate dueDate, long openCount, long doneCount, List<CalendarTask> tasks) {
     }
 
     public record CalendarResult(int year, int month, List<CalendarCell> cells) {

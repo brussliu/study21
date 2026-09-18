@@ -100,4 +100,27 @@
         SELECT DISTINCT a."モデル名" FROM public."BAT_AI呼出履歴情報" a
          WHERE a."モデル名" IS NOT NULL ORDER BY 1
     </select>
+
+
+    <!--
+      AI 呼び出しの記録（2.1 で新設）。
+      設計 §3.4: 呼び出しごとに 1 行残す（成功・失敗のどちらも）。試行ごとに 1 行増えるので、
+      再試行のコストが履歴で見える。**プロンプトに画像の base64 を入れない**（表が太るため）。
+    -->
+    <insert id="insert" parameterType="com.study21.admin.batch.AiCallLogEntity"
+            useGeneratedKeys="true" keyProperty="callId">
+        INSERT INTO public."BAT_AI呼出履歴情報" (
+            "実行ID", "バッチコード", "処理キー", "言語区分", "AI区分", "モデル名", "呼出URL",
+            "HTTPステータス", "開始日時", "終了日時", "処理時間ms", "結果区分",
+            "エラーコード", "エラーメッセージ", "プロンプト", "レスポンス",
+            "入力トークン数", "出力トークン数", "合計トークン数",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{executionId}, #{batchCode}, #{processKey}, #{language}, #{aiType}, #{modelName}, #{callUrl},
+            #{httpStatus}, #{startTime}, #{endTime}, #{durationMs}, #{result},
+            #{errorCode}, #{errorMessage}, #{prompt}, #{response},
+            #{inputTokens}, #{outputTokens}, #{totalTokens},
+            #{createdBy}, COALESCE(#{sourceCode}, 'BATCH')
+        )
+    </insert>
 </mapper>

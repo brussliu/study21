@@ -13,8 +13,9 @@ import java.util.Map;
  * 機械的な命名規則では対応しないため、明示的な全件定義とする。</p>
  *
  * <p>注: DB カタログには画面に存在しない行（AI_GEMINI_*、ENGLISH_ESSAY_TITLE_*、
- * ENGLISH_READING_INTENSIVE_OCR_ARTICLE_*、ENGLISH_WORD_TEXTBOOK_AI_*）も登録されているが、
- * これらは本対応表の対象外（バッチ用・将来用）。</p>
+ * ENGLISH_READING_INTENSIVE_OCR_ARTICLE_*、ENGLISH_WORD_TEXTBOOK_AI_*、
+ * GEOMETRY_AI のうち画面に出さないキー＝System Prompt・許可コマンド・日次上限など）も
+ * 登録されているが、これらは本対応表の対象外（バッチ用・将来用）。</p>
  */
 public final class SettingPageFields {
 
@@ -51,6 +52,14 @@ public final class SettingPageFields {
         put(m, "bigmodelOcrModel",    "AI_MODEL", "AI_BIGMODEL_OCR_MODEL");
         put(m, "bigmodelOcrApiKey",   "AI_MODEL", "AI_BIGMODEL_OCR_API_KEY");
         put(m, "bigmodelOcrUrl",      "AI_MODEL", "AI_BIGMODEL_OCR_URL");
+        // STT（音声認識）も AI モデルと同じ扱いにする（利用者の指示）。
+        // 接続情報（モデル・API Key・URL）は「AIモデル」ページの専用タブで設定する
+        put(m, "googleSttModel",      "AI_MODEL", "AI_GOOGLE_STT_MODEL");
+        put(m, "googleSttApiKey",     "AI_MODEL", "AI_GOOGLE_STT_API_KEY");
+        put(m, "googleSttUrl",        "AI_MODEL", "AI_GOOGLE_STT_URL");
+        put(m, "alibabaSttModel",     "AI_MODEL", "AI_ALIBABA_STT_MODEL");
+        put(m, "alibabaSttApiKey",    "AI_MODEL", "AI_ALIBABA_STT_API_KEY");
+        put(m, "alibabaSttUrl",       "AI_MODEL", "AI_ALIBABA_STT_URL");
 
         // --- 単語翻訳発音 (TRANSLATION / VOICE) ---
         put(m, "zhWordApi",           "TRANSLATION", "ZH_WORD_TRANSLATE_API");
@@ -273,6 +282,108 @@ public final class SettingPageFields {
         put(m, "c28SystemPrompt",          "JAPANESE_WORD_AI", "BAT_C44_SYSTEM_PROMPT");
         put(m, "c28UserPrompt",            "JAPANESE_WORD_AI", "BAT_C44_USER_PROMPT");
         put(m, "c28RetryLimit",            "JAPANESE_WORD_AI", "BAT_C44_RETRY_LIMIT");
+
+        // --- AI生図・AI画図助手 (GEOMETRY_AI) ---
+        // 設定画面「図形管理」から編集できる **GEOMETRY_AI の 54 キー**（共通の 26 キー ＋ 作図モード別の
+        // 28 キー）。画面は 画像の取込・前処理（バックエンドの通常コード）・共通規則（AI 生成の 4 モードで
+        // 共通に使う値）・作図モード A〜D（batC51-A〜D。モードごとに 1 バッチ）・コマンド検証・確定
+        // （バックエンドの通常コード）・AI 画図助手（batC52。user-api が同期で呼ぶ＝バッチは通らない）に
+        // 分けて出す。
+        put(m, "geometryAiEnabled",             "GEOMETRY_AI", "GEOMETRY_AI_ENABLED");
+        put(m, "geometryAiProvider",            "GEOMETRY_AI", "GEOMETRY_AI_PROVIDER");
+        put(m, "geometryAiMaxImageMb",          "GEOMETRY_AI", "GEOMETRY_AI_MAX_IMAGE_MB");
+        put(m, "geometryAiMaxImagePixels",      "GEOMETRY_AI", "GEOMETRY_AI_MAX_IMAGE_PIXELS");
+        put(m, "geometryAiDefaultCrop",         "GEOMETRY_AI", "GEOMETRY_AI_DEFAULT_CROP");
+        put(m, "geometryAiDefaultKind",         "GEOMETRY_AI", "GEOMETRY_AI_DEFAULT_KIND");
+        put(m, "geometryAiApproval",            "GEOMETRY_AI", "GEOMETRY_AI_APPROVAL");
+        put(m, "geometryAiInstructionTemplate", "GEOMETRY_AI", "GEOMETRY_AI_INSTRUCTION_TEMPLATE");
+        put(m, "geometryAiSystemPrompt",        "GEOMETRY_AI", "GEOMETRY_AI_SYSTEM_PROMPT");
+        put(m, "geometryAiOutputFormat",        "GEOMETRY_AI", "GEOMETRY_AI_OUTPUT_FORMAT");
+        put(m, "geometryAiTemperature",         "GEOMETRY_AI", "GEOMETRY_AI_TEMPERATURE");
+        put(m, "geometryAiMaxCompletionTokens", "GEOMETRY_AI", "GEOMETRY_AI_MAX_COMPLETION_TOKENS");
+        put(m, "geometryAiRequestTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_REQUEST_TIMEOUT_SECONDS");
+        put(m, "geometryAiRetryLimit",          "GEOMETRY_AI", "GEOMETRY_AI_RETRY_LIMIT");
+        put(m, "geometryAiAllowedCommands",     "GEOMETRY_AI", "GEOMETRY_AI_ALLOWED_COMMANDS");
+        put(m, "geometryAiMaxCommands",         "GEOMETRY_AI", "GEOMETRY_AI_MAX_COMMANDS");
+        put(m, "geometryAiImageRetentionDays",  "GEOMETRY_AI", "GEOMETRY_AI_IMAGE_RETENTION_DAYS");
+        put(m, "geometryAiMaxConcurrency",      "GEOMETRY_AI", "GEOMETRY_AI_MAX_CONCURRENCY");
+        put(m, "geometryAiDailyLimitPerAccount", "GEOMETRY_AI", "GEOMETRY_AI_DAILY_LIMIT_PER_ACCOUNT");
+        // AI 生図の**作図モード**（batC51-A〜D）。モードごとに独立したバッチ・プロンプト・出力 DTO を持ち、
+        // 設定キーは GEOMETRY_AI_<モード>_<項目>（サーバー側は FigureProcessorSettings が解決する）。
+        // **空の値は「共通の設定（上の GEOMETRY_AI_* ）を継承する」**を意味するので必須ではない。
+        put(m, "geometryAiASystemPrompt",          "GEOMETRY_AI", "GEOMETRY_AI_A_SYSTEM_PROMPT");
+        put(m, "geometryAiATaskTemplate",          "GEOMETRY_AI", "GEOMETRY_AI_A_TASK_TEMPLATE");
+        put(m, "geometryAiAProvider",              "GEOMETRY_AI", "GEOMETRY_AI_A_PROVIDER");
+        put(m, "geometryAiATemperature",           "GEOMETRY_AI", "GEOMETRY_AI_A_TEMPERATURE");
+        put(m, "geometryAiAMaxCompletionTokens",   "GEOMETRY_AI", "GEOMETRY_AI_A_MAX_COMPLETION_TOKENS");
+        put(m, "geometryAiARequestTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_A_REQUEST_TIMEOUT_SECONDS");
+        put(m, "geometryAiARetryLimit",            "GEOMETRY_AI", "GEOMETRY_AI_A_RETRY_LIMIT");
+        put(m, "geometryAiBSystemPrompt",          "GEOMETRY_AI", "GEOMETRY_AI_B_SYSTEM_PROMPT");
+        put(m, "geometryAiBTaskTemplate",          "GEOMETRY_AI", "GEOMETRY_AI_B_TASK_TEMPLATE");
+        put(m, "geometryAiBProvider",              "GEOMETRY_AI", "GEOMETRY_AI_B_PROVIDER");
+        put(m, "geometryAiBTemperature",           "GEOMETRY_AI", "GEOMETRY_AI_B_TEMPERATURE");
+        put(m, "geometryAiBMaxCompletionTokens",   "GEOMETRY_AI", "GEOMETRY_AI_B_MAX_COMPLETION_TOKENS");
+        put(m, "geometryAiBRequestTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_B_REQUEST_TIMEOUT_SECONDS");
+        put(m, "geometryAiBRetryLimit",            "GEOMETRY_AI", "GEOMETRY_AI_B_RETRY_LIMIT");
+        // batC51-C（文章の条件から作図）
+        put(m, "geometryAiCSystemPrompt",          "GEOMETRY_AI", "GEOMETRY_AI_C_SYSTEM_PROMPT");
+        put(m, "geometryAiCTaskTemplate",          "GEOMETRY_AI", "GEOMETRY_AI_C_TASK_TEMPLATE");
+        put(m, "geometryAiCProvider",              "GEOMETRY_AI", "GEOMETRY_AI_C_PROVIDER");
+        put(m, "geometryAiCTemperature",           "GEOMETRY_AI", "GEOMETRY_AI_C_TEMPERATURE");
+        put(m, "geometryAiCMaxCompletionTokens",   "GEOMETRY_AI", "GEOMETRY_AI_C_MAX_COMPLETION_TOKENS");
+        put(m, "geometryAiCRequestTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_C_REQUEST_TIMEOUT_SECONDS");
+        put(m, "geometryAiCRetryLimit",            "GEOMETRY_AI", "GEOMETRY_AI_C_RETRY_LIMIT");
+        // batC51-D（文章と図を合わせて作図）
+        put(m, "geometryAiDSystemPrompt",          "GEOMETRY_AI", "GEOMETRY_AI_D_SYSTEM_PROMPT");
+        put(m, "geometryAiDTaskTemplate",          "GEOMETRY_AI", "GEOMETRY_AI_D_TASK_TEMPLATE");
+        put(m, "geometryAiDProvider",              "GEOMETRY_AI", "GEOMETRY_AI_D_PROVIDER");
+        put(m, "geometryAiDTemperature",           "GEOMETRY_AI", "GEOMETRY_AI_D_TEMPERATURE");
+        put(m, "geometryAiDMaxCompletionTokens",   "GEOMETRY_AI", "GEOMETRY_AI_D_MAX_COMPLETION_TOKENS");
+        put(m, "geometryAiDRequestTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_D_REQUEST_TIMEOUT_SECONDS");
+        put(m, "geometryAiDRetryLimit",            "GEOMETRY_AI", "GEOMETRY_AI_D_RETRY_LIMIT");
+        // AI 画図助手（作図画面の【AI 助手】。バッチを通さず user-api が同期で呼ぶ）
+        put(m, "geometryAiAssistEnabled",       "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_ENABLED");
+        put(m, "geometryAiAssistProvider",      "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_PROVIDER");
+        put(m, "geometryAiAssistSystemPrompt",  "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_SYSTEM_PROMPT");
+        put(m, "geometryAiAssistUserPrompt",    "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_USER_PROMPT");
+        put(m, "geometryAiAssistTimeoutSeconds", "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_TIMEOUT_SECONDS");
+        put(m, "geometryAiAssistMaxCommands",   "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_MAX_COMMANDS");
+        put(m, "geometryAiAssistDailyLimitPerAccount", "GEOMETRY_AI", "GEOMETRY_AI_ASSIST_DAILY_LIMIT_PER_ACCOUNT");
+
+        // --- 授業録音 / AI 授業記録 (CLASSROOM_AI) ---
+        // 設定画面「AI 授業記録（授業録音）」から編集できる **CLASSROOM_AI のカタログ全 30 キー**。
+        // 当初は 7 キーだけを許可していたが、STT 接続・言語マッピング・しきい値・保存期間・
+        // 閲覧範囲・ノート LLM のプロンプトなどが「画面に見えるのに保存できない（400）」状態に
+        // なっていたため、カタログにあるキーはすべて許可する（値は COM_設定情報 に既存）。
+        put(m, "classroomAiEnabled",             "CLASSROOM_AI", "CLASSROOM_AI_ENABLED");
+        put(m, "classroomAiSttProvider",         "CLASSROOM_AI", "CLASSROOM_AI_STT_PROVIDER");
+        put(m, "classroomAiSttModel",            "CLASSROOM_AI", "CLASSROOM_AI_STT_MODEL");
+        put(m, "classroomAiSttEndpoint",         "CLASSROOM_AI", "CLASSROOM_AI_STT_ENDPOINT");
+        put(m, "classroomAiSttApiKey",           "CLASSROOM_AI", "CLASSROOM_AI_STT_API_KEY");
+        put(m, "classroomAiSttTimeoutSeconds",   "CLASSROOM_AI", "CLASSROOM_AI_STT_TIMEOUT_SECONDS");
+        put(m, "classroomAiChunkSeconds",        "CLASSROOM_AI", "CLASSROOM_AI_CHUNK_SECONDS");
+        put(m, "classroomAiNoteEnabled",         "CLASSROOM_AI", "CLASSROOM_AI_NOTE_ENABLED");
+        put(m, "classroomAiLangZh",              "CLASSROOM_AI", "CLASSROOM_AI_LANG_ZH");
+        put(m, "classroomAiLangJa",              "CLASSROOM_AI", "CLASSROOM_AI_LANG_JA");
+        put(m, "classroomAiLangEn",              "CLASSROOM_AI", "CLASSROOM_AI_LANG_EN");
+        put(m, "classroomAiLangZhEn",            "CLASSROOM_AI", "CLASSROOM_AI_LANG_ZH_EN");
+        put(m, "classroomAiLangJaEn",            "CLASSROOM_AI", "CLASSROOM_AI_LANG_JA_EN");
+        put(m, "classroomAiLangAuto",            "CLASSROOM_AI", "CLASSROOM_AI_LANG_AUTO");
+        put(m, "classroomAiTriggerIntervalMinutes", "CLASSROOM_AI", "CLASSROOM_AI_TRIGGER_INTERVAL_MINUTES");
+        put(m, "classroomAiTriggerMinChars",     "CLASSROOM_AI", "CLASSROOM_AI_TRIGGER_MIN_CHARS");
+        put(m, "classroomAiTriggerKeywords",     "CLASSROOM_AI", "CLASSROOM_AI_TRIGGER_KEYWORDS");
+        put(m, "classroomAiTriggerCooldownMinutes", "CLASSROOM_AI", "CLASSROOM_AI_TRIGGER_COOLDOWN_MINUTES");
+        put(m, "classroomAiMaxRecordingMinutes", "CLASSROOM_AI", "CLASSROOM_AI_MAX_RECORDING_MINUTES");
+        put(m, "classroomAiDailyLimitPerAccount", "CLASSROOM_AI", "CLASSROOM_AI_DAILY_LIMIT_PER_ACCOUNT");
+        put(m, "classroomAiRetentionDays",       "CLASSROOM_AI", "CLASSROOM_AI_RETENTION_DAYS");
+        put(m, "classroomAiViewScope",           "CLASSROOM_AI", "CLASSROOM_AI_VIEW_SCOPE");
+        put(m, "classroomAiNoteProvider",        "CLASSROOM_AI", "CLASSROOM_AI_NOTE_PROVIDER");
+        put(m, "classroomAiNoteSystemPrompt",    "CLASSROOM_AI", "CLASSROOM_AI_NOTE_SYSTEM_PROMPT");
+        put(m, "classroomAiNoteUserPrompt",      "CLASSROOM_AI", "CLASSROOM_AI_NOTE_USER_PROMPT");
+        put(m, "classroomAiNoteTimeoutSeconds",  "CLASSROOM_AI", "CLASSROOM_AI_NOTE_TIMEOUT_SECONDS");
+        put(m, "classroomAiNoteMaxCompletionTokens", "CLASSROOM_AI", "CLASSROOM_AI_NOTE_MAX_COMPLETION_TOKENS");
+        put(m, "classroomAiSummarySystemPrompt", "CLASSROOM_AI", "CLASSROOM_AI_SUMMARY_SYSTEM_PROMPT");
+        put(m, "classroomAiSummaryUserPrompt",   "CLASSROOM_AI", "CLASSROOM_AI_SUMMARY_USER_PROMPT");
 
         // --- LINE連携 (LINE) ---
         put(m, "lineMessagingChannelAccessToken",     "LINE", "LINE_MESSAGING_CHANNEL_ACCESS_TOKEN");

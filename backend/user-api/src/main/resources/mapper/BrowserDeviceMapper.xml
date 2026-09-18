@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.browserext.BrowserDeviceMapper">
+
+    <!-- ブラウザ拡張が登録した端末（1 ブラウザ = 1 行）。 -->
+    <resultMap id="DeviceMap" type="com.study21.user.browserext.BrowserDeviceEntity">
+        <id     property="registrationId"   column="端末登録ID"/>
+        <result property="accountId"        column="利用者アカウントID"/>
+        <result property="deviceId"         column="端末識別子"/>
+        <result property="deviceName"       column="端末名称"/>
+        <result property="osType"           column="OS種別"/>
+        <result property="browserType"      column="ブラウザ種別"/>
+        <result property="browserVersion"   column="ブラウザバージョン"/>
+        <result property="extensionVersion" column="拡張機能バージョン"/>
+        <result property="profileId"        column="ブラウザプロファイルID"/>
+        <result property="status"           column="状態コード"/>
+        <result property="lastStartedAt"    column="最終起動日時"/>
+        <result property="lastSentAt"       column="最終送信日時"/>
+        <result property="lastHeartbeatAt"  column="最終心拍日時"/>
+        <result property="version"          column="バージョン"/>
+        <result property="createdAt"        column="登録日時"/>
+    </resultMap>
+
+    <sql id="DeviceColumns">
+        "端末登録ID", "利用者アカウントID", "端末識別子", "端末名称", "OS種別", "ブラウザ種別",
+        "ブラウザバージョン", "拡張機能バージョン", "ブラウザプロファイルID", "状態コード",
+        "最終起動日時", "最終送信日時", "最終心拍日時", "バージョン", "登録日時"
+    </sql>
+
+    <select id="findByAccountAndDevice" resultMap="DeviceMap">
+        SELECT <include refid="DeviceColumns"/>
+          FROM public."NET_ブラウザ端末情報"
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "端末識別子" = #{deviceId}
+    </select>
+
+    <select id="listByAccount" resultMap="DeviceMap">
+        SELECT <include refid="DeviceColumns"/>
+          FROM public."NET_ブラウザ端末情報"
+         WHERE "利用者アカウントID" = #{accountId}
+         ORDER BY "最終心拍日時" DESC NULLS LAST, "端末登録ID" DESC
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.browserext.BrowserDeviceEntity">
+        INSERT INTO public."NET_ブラウザ端末情報" (
+            "利用者アカウントID", "端末識別子", "端末名称", "OS種別", "ブラウザ種別",
+            "ブラウザバージョン", "拡張機能バージョン", "ブラウザプロファイルID", "状態コード",
+            "最終起動日時", "最終心拍日時", "登録元コード"
+        ) VALUES (
+            #{accountId}, #{deviceId}, #{deviceName}, #{osType}, #{browserType},
+            #{browserVersion}, #{extensionVersion}, #{profileId}, 'ACTIVE',
+            #{lastStartedAt}, #{lastHeartbeatAt}, 'BROWSER'
+        )
+    </insert>
+
+    <!-- register: 端末の情報を上書きする。届かなかった項目は NULL にせず今の値を使う。 -->
+    <update id="updateOnRegister">
+        UPDATE public."NET_ブラウザ端末情報"
+           SET "端末名称"           = COALESCE(#{entity.deviceName}, "端末名称"),
+               "OS種別"             = COALESCE(#{entity.osType}, "OS種別"),
+               "ブラウザ種別"       = COALESCE(#{entity.browserType}, "ブラウザ種別"),
+               "ブラウザバージョン" = COALESCE(#{entity.browserVersion}, "ブラウザバージョン"),
+               "拡張機能バージョン" = COALESCE(#{entity.extensionVersion}, "拡張機能バージョン"),
+               "ブラウザプロファイルID" = COALESCE(#{entity.profileId}, "ブラウザプロファイルID"),
+               "最終起動日時"       = COALESCE(#{entity.lastStartedAt}, "最終起動日時"),
+               "最終心拍日時"       = #{heartbeatAt},
+               "更新元コード"       = 'BROWSER',
+               "バージョン"         = "バージョン" + 1,
+               "更新日時"           = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{entity.accountId}
+           AND "端末識別子" = #{entity.deviceId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="touchHeartbeat">
+        UPDATE public."NET_ブラウザ端末情報"
+           SET "最終心拍日時" = #{heartbeatAt},
+               "更新元コード" = 'BROWSER',
+               "バージョン"   = "バージョン" + 1,
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "端末識別子" = #{deviceId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <!-- events: 最終送信日時を進める。空欄の端末情報はバッチのヘッダで埋める。 -->
+    <update id="touchSent">
+        UPDATE public."NET_ブラウザ端末情報"
+           SET "最終送信日時"       = #{sentAt},
+               "端末名称"           = COALESCE("端末名称", #{entity.deviceName}),
+               "ブラウザ種別"       = COALESCE("ブラウザ種別", #{entity.browserType}),
+               "ブラウザバージョン" = COALESCE("ブラウザバージョン", #{entity.browserVersion}),
+               "拡張機能バージョン" = COALESCE("拡張機能バージョン", #{entity.extensionVersion}),
+               "ブラウザプロファイルID" = COALESCE("ブラウザプロファイルID", #{entity.profileId}),
+               "更新元コード"       = 'BROWSER',
+               "バージョン"         = "バージョン" + 1,
+               "更新日時"           = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{entity.accountId}
+           AND "端末識別子" = #{entity.deviceId}
+           AND "バージョン" = #{version}
+    </update>
+</mapper>

@@ -1,0 +1,300 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.japanese.JpnTestMapper">
+
+    <!-- 単語テスト（JPN_テスト情報）。 -->
+    <resultMap id="TestMap" type="com.study21.user.japanese.JpnTestEntity">
+        <id     property="testId"          column="テストID"/>
+        <result property="legacyTestId"    column="旧テストID"/>
+        <result property="testNo"          column="テスト番号"/>
+        <result property="accountId"       column="利用者アカウントID"/>
+        <result property="testType"        column="テスト種別"/>
+        <result property="level"           column="レベル"/>
+        <result property="book"            column="書籍"/>
+        <result property="categoryFrom"    column="分類開始"/>
+        <result property="categoryTo"      column="分類終了"/>
+        <result property="difficulty"      column="難易度"/>
+        <result property="mode"            column="出題方式"/>
+        <result property="questionCount"   column="出題数"/>
+        <result property="doneCount"       column="完了出題数"/>
+        <result property="correctCount"    column="正解数"/>
+        <result property="wrongCount"      column="不正解数"/>
+        <result property="stateCode"       column="状態コード"/>
+        <result property="startedAt"       column="開始日時"/>
+        <result property="finishedAt"      column="終了日時"/>
+        <result property="lastStudiedAt"   column="最終学習日時"/>
+        <result property="activeMs"        column="有効学習時間ms"/>
+        <result property="version"         column="バージョン"/>
+    </resultMap>
+
+    <sql id="TestColumns">
+        t."テストID", t."旧テストID", t."テスト番号", t."利用者アカウントID", t."テスト種別", t."レベル",
+        t."書籍", t."分類開始", t."分類終了", t."難易度", t."出題方式", t."出題数", t."完了出題数",
+        t."正解数", t."不正解数", t."状態コード", t."開始日時", t."終了日時", t."最終学習日時",
+        t."有効学習時間ms", t."バージョン"
+    </sql>
+
+    <sql id="TestWhere">
+        WHERE t."利用者アカウントID" = #{accountId}
+        <if test="state != null and state != ''">
+            AND t."状態コード" = #{state}
+        </if>
+        <if test="testType != null and testType != ''">
+            AND t."テスト種別" = #{testType}
+        </if>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."JPN_テスト情報" t
+        <include refid="TestWhere"/>
+    </select>
+
+    <select id="search" resultMap="TestMap">
+        SELECT <include refid="TestColumns"/>
+          FROM public."JPN_テスト情報" t
+        <include refid="TestWhere"/>
+         ORDER BY t."テストID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="totals" resultType="com.study21.user.japanese.JpnTotalsEntity">
+        SELECT count(*)                                                   AS "testCount",
+               count(*) FILTER (WHERE t."状態コード" = 'COMPLETED')        AS "completedCount",
+               count(*) FILTER (WHERE t."状態コード" = 'RUNNING')          AS "runningCount",
+               COALESCE(round(avg(CASE WHEN t."完了出題数" > 0
+                                       THEN t."正解数" * 100.0 / t."完了出題数" END)
+                               FILTER (WHERE t."状態コード" = 'COMPLETED')), 0)::int AS "averageScore",
+               COALESCE(sum(t."有効学習時間ms"), 0)                        AS "totalActiveMs"
+          FROM public."JPN_テスト情報" t
+         WHERE t."利用者アカウントID" = #{accountId}
+    </select>
+
+    <select id="findById" resultMap="TestMap">
+        SELECT <include refid="TestColumns"/>
+          FROM public."JPN_テスト情報" t
+         WHERE t."テストID" = #{testId}
+    </select>
+
+    <select id="findByNo" resultType="com.study21.user.japanese.JpnTestEntity">
+        SELECT "テストID" AS "testId", "テスト番号" AS "testNo"
+          FROM public."JPN_テスト情報"
+         WHERE "テスト番号" = #{testNo}
+         LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.japanese.JpnTestEntity"
+            useGeneratedKeys="true" keyProperty="testId">
+        INSERT INTO public."JPN_テスト情報" (
+            "テスト番号", "利用者アカウントID", "テスト種別", "レベル", "書籍", "分類開始", "分類終了",
+            "難易度", "出題方式", "出題数", "完了出題数", "正解数", "不正解数", "状態コード", "開始日時",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{testNo}, #{accountId}, #{testType}, #{level}, #{book}, #{categoryFrom}, #{categoryTo},
+            #{difficulty}, #{mode}, #{questionCount}, 0, 0, 0, 'RUNNING', #{startedAt},
+            #{accountId}, 'APP'
+        )
+    </insert>
+
+    <update id="updateProgress">
+        UPDATE public."JPN_テスト情報"
+           SET "完了出題数"   = #{doneCount},
+               "正解数"       = #{correctCount},
+               "不正解数"     = #{wrongCount},
+               "状態コード"   = #{state},
+               "最終学習日時" = #{lastStudiedAt},
+               "有効学習時間ms" = #{activeMs},
+               "バージョン"   = "バージョン" + 1,
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "テストID" = #{testId}
+    </update>
+
+    <update id="updateQuestionCount">
+        UPDATE public."JPN_テスト情報"
+           SET "出題数"   = #{questionCount},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "テストID" = #{testId}
+    </update>
+
+    <update id="updateState">
+        UPDATE public."JPN_テスト情報"
+           SET "状態コード" = #{state},
+               "開始日時"   = COALESCE(#{startedAt}, "開始日時"),
+               "終了日時"   = #{finishedAt},
+               "バージョン" = "バージョン" + 1,
+               "更新日時"   = CURRENT_TIMESTAMP
+         WHERE "テストID" = #{testId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."JPN_テスト情報" WHERE "テストID" = #{testId}
+    </delete>
+
+    <!-- 出題（1 テスト = 複数の出題。問題とその語をまとめて返す） -->
+    <resultMap id="EntryMap" type="com.study21.user.japanese.JpnTestQuestionEntity">
+        <id     property="entryId"       column="出題ID"/>
+        <result property="testId"        column="テストID"/>
+        <result property="wordId"        column="単語ID"/>
+        <result property="questionId"    column="問題ID"/>
+        <result property="orderNo"       column="出題順"/>
+        <result property="entryState"    column="出題状態"/>
+        <result property="judgment"      column="最終判定"/>
+        <result property="answerCount"   column="回答回数"/>
+        <result property="wrongCount"    column="誤答回数"/>
+        <result property="activeMs"      column="有効学習時間ms"/>
+        <result property="answeredAt"    column="回答完了日時"/>
+        <result property="word"          column="見出し語"/>
+        <result property="reading"       column="読み"/>
+        <result property="questionType"  column="問題種別"/>
+        <result property="questionTextJa" column="問題文_日本語"/>
+        <result property="correctValue"  column="正解値"/>
+        <result property="explanationJa" column="解説_日本語"/>
+        <result property="difficulty"    column="難易度"/>
+        <result property="book"          column="書籍"/>
+        <result property="category"      column="分類"/>
+        <result property="snapshotJson"  column="単語スナップショットJSON"/>
+    </resultMap>
+
+    <sql id="EntryColumns">
+        e."出題ID", e."テストID", e."単語ID", e."問題ID", e."出題順", e."出題状態", e."最終判定",
+        e."回答回数", e."誤答回数", e."有効学習時間ms", e."回答完了日時",
+        w."見出し語", w."読み",
+        q."問題種別", q."問題文_日本語", q."正解値", q."解説_日本語", q."難易度",
+        e."単語スナップショットJSON"::text AS "単語スナップショットJSON",
+        col."書籍", col."分類"
+    </sql>
+
+    <select id="listEntries" resultMap="EntryMap">
+        SELECT <include refid="EntryColumns"/>
+          FROM public."JPN_テスト出題情報" e
+          JOIN public."JPN_単語情報" w ON w."単語ID" = e."単語ID"
+          LEFT JOIN public."JPN_単語問題情報" q ON q."問題ID" = e."問題ID"
+          LEFT JOIN LATERAL (
+              SELECT c."書籍", c."分類"
+                FROM public."JPN_単語収録情報" c
+               WHERE c."単語ID" = e."単語ID"
+               ORDER BY c."レベル", c."書籍", c."分類", c."単語SEQ"
+               LIMIT 1
+          ) col ON TRUE
+         WHERE e."テストID" = #{testId}
+         ORDER BY e."出題順" ASC
+    </select>
+
+    <select id="findEntry" resultMap="EntryMap">
+        SELECT <include refid="EntryColumns"/>
+          FROM public."JPN_テスト出題情報" e
+          JOIN public."JPN_単語情報" w ON w."単語ID" = e."単語ID"
+          LEFT JOIN public."JPN_単語問題情報" q ON q."問題ID" = e."問題ID"
+          LEFT JOIN LATERAL (
+              SELECT c."書籍", c."分類"
+                FROM public."JPN_単語収録情報" c
+               WHERE c."単語ID" = e."単語ID"
+               ORDER BY c."レベル", c."書籍", c."分類", c."単語SEQ"
+               LIMIT 1
+          ) col ON TRUE
+         WHERE e."テストID" = #{testId}
+           AND e."出題順" = #{orderNo}
+    </select>
+
+    <insert id="insertEntry" parameterType="com.study21.user.japanese.JpnTestQuestionEntity"
+            useGeneratedKeys="true" keyProperty="entryId">
+        INSERT INTO public."JPN_テスト出題情報" (
+            "テストID", "単語ID", "収録ID", "出題順", "問題ID", "出題状態", "単語スナップショットJSON",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{testId}, #{wordId}, #{collectionId}, #{orderNo}, #{questionId}, 'PENDING',
+            COALESCE(#{snapshotJson}, '{}')::jsonb,
+            #{accountId}, 'APP'
+        )
+    </insert>
+
+    <update id="updateEntryAnswer">
+        UPDATE public."JPN_テスト出題情報"
+           SET "問題ID"         = COALESCE("問題ID", #{questionId}),
+               "出題状態"       = #{state},
+               "最終判定"       = #{judgment},
+               "回答回数"       = #{answerCount},
+               "誤答回数"       = #{wrongCount},
+               "有効学習時間ms" = "有効学習時間ms" + #{activeMs},
+               "回答完了日時"   = #{answeredAt},
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "出題ID" = #{entryId}
+    </update>
+
+    <!-- テスト作成: 条件に合う問題から出題数ぶん選ぶ（出題方式 RANDOM ならランダム） -->
+    <select id="pickQuestions" resultType="com.study21.user.japanese.JpnQuestionEntity">
+        SELECT q."問題ID" AS "questionId", q."単語ID" AS "wordId", q."問題種別" AS "questionType",
+               q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa",
+               q."正解値" AS "correctValue", q."難易度" AS "difficulty"
+          FROM public."JPN_単語問題情報" q
+          JOIN public."JPN_単語情報" w ON w."単語ID" = q."単語ID"
+         WHERE q."状態コード" = 'ACTIVE'
+           AND w."状態コード" = 'ACTIVE'
+        <if test='"C".equals(testType)'>
+            AND q."問題種別" IN ('C1_READING', 'C2_KANJI')
+        </if>
+        <if test='"D".equals(testType)'>
+            AND q."問題種別" = 'D_CONTEXT_MEANING'
+        </if>
+        <if test='"E".equals(testType)'>
+            AND q."問題種別" = 'E_KANJI_USAGE'
+        </if>
+        <if test="difficulty != null and difficulty != '' and difficulty != 'NORMAL'">
+            AND q."難易度" = #{difficulty}
+        </if>
+        <if test="level != null and level != ''">
+            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cl
+                         WHERE cl."単語ID" = q."単語ID" AND cl."レベル" = #{level})
+        </if>
+        <if test="book != null and book != ''">
+            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cb
+                         WHERE cb."単語ID" = q."単語ID" AND cb."書籍" ILIKE '%' || #{book} || '%')
+        </if>
+        <if test="categoryFrom != null and categoryFrom != ''">
+            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cf
+                         WHERE cf."単語ID" = q."単語ID" AND cf."分類" &gt;= #{categoryFrom})
+        </if>
+        <if test="categoryTo != null and categoryTo != ''">
+            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" ct
+                         WHERE ct."単語ID" = q."単語ID" AND ct."分類" &lt;= #{categoryTo})
+        </if>
+         ORDER BY
+        <choose>
+            <when test="random">random()</when>
+            <otherwise>w."見出し語キー", q."問題種別", q."問題番号"</otherwise>
+        </choose>
+         LIMIT #{limit}
+    </select>
+
+    <select id="listChoices" resultType="com.study21.user.japanese.JpnChoiceEntity">
+        SELECT "選択肢ID" AS "choiceId", "問題ID" AS "questionId", "表示順" AS "orderNo",
+               "選択肢値" AS "value", "選択肢読み" AS "reading", "正解フラグ" AS "correct",
+               "説明_日本語" AS "descriptionJa", "説明_中国語" AS "descriptionZh"
+          FROM public."JPN_単語問題選択肢情報"
+         WHERE "問題ID" = #{questionId}
+         ORDER BY "表示順", "選択肢ID"
+    </select>
+
+    <select id="listChoicesByQuestionIds" resultType="com.study21.user.japanese.JpnChoiceEntity">
+        SELECT "選択肢ID" AS "choiceId", "問題ID" AS "questionId", "表示順" AS "orderNo",
+               "選択肢値" AS "value", "選択肢読み" AS "reading", "正解フラグ" AS "correct",
+               "説明_日本語" AS "descriptionJa", "説明_中国語" AS "descriptionZh"
+          FROM public."JPN_単語問題選択肢情報"
+         WHERE "問題ID" IN
+        <foreach collection="questionIds" item="id" open="(" separator="," close=")">#{id}</foreach>
+         ORDER BY "問題ID", "表示順", "選択肢ID"
+    </select>
+
+    <select id="findQuestionByWordAndTypes" resultType="com.study21.user.japanese.JpnQuestionEntity">
+        SELECT q."問題ID" AS "questionId", q."単語ID" AS "wordId", q."問題種別" AS "questionType",
+               q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa",
+               q."正解値" AS "correctValue", q."解説_日本語" AS "explanationJa"
+          FROM public."JPN_単語問題情報" q
+         WHERE q."単語ID" = #{wordId}
+           AND q."状態コード" = 'ACTIVE'
+           AND q."問題種別" IN
+        <foreach collection="types" item="type" open="(" separator="," close=")">#{type}</foreach>
+         ORDER BY q."問題種別", q."問題番号"
+         LIMIT 1
+    </select>
+</mapper>

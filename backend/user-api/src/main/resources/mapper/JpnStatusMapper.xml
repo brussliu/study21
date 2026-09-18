@@ -1,0 +1,320 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.japanese.JpnStatusMapper">
+
+    <!-- 勉強状況のサマリ（学習した語・習得済・お気に入り・平均習得度・回答・学習時間） -->
+    <select id="summary" resultType="com.study21.user.japanese.JpnTotalsEntity">
+        SELECT count(*)                                                        AS "wordCount",
+               count(*) FILTER (WHERE s."習得済フラグ")                          AS "learnedCount",
+               count(*) FILTER (WHERE s."お気に入りフラグ")                      AS "favoriteCount",
+               COALESCE(round(avg(s."総合習得度"), 2), 0)                       AS "averageMastery",
+               COALESCE(sum(s."回答回数"), 0)                                   AS "answeredCount",
+               COALESCE(sum(s."正解回数"), 0)                                   AS "correctCount",
+               COALESCE(sum(s."有効学習時間ms"), 0)                             AS "activeMs",
+               COALESCE((SELECT d."有効学習時間ms" FROM public."JPN_学習日次情報" d
+                          WHERE d."利用者アカウントID" = #{accountId} AND d."学習日" = #{today}), 0) AS "todayActiveMs",
+               max(s."最終学習日時")                                            AS "lastStudiedAt"
+          FROM public."JPN_学習状況情報" s
+         WHERE s."利用者アカウントID" = #{accountId}
+    </select>
+
+    <select id="listDaily" resultType="com.study21.user.japanese.JpnDailyEntity">
+        SELECT d."学習日" AS "studyDate", d."有効学習時間ms" AS "activeMs",
+               d."A学習時間ms" AS "typeAMs", d."B学習時間ms" AS "typeBMs", d."C学習時間ms" AS "typeCMs",
+               d."D学習時間ms" AS "typeDMs", d."E学習時間ms" AS "typeEMs",
+               d."学習単語数" AS "wordCount", d."完了テスト数" AS "testCount", d."完了課題数" AS "doneCount",
+               d."正解課題数" AS "correctCount", d."不正解課題数" AS "wrongCount"
+          FROM public."JPN_学習日次情報" d
+         WHERE d."利用者アカウントID" = #{accountId}
+         ORDER BY d."学習日" DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- 語別の学習状況（学習状況 + 単語 + 収録） -->
+    <resultMap id="StatusMap" type="com.study21.user.japanese.JpnStatusEntity">
+        <id     property="wordId"             column="単語ID"/>
+        <result property="word"               column="見出し語"/>
+        <result property="reading"            column="読み"/>
+        <result property="jlptLevel"          column="JLPTレベル"/>
+        <result property="partOfSpeech"       column="品詞"/>
+        <result property="book"               column="書籍"/>
+        <result property="category"           column="分類"/>
+        <result property="learnState"         column="学習状態"/>
+        <result property="mastery"            column="総合習得度"/>
+        <result property="learned"            column="習得済フラグ"/>
+        <result property="favorite"           column="お気に入りフラグ"/>
+        <result property="answeredCount"      column="回答回数"/>
+        <result property="correctCount"       column="正解回数"/>
+        <result property="wrongCount"         column="不正解回数"/>
+        <result property="streak"             column="連続正解回数"/>
+        <result property="bestStreak"         column="最大連続正解回数"/>
+        <result property="activeMs"           column="有効学習時間ms"/>
+        <result property="lastTestType"       column="最終テスト種別"/>
+        <result property="lastJudgment"       column="最終判定"/>
+        <result property="firstStudiedAt"     column="初回学習日時"/>
+        <result property="lastStudiedAt"      column="最終学習日時"/>
+        <result property="nextReviewAt"       column="次回復習日時"/>
+        <result property="reviewIntervalDays" column="復習間隔日数"/>
+    </resultMap>
+
+    <sql id="StatusColumns">
+        s."単語ID", w."見出し語", w."読み", w."JLPTレベル", w."品詞", col."書籍", col."分類",
+        s."学習状態", s."総合習得度", s."習得済フラグ", s."お気に入りフラグ", s."回答回数", s."正解回数",
+        s."不正解回数", s."連続正解回数", s."最大連続正解回数", s."有効学習時間ms", s."最終テスト種別",
+        s."最終判定", s."初回学習日時", s."最終学習日時", s."次回復習日時", s."復習間隔日数"
+    </sql>
+
+    <sql id="StatusJoins">
+        FROM public."JPN_学習状況情報" s
+        JOIN public."JPN_単語情報" w ON w."単語ID" = s."単語ID"
+        LEFT JOIN LATERAL (
+            SELECT c."書籍", c."分類"
+              FROM public."JPN_単語収録情報" c
+             WHERE c."単語ID" = s."単語ID"
+             ORDER BY c."レベル", c."書籍", c."分類", c."単語SEQ"
+             LIMIT 1
+        ) col ON TRUE
+    </sql>
+
+    <sql id="StatusWhere">
+        WHERE s."利用者アカウントID" = #{accountId}
+        <if test="learnState != null and learnState != ''">
+            AND s."学習状態" = #{learnState}
+        </if>
+        <if test="jlpt != null and jlpt != ''">
+            AND w."JLPTレベル" = #{jlpt}
+        </if>
+    </sql>
+
+    <select id="countStatuses" resultType="long">
+        SELECT count(*)
+        <include refid="StatusJoins"/>
+        <include refid="StatusWhere"/>
+    </select>
+
+    <select id="listStatuses" resultMap="StatusMap">
+        SELECT <include refid="StatusColumns"/>
+        <include refid="StatusJoins"/>
+        <include refid="StatusWhere"/>
+         ORDER BY s."最終学習日時" DESC NULLS LAST, s."単語ID" ASC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 技能別の習得 -->
+    <resultMap id="SkillMap" type="com.study21.user.japanese.JpnSkillEntity">
+        <id     property="wordId"         column="単語ID"/>
+        <result property="word"           column="見出し語"/>
+        <result property="reading"        column="読み"/>
+        <result property="testType"       column="テスト種別"/>
+        <result property="skillCode"      column="技能区分"/>
+        <result property="learnState"     column="学習状態"/>
+        <result property="mastery"        column="習得度"/>
+        <result property="answeredCount"  column="回答回数"/>
+        <result property="correctCount"   column="正解回数"/>
+        <result property="wrongCount"     column="不正解回数"/>
+        <result property="streak"         column="連続正解回数"/>
+        <result property="bestStreak"     column="最大連続正解回数"/>
+        <result property="lastJudgment"   column="最終判定"/>
+        <result property="lastStudiedAt"  column="最終学習日時"/>
+        <result property="nextReviewAt"   column="次回復習日時"/>
+    </resultMap>
+
+    <sql id="SkillWhere">
+        WHERE k."利用者アカウントID" = #{accountId}
+        <if test="testType != null and testType != ''">
+            AND k."テスト種別" = #{testType}
+        </if>
+        <if test="skill != null and skill != ''">
+            AND k."技能区分" ILIKE '%' || #{skill} || '%'
+        </if>
+    </sql>
+
+    <select id="countSkills" resultType="long">
+        SELECT count(*)
+          FROM public."JPN_技能習得情報" k
+        <include refid="SkillWhere"/>
+    </select>
+
+    <select id="listSkills" resultMap="SkillMap">
+        SELECT k."単語ID", w."見出し語", w."読み", k."テスト種別", k."技能区分", k."学習状態", k."習得度",
+               k."回答回数", k."正解回数", k."不正解回数", k."連続正解回数", k."最大連続正解回数",
+               k."最終判定", k."最終学習日時", k."次回復習日時"
+          FROM public."JPN_技能習得情報" k
+          JOIN public."JPN_単語情報" w ON w."単語ID" = k."単語ID"
+        <include refid="SkillWhere"/>
+         ORDER BY k."最終学習日時" DESC NULLS LAST, k."単語ID" ASC, k."技能区分"
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 回答したときの更新（学習状況・技能習得）。習得度と復習間隔はサービス側で計算して渡す。 -->
+    <insert id="insertStatusIfAbsent">
+        INSERT INTO public."JPN_学習状況情報" (
+            "利用者アカウントID", "単語ID", "学習状態", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{accountId}, #{wordId}, 'LEARNING', #{accountId}, 'APP'
+        )
+        ON CONFLICT ("利用者アカウントID", "単語ID") DO NOTHING
+    </insert>
+
+    <update id="updateStatusAfterAnswer">
+        UPDATE public."JPN_学習状況情報"
+           SET "回答回数"         = "回答回数" + 1,
+               "正解回数"         = "正解回数" + CASE WHEN #{correct} THEN 1 ELSE 0 END,
+               "不正解回数"       = "不正解回数" + CASE WHEN #{correct} THEN 0 ELSE 1 END,
+               "連続正解回数"     = CASE WHEN #{correct} THEN "連続正解回数" + 1 ELSE 0 END,
+               "最大連続正解回数" = GREATEST("最大連続正解回数",
+                                             CASE WHEN #{correct} THEN "連続正解回数" + 1 ELSE "連続正解回数" END),
+               "A確認回数"        = "A確認回数" + CASE WHEN #{testType} = 'A' THEN 1 ELSE 0 END,
+               "有効学習時間ms"   = "有効学習時間ms" + #{elapsedMs},
+               "初回学習日時"     = COALESCE("初回学習日時", #{now}),
+               "最終学習日時"     = #{now},
+               "最終テスト種別"   = #{testType},
+               "最終判定"         = #{judgment},
+               "次回復習日時"     = #{nextReviewAt},
+               "復習間隔日数"     = #{reviewIntervalDays},
+               "更新者アカウントID" = #{accountId},
+               "更新元コード"     = 'APP',
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "単語ID" = #{wordId}
+    </update>
+
+    <select id="findSkill" resultMap="SkillMap">
+        SELECT k."単語ID", w."見出し語", w."読み", k."テスト種別", k."技能区分", k."学習状態", k."習得度",
+               k."回答回数", k."正解回数", k."不正解回数", k."連続正解回数", k."最大連続正解回数",
+               k."最終判定", k."最終学習日時", k."次回復習日時"
+          FROM public."JPN_技能習得情報" k
+          JOIN public."JPN_単語情報" w ON w."単語ID" = k."単語ID"
+         WHERE k."利用者アカウントID" = #{accountId}
+           AND k."単語ID" = #{wordId}
+           AND k."テスト種別" = #{testType}
+           AND k."技能区分" = #{skillCode}
+    </select>
+
+    <insert id="insertSkillIfAbsent">
+        INSERT INTO public."JPN_技能習得情報" (
+            "利用者アカウントID", "単語ID", "テスト種別", "技能区分", "学習状態",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{accountId}, #{wordId}, #{testType}, #{skillCode}, 'LEARNING', #{accountId}, 'APP'
+        )
+        ON CONFLICT ("利用者アカウントID", "単語ID", "テスト種別", "技能区分") DO NOTHING
+    </insert>
+
+    <update id="updateSkillAfterAnswer">
+        UPDATE public."JPN_技能習得情報"
+           SET "習得度"           = #{mastery},
+               "学習状態"         = #{state},
+               "回答回数"         = "回答回数" + 1,
+               "正解回数"         = "正解回数" + CASE WHEN #{correct} THEN 1 ELSE 0 END,
+               "不正解回数"       = "不正解回数" + CASE WHEN #{correct} THEN 0 ELSE 1 END,
+               "連続正解回数"     = CASE WHEN #{correct} THEN "連続正解回数" + 1 ELSE 0 END,
+               "最大連続正解回数" = GREATEST("最大連続正解回数",
+                                             CASE WHEN #{correct} THEN "連続正解回数" + 1 ELSE "連続正解回数" END),
+               "最終判定"         = #{judgment},
+               "最終学習日時"     = #{now},
+               "次回復習日時"     = #{nextReviewAt},
+               "更新者アカウントID" = #{accountId},
+               "更新元コード"     = 'APP',
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "単語ID" = #{wordId}
+           AND "テスト種別" = #{testType}
+           AND "技能区分" = #{skillCode}
+    </update>
+
+    <select id="averageSkillMastery" resultType="java.math.BigDecimal">
+        SELECT round(avg(k."習得度"), 2)
+          FROM public."JPN_技能習得情報" k
+         WHERE k."利用者アカウントID" = #{accountId}
+           AND k."単語ID" = #{wordId}
+    </select>
+
+    <!--
+      2.0 と同じ規則で 学習状況 を作り直す:
+        総合習得度 = 技能の平均習得度（技能が無ければ A確認回数>0 なら 10、それ以外 0）
+        学習状態   = 平均が 80 以上なら MASTERED、直前が誤答なら REVIEW、それ以外 LEARNING
+      習得済フラグは MASTERED になった時点で立てる。
+    -->
+    <update id="refreshStatusFromSkills">
+        UPDATE public."JPN_学習状況情報" s
+           SET "総合習得度"   = COALESCE(avg_mastery.value,
+                                         CASE WHEN #{aCheckCount} > 0 THEN 10 ELSE 0 END),
+               "学習状態"     = CASE WHEN COALESCE(avg_mastery.value, 0) >= 80 THEN 'MASTERED'
+                                     WHEN #{judgment} = 'INCORRECT' THEN 'REVIEW'
+                                     ELSE 'LEARNING' END,
+               "習得済フラグ" = COALESCE(avg_mastery.value, 0) >= 80,
+               "習得日時"     = CASE WHEN COALESCE(avg_mastery.value, 0) >= 80
+                                     THEN COALESCE(s."習得日時", CURRENT_TIMESTAMP)
+                                     ELSE NULL END,
+               "更新元コード" = 'APP',
+               "更新日時"     = CURRENT_TIMESTAMP
+          FROM (
+                SELECT round(avg(k."習得度"), 2) AS value
+                  FROM public."JPN_技能習得情報" k
+                 WHERE k."利用者アカウントID" = #{accountId}
+                   AND k."単語ID" = #{wordId}
+          ) avg_mastery
+         WHERE s."利用者アカウントID" = #{accountId}
+           AND s."単語ID" = #{wordId}
+    </update>
+
+    <update id="updateFavorite">
+        UPDATE public."JPN_学習状況情報"
+           SET "お気に入りフラグ" = #{favorite},
+               "お気に入り日時"   = CASE WHEN #{favorite} THEN #{now}::timestamp ELSE NULL END,
+               "更新元コード"     = 'APP',
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "単語ID" = #{wordId}
+    </update>
+
+    <update id="updateLearned">
+        UPDATE public."JPN_学習状況情報"
+           SET "習得済フラグ" = #{learned},
+               "学習状態"     = CASE WHEN #{learned} THEN 'MASTERED'
+                                     WHEN "学習状態" = 'MASTERED' THEN 'LEARNING'
+                                     ELSE "学習状態" END,
+               "習得日時"     = CASE WHEN #{learned} THEN #{now}::timestamp ELSE NULL END,
+               "更新元コード" = 'APP',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "利用者アカウントID" = #{accountId}
+           AND "単語ID" = #{wordId}
+    </update>
+
+    <insert id="upsertDaily">
+        INSERT INTO public."JPN_学習日次情報" (
+            "利用者アカウントID", "学習日", "有効学習時間ms",
+            "A学習時間ms", "B学習時間ms", "C学習時間ms", "D学習時間ms", "E学習時間ms",
+            "完了課題数", "正解課題数", "不正解課題数", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{accountId}, #{studyDate}, #{elapsedMs},
+            CASE WHEN #{testType} = 'A' THEN #{elapsedMs} ELSE 0 END,
+            CASE WHEN #{testType} = 'B' THEN #{elapsedMs} ELSE 0 END,
+            CASE WHEN #{testType} = 'C' THEN #{elapsedMs} ELSE 0 END,
+            CASE WHEN #{testType} = 'D' THEN #{elapsedMs} ELSE 0 END,
+            CASE WHEN #{testType} = 'E' THEN #{elapsedMs} ELSE 0 END,
+            1, CASE WHEN #{correct} THEN 1 ELSE 0 END, CASE WHEN #{correct} THEN 0 ELSE 1 END,
+            #{accountId}, 'APP'
+        )
+        ON CONFLICT ("利用者アカウントID", "学習日") DO UPDATE
+           SET "有効学習時間ms" = public."JPN_学習日次情報"."有効学習時間ms" + #{elapsedMs},
+               "A学習時間ms"    = public."JPN_学習日次情報"."A学習時間ms"
+                                  + CASE WHEN #{testType} = 'A' THEN #{elapsedMs} ELSE 0 END,
+               "B学習時間ms"    = public."JPN_学習日次情報"."B学習時間ms"
+                                  + CASE WHEN #{testType} = 'B' THEN #{elapsedMs} ELSE 0 END,
+               "C学習時間ms"    = public."JPN_学習日次情報"."C学習時間ms"
+                                  + CASE WHEN #{testType} = 'C' THEN #{elapsedMs} ELSE 0 END,
+               "D学習時間ms"    = public."JPN_学習日次情報"."D学習時間ms"
+                                  + CASE WHEN #{testType} = 'D' THEN #{elapsedMs} ELSE 0 END,
+               "E学習時間ms"    = public."JPN_学習日次情報"."E学習時間ms"
+                                  + CASE WHEN #{testType} = 'E' THEN #{elapsedMs} ELSE 0 END,
+               "完了課題数"     = public."JPN_学習日次情報"."完了課題数" + 1,
+               "正解課題数"     = public."JPN_学習日次情報"."正解課題数"
+                                  + CASE WHEN #{correct} THEN 1 ELSE 0 END,
+               "不正解課題数"   = public."JPN_学習日次情報"."不正解課題数"
+                                  + CASE WHEN #{correct} THEN 0 ELSE 1 END,
+               "更新元コード"   = 'APP',
+               "更新日時"       = CURRENT_TIMESTAMP
+    </insert>
+</mapper>

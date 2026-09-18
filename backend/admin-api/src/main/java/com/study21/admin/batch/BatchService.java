@@ -17,9 +17,28 @@ public interface BatchService {
      * 画面の【再実行】。設定検証（不足なら拒否）→ 二重起動チェック → 実行 → 履歴記録。
      *
      * <p>有効／無効に関係なく実行できる（無効は「定時実行しない」の意味）。
-     * 業務処理のハンドラが未実装のバッチは拒否する。</p>
+     * 業務処理のハンドラが未実装のバッチは拒否する。種別 C（呼出）も拒否する
+     * （他の処理が工程として呼ぶバッチで、画面の一覧には【再実行】ボタンを出さない。
+     * 他の処理からの呼出は {@link #rerunStep}）。</p>
      */
     Map<String, Object> rerun(String batchCode, String operator);
+
+    /**
+     * 要求内容（`要求内容` 列の JSONB）を添えて 1 工程だけ実行する。
+     *
+     * <p>AI 生図は「1 操作 = 3 工程（batC51 → 52 → 53）」で、起動の入口（`AiFigurePipelineService`）が
+     * この 1 件ずつを順に呼ぶ。`要求内容` に `{"aiRequestId": N}` を入れるので、ハンドラは
+     * **どの要求を処理するか**を実行履歴から知れる（省略時は「未処理の最古の 1 件」を拾う）。</p>
+     *
+     * <p>`rerun` との違いは `要求内容` を渡せることだけ（有効／無効に関係なく実行できることも同じ）。</p>
+     */
+    Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson);
+
+    /**
+     * AI 生図の要求（`要求内容` の aiRequestId）に紐づく実行履歴を古い順に返す。
+     * 工程ごとの実行 ID・状態・処理時間・エラーを画面に出すために使う。
+     */
+    List<Map<String, Object>> executionsOfRequest(long aiRequestId);
 
     /**
      * admin-api の起動時に実行する対象（種別 S かつ有効なバッチ）のコード。

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.geometry.GeometryAiAssistMapper">
+
+    <!-- AI 画図助手の指示（GEO_AI画図指示情報）。1 指示 = 1 行 -->
+    <resultMap id="AiAssistMap" type="com.study21.user.geometry.GeometryAiAssistEntity">
+        <id     property="assistId"      column="画図指示ID"/>
+        <result property="figureId"      column="図形ID"/>
+        <result property="instruction"   column="指示文"/>
+        <result property="beforeXml"     column="指示前XML"/>
+        <result property="objectsSummary" column="作図オブジェクト"/>
+        <result property="failureDetail"  column="失敗の内容"/>
+        <result property="beforeXmlAvailable" column="指示前XML有無"/>
+        <result property="commands"      column="生成コマンド"/>
+        <result property="commandCount"  column="生成コマンド数"/>
+        <result property="applyKind"     column="適用区分"/>
+        <result property="mode"          column="反映区分"/>
+        <result property="description"   column="説明"/>
+        <result property="aiCallId"      column="AI呼出履歴ID"/>
+        <result property="status"        column="生成状態"/>
+        <result property="retryCount"    column="再試行回数"/>
+        <result property="errorCode"     column="エラーコード"/>
+        <result property="errorMessage"  column="エラーメッセージ"/>
+        <result property="createdBy"     column="登録者アカウントID"/>
+        <result property="updatedBy"     column="更新者アカウントID"/>
+        <result property="sourceCode"    column="登録元コード"/>
+        <result property="updateSourceCode" column="更新元コード"/>
+        <result property="createdAt"     column="登録日時"/>
+        <result property="updatedAt"     column="更新日時"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.study21.user.geometry.GeometryAiAssistEntity"
+            useGeneratedKeys="true" keyProperty="assistId">
+        INSERT INTO public."GEO_AI画図指示情報" (
+            "図形ID", "指示文", "指示前XML", "作図オブジェクト", "失敗の内容",
+            "生成コマンド", "生成コマンド数",
+            "適用区分", "反映区分", "説明", "AI呼出履歴ID", "生成状態", "再試行回数",
+            "エラーコード", "エラーメッセージ",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{figureId}, #{instruction}, #{beforeXml}, #{objectsSummary}, #{failureDetail},
+            #{commands}, #{commandCount},
+            #{applyKind}, #{mode}, #{description}, #{aiCallId}, COALESCE(#{status}, 'PENDING'),
+            COALESCE(#{retryCount}, 0), #{errorCode}, #{errorMessage},
+            #{createdBy}, #{sourceCode}
+        )
+    </insert>
+
+    <select id="findById" resultMap="AiAssistMap">
+        SELECT * FROM public."GEO_AI画図指示情報" WHERE "画図指示ID" = #{assistId}
+    </select>
+
+    <!-- 図形ごとの履歴（新しい順に LIMIT 件。サービス側で古い順に戻す）。
+         ・自分の行だけ（他人の指示は見せない）
+         ・「指示前XML」は重いので運ばず、**【戻す】に使えるかどうか**だけを返す
+           （必要になったら findById で 1 件だけ取る）。
+           `length < 2000000` は「サーバー側で切られていない」の判定
+           （アプリの BEFORE_XML_LIMIT = 2,000,000。切られた XML を読み込むと作図が壊れる）。 -->
+    <select id="findByFigure" resultMap="AiAssistMap">
+        SELECT "画図指示ID", "図形ID", "指示文",
+               NULL AS "指示前XML",
+               ("指示前XML" IS NOT NULL
+                AND btrim("指示前XML") &lt;&gt; ''
+                AND length("指示前XML") &lt; 2000000) AS "指示前XML有無",
+               "生成コマンド", "生成コマンド数",
+               "適用区分", "反映区分", "説明", "AI呼出履歴ID", "生成状態", "再試行回数",
+               "エラーコード", "エラーメッセージ",
+               "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード",
+               "登録日時", "更新日時"
+          FROM public."GEO_AI画図指示情報"
+         WHERE "図形ID" = #{figureId}
+           AND "登録者アカウントID" = #{accountId}
+         ORDER BY "画図指示ID" DESC
+         LIMIT #{limit}
+    </select>
+
+    <!-- 【反映】と【破棄】は自分の行だけを更新する（他人の指示を書き換えられない） -->
+    <update id="updateApplied">
+        UPDATE public."GEO_AI画図指示情報"
+           SET "適用区分"       = 'APPLIED',
+               "反映区分"       = #{mode},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"   = 'APP',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "画図指示ID" = #{assistId}
+           AND "登録者アカウントID" = #{operator}
+    </update>
+
+    <!-- 【反映】と【破棄】は自分の行だけを更新する（他人の指示を書き換えられない）。
+         【破棄】は「作図に反映しなかった」の記録。理由があれば残す（無ければ今のまま）。 -->
+    <update id="updateRejected">
+        UPDATE public."GEO_AI画図指示情報"
+           SET "適用区分"       = 'REJECTED',
+               "エラーメッセージ" = COALESCE(#{reason}, "エラーメッセージ"),
+               "更新者アカウントID" = #{operator},
+               "更新元コード"   = 'APP',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "画図指示ID" = #{assistId}
+           AND "登録者アカウントID" = #{operator}
+    </update>
+
+    <select id="countTodayByAccount" resultType="long">
+        SELECT count(*)
+          FROM public."GEO_AI画図指示情報"
+         WHERE "登録者アカウントID" = #{accountId}
+           AND "登録日時" &gt;= CURRENT_DATE
+    </select>
+</mapper>

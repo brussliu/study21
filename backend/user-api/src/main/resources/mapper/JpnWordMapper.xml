@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.japanese.JpnWordMapper">
+
+    <!-- 日本語の単語（母表）。収録と学習状況をまとめて返す。 -->
+    <resultMap id="WordMap" type="com.study21.user.japanese.JpnWordEntity">
+        <id     property="wordId"            column="単語ID"/>
+        <result property="legacyWordId"      column="旧単語ID"/>
+        <result property="word"              column="見出し語"/>
+        <result property="reading"           column="読み"/>
+        <result property="wordKey"           column="見出し語キー"/>
+        <result property="readingKey"        column="読みキー"/>
+        <result property="jlptLevel"         column="JLPTレベル"/>
+        <result property="partOfSpeech"      column="品詞"/>
+        <result property="stateCode"         column="状態コード"/>
+        <result property="note"              column="備考"/>
+        <result property="version"           column="バージョン"/>
+        <result property="book"              column="書籍"/>
+        <result property="category"          column="分類"/>
+        <result property="level"             column="レベル"/>
+        <result property="wordSeq"           column="単語SEQ"/>
+        <result property="collectionCount"   column="収録数"/>
+        <result property="learnState"        column="学習状態"/>
+        <result property="mastery"           column="総合習得度"/>
+        <result property="answeredCount"     column="回答回数"/>
+        <result property="correctCount"      column="正解回数"/>
+        <result property="favorite"          column="お気に入りフラグ"/>
+        <result property="learned"           column="習得済フラグ"/>
+        <result property="lastStudiedAt"     column="最終学習日時"/>
+        <result property="nextReviewAt"      column="次回復習日時"/>
+    </resultMap>
+
+    <sql id="WordColumns">
+        w."単語ID", w."旧単語ID", w."見出し語", w."読み", w."見出し語キー", w."読みキー",
+        w."JLPTレベル", w."品詞", w."状態コード", w."備考", w."バージョン",
+        col."書籍", col."分類", col."レベル", col."単語SEQ", COALESCE(col."収録数", 0) AS "収録数",
+        COALESCE(s."学習状態", 'NOT_STARTED') AS "学習状態",
+        COALESCE(s."総合習得度", 0) AS "総合習得度",
+        COALESCE(s."回答回数", 0) AS "回答回数",
+        COALESCE(s."正解回数", 0) AS "正解回数",
+        COALESCE(s."お気に入りフラグ", false) AS "お気に入りフラグ",
+        COALESCE(s."習得済フラグ", false) AS "習得済フラグ",
+        s."最終学習日時", s."次回復習日時"
+    </sql>
+
+    <!-- 教材のどこに載っているかは 1 語につき 1 件だけ出す（残りは 収録数 で示す） -->
+    <sql id="WordJoins">
+        FROM public."JPN_単語情報" w
+        LEFT JOIN public."JPN_学習状況情報" s
+               ON s."単語ID" = w."単語ID" AND s."利用者アカウントID" = #{accountId}
+        LEFT JOIN LATERAL (
+            SELECT c."書籍", c."分類", c."レベル", c."単語SEQ", count(*) OVER () AS "収録数"
+              FROM public."JPN_単語収録情報" c
+             WHERE c."単語ID" = w."単語ID"
+             ORDER BY c."レベル", c."書籍", c."分類", c."単語SEQ"
+             LIMIT 1
+        ) col ON TRUE
+    </sql>
+
+    <sql id="WordWhere">
+        <where>
+            <if test="keyword != null and keyword != ''">
+                AND (w."見出し語" ILIKE '%' || #{keyword} || '%' OR w."見出し語キー" ILIKE '%' || #{keyword} || '%')
+            </if>
+            <if test="reading != null and reading != ''">
+                AND (w."読み" ILIKE '%' || #{reading} || '%' OR w."読みキー" ILIKE '%' || #{reading} || '%')
+            </if>
+            <if test="jlpt != null and jlpt != ''">
+                AND w."JLPTレベル" = #{jlpt}
+            </if>
+            <if test="part != null and part != ''">
+                AND COALESCE(w."品詞", '') ILIKE '%' || #{part} || '%'
+            </if>
+            <if test="state != null and state != ''">
+                AND w."状態コード" = #{state}
+            </if>
+            <if test="learnState != null and learnState != ''">
+                AND COALESCE(s."学習状態", 'NOT_STARTED') = #{learnState}
+            </if>
+            <if test="book != null and book != ''">
+                AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cb
+                             WHERE cb."単語ID" = w."単語ID" AND cb."書籍" ILIKE '%' || #{book} || '%')
+            </if>
+            <if test="category != null and category != ''">
+                AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cc
+                             WHERE cc."単語ID" = w."単語ID" AND cc."分類" ILIKE '%' || #{category} || '%')
+            </if>
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+        <include refid="WordJoins"/>
+        <include refid="WordWhere"/>
+    </select>
+
+    <select id="search" resultMap="WordMap">
+        SELECT <include refid="WordColumns"/>
+        <include refid="WordJoins"/>
+        <include refid="WordWhere"/>
+         ORDER BY w."見出し語キー" ASC, w."単語ID" ASC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="totals" resultType="com.study21.user.japanese.JpnTotalsEntity">
+        SELECT count(*)                                              AS "wordCount",
+               count(*) FILTER (WHERE COALESCE(s."習得済フラグ", false)) AS "learnedCount",
+               count(*) FILTER (WHERE COALESCE(s."お気に入りフラグ", false)) AS "favoriteCount",
+               COALESCE(round(avg(s."総合習得度") FILTER (WHERE s."総合習得度" IS NOT NULL), 2), 0) AS "averageMastery",
+               COALESCE(sum(s."回答回数"), 0)                         AS "answeredCount"
+          FROM public."JPN_単語情報" w
+          LEFT JOIN public."JPN_学習状況情報" s
+                 ON s."単語ID" = w."単語ID" AND s."利用者アカウントID" = #{accountId}
+    </select>
+
+    <select id="findById" resultMap="WordMap">
+        SELECT <include refid="WordColumns"/>
+        <include refid="WordJoins"/>
+         WHERE w."単語ID" = #{wordId}
+    </select>
+
+    <select id="findByWordAndReading" resultType="com.study21.user.japanese.JpnWordEntity">
+        SELECT "単語ID" AS "wordId", "見出し語" AS "word", "読み" AS "reading"
+          FROM public."JPN_単語情報"
+         WHERE "見出し語" = #{word} AND "読み" = #{reading}
+         LIMIT 1
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.japanese.JpnWordEntity"
+            useGeneratedKeys="true" keyProperty="wordId">
+        INSERT INTO public."JPN_単語情報" (
+            "見出し語", "読み", "見出し語キー", "読みキー", "JLPTレベル", "品詞", "状態コード", "備考",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{word}, #{reading}, #{wordKey}, #{readingKey}, #{jlptLevel}, #{partOfSpeech}, #{stateCode}, #{note},
+            #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <update id="update" parameterType="com.study21.user.japanese.JpnWordEntity">
+        UPDATE public."JPN_単語情報"
+           SET "見出し語"         = #{word},
+               "読み"             = #{reading},
+               "見出し語キー"     = #{wordKey},
+               "読みキー"         = #{readingKey},
+               "JLPTレベル"       = #{jlptLevel},
+               "品詞"             = #{partOfSpeech},
+               "状態コード"       = #{stateCode},
+               "備考"             = #{note},
+               "更新者アカウントID" = #{updatedBy},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "単語ID" = #{wordId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM public."JPN_単語情報" WHERE "単語ID" = #{wordId}
+    </delete>
+
+    <select id="listCollections" resultType="com.study21.user.japanese.JpnCollectionEntity">
+        SELECT "収録ID" AS "collectionId", "単語ID" AS "wordId", "レベル" AS "level", "書籍" AS "book",
+               "分類" AS "category", "単語SEQ" AS "wordSeq", "掲載見出し語" AS "listedWord",
+               "掲載読み" AS "listedReading", "掲載品詞" AS "listedPartOfSpeech",
+               "掲載中国語意味" AS "chineseMeaning"
+          FROM public."JPN_単語収録情報"
+         WHERE "単語ID" = #{wordId}
+         ORDER BY "レベル", "書籍", "分類", "単語SEQ"
+    </select>
+
+    <select id="listQuestions" resultType="com.study21.user.japanese.JpnQuestionEntity">
+        SELECT q."問題ID" AS "questionId", q."単語ID" AS "wordId", q."問題種別" AS "questionType",
+               q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa", q."正解値" AS "correctValue",
+               (SELECT count(*) FROM public."JPN_単語問題選択肢情報" c WHERE c."問題ID" = q."問題ID") AS "choiceCount"
+          FROM public."JPN_単語問題情報" q
+         WHERE q."単語ID" = #{wordId}
+         ORDER BY q."問題種別", q."問題番号", q."問題ID"
+    </select>
+
+    <select id="findDetail" resultType="com.study21.user.japanese.JpnWordDetailEntity">
+        SELECT "詳細ID" AS "detailId", "単語ID" AS "wordId", "内容版数" AS "contentVersion",
+               "詳細JSON"::text AS "detailJson", "AIプロバイダ" AS "aiProvider", "AIモデル" AS "aiModel",
+               "取得日時" AS "fetchedAt"
+          FROM public."JPN_単語詳細情報"
+         WHERE "単語ID" = #{wordId}
+         LIMIT 1
+    </select>
+</mapper>

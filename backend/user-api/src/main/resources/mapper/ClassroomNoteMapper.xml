@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomNoteMapper">
+
+    <resultMap id="NoteMap" type="com.study21.user.classroom.ClassroomNoteEntity">
+        <id     property="noteId"          column="授業ノートID"/>
+        <result property="recordId"        column="授業記録ID"/>
+        <result property="kind"            column="種別"/>
+        <result property="phaseNo"         column="フェーズ番号"/>
+        <result property="startSeq"        column="対象開始連番"/>
+        <result property="endSeq"          column="対象終了連番"/>
+        <result property="noteJson"        column="ノートJSON"/>
+        <result property="status"          column="生成状態"/>
+        <result property="aiCallId"        column="AI呼出履歴ID"/>
+        <result property="errorCode"       column="エラーコード"/>
+        <result property="errorMessage"    column="エラーメッセージ"/>
+        <result property="retryCount"      column="再試行回数"/>
+        <result property="version"         column="バージョン"/>
+        <result property="createdBy"       column="登録者アカウントID"/>
+        <result property="updatedBy"       column="更新者アカウントID"/>
+        <result property="sourceCode"      column="登録元コード"/>
+        <result property="updateSourceCode" column="更新元コード"/>
+        <result property="createdAt"       column="登録日時"/>
+        <result property="updatedAt"       column="更新日時"/>
+    </resultMap>
+
+    <sql id="NoteColumns">
+        "授業ノートID", "授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番",
+        "ノートJSON"::text AS "ノートJSON", "生成状態", "AI呼出履歴ID", "エラーコード", "エラーメッセージ",
+        "再試行回数", "バージョン", "登録者アカウントID", "更新者アカウントID",
+        "登録元コード", "更新元コード", "登録日時", "更新日時"
+    </sql>
+
+    <insert id="insert" parameterType="com.study21.user.classroom.ClassroomNoteEntity"
+            useGeneratedKeys="true" keyProperty="noteId">
+        INSERT INTO public."CR_授業ノート情報" (
+            "授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番",
+            "生成状態", "再試行回数", "バージョン", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{recordId}, #{kind}, #{phaseNo}, #{startSeq}, #{endSeq},
+            COALESCE(#{status}, 'PENDING'), 0, 1, #{createdBy}, COALESCE(#{sourceCode}, 'APP')
+        )
+    </insert>
+
+    <select id="findLastPhase" resultMap="NoteMap">
+        SELECT <include refid="NoteColumns"/>
+          FROM public."CR_授業ノート情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "種別" = 'PHASE'
+         ORDER BY "フェーズ番号" DESC, "授業ノートID" DESC
+         LIMIT 1
+    </select>
+
+    <select id="findByRecord" resultMap="NoteMap">
+        SELECT <include refid="NoteColumns"/>
+          FROM public."CR_授業ノート情報"
+         WHERE "授業記録ID" = #{recordId}
+         ORDER BY "種別", "フェーズ番号", "授業ノートID"
+    </select>
+</mapper>

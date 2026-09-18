@@ -62,4 +62,28 @@
          ORDER BY h."アクセス日時" DESC, h."閲覧履歴ID" DESC
          LIMIT #{limit} OFFSET #{offset}
     </select>
+
+    <!--
+      ブラウザ拡張から受信したイベントの一括登録（1 バッチ = 複数行の INSERT）。
+      同じ 端末識別子 + イベント識別子 があれば ON CONFLICT で飛ばす（拡張の再送対策）。
+      イベント識別子 が NULL の行（2.0 からの移行データ）は衝突しない。
+    -->
+    <insert id="insertBatch">
+        INSERT INTO public."NET_Web閲覧履歴情報" (
+            "利用者アカウントID", "端末識別子", "端末名称", "ブラウザ種別", "ブラウザプロファイルID",
+            "タブID", "ウィンドウID", "セッションID", "イベント種別", "URL", "ドメイン",
+            "ページタイトル", "リファラーURL", "ファビコンURL", "ページ遷移種別",
+            "アクティブフラグ", "履歴同期元フラグ", "アクセス日時", "滞在秒数", "閲覧回数",
+            "イベント識別子", "登録元コード", "更新元コード", "登録者アカウントID", "更新者アカウントID"
+        )
+        VALUES
+        <foreach collection="events" item="e" separator=",">
+            (#{accountId}, #{terminalId}, #{terminalName}, #{browserType}, #{profileId},
+             #{e.tabId}, #{e.windowId}, #{e.sessionId}, #{e.eventType}, #{e.url}, #{e.domain},
+             #{e.pageTitle}, #{e.referrerUrl}, #{e.faviconUrl}, #{e.transitionType},
+             #{e.activeFlag}, #{e.historySyncFlag}, #{e.visitedAt}, #{e.staySeconds}, #{e.viewCount},
+             #{e.eventKey}, 'BROWSER', 'BROWSER', NULL, NULL)
+        </foreach>
+        ON CONFLICT ("端末識別子", "イベント識別子") DO NOTHING
+    </insert>
 </mapper>

@@ -171,6 +171,26 @@ class NetControlRepositoryTest {
     }
 
     @Test
+    void terminalCanBeDeleted() {
+        // 一時的に 1 台登録してから削除する（テストはロールバックするので DB は汚れない）
+        String ip = "192.168.0.240";
+        var created = terminalService.create(guardian(), new NetTerminalModels.TerminalSaveRequest(
+                ip, "削除テスト端末", "T", "1", "E2E 削除", null));
+        assertThat(created.message()).contains("登録しました");
+        long terminalId = terminalService.search(guardian(),
+                        new NetTerminalService.NetTerminalSearchQuery(null, null, ip, 1, 50))
+                .items().get(0).terminalId();
+        assertThat(terminalMapper.findById(terminalId)).isNotNull();
+
+        var deleted = terminalService.delete(guardian(), terminalId);
+
+        assertThat(deleted.message()).contains("削除しました");
+        assertThat(terminalMapper.findById(terminalId)).isNull();
+        // 他の端末は消えていない（移行済みの 5 台）
+        assertThat(terminalMapper.count(null, null, null)).isEqualTo(5);
+    }
+
+    @Test
     void siteUrlSortGroupsSubdomainsWithTheirParentDomain() {
         // 同じサイトの親ドメインとサブドメイン、別サイト（gakken）を一時的に作る
         List<String> hosts = List.of("google.com", "accounts.google.com", "mail.google.com",

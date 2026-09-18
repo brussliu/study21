@@ -30,5 +30,46 @@
         <maven.compiler.release>21</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <!-- AI（LLM）呼び出しのフレームワーク。バージョンは BOM で 1 か所に集約する -->
+        <langchain4j.version>1.20.0</langchain4j.version>
+        <!-- AI の出力 DTO（@Schema）と、そこから JSON Schema を生成するライブラリ。
+             victools は 4.x 系（Jackson 2 ベース。5.x は Jackson 3 なのでこのリポジトリでは使えない）。 -->
+        <victools.version>4.38.0</victools.version>
+        <swagger-annotations.version>2.2.55</swagger-annotations.version>
     </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <!-- LangChain4j のモジュール（core / open-ai / http-client など）の版を揃える -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-bom</artifactId>
+                <version>${langchain4j.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- AI 出力 DTO の @Schema（swagger のアノテーションだけを使う。springdoc は入れない） -->
+            <dependency>
+                <groupId>io.swagger.core.v3</groupId>
+                <artifactId>swagger-annotations-jakarta</artifactId>
+                <version>${swagger-annotations.version}</version>
+            </dependency>
+            <!-- DTO → JSON Schema の生成（@Schema の説明・required・enum を反映する） -->
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-generator</artifactId>
+                <version>${victools.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-swagger-2</artifactId>
+                <version>${victools.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.github.victools</groupId>
+                <artifactId>jsonschema-module-jackson</artifactId>
+                <version>${victools.version}</version>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 </project>

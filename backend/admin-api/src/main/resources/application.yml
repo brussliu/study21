@@ -39,6 +39,23 @@ app:
 study21:
   cors:
     allowed-origins: "${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174}"
+  geometry-ai:
+    # AI 生図の画像（元画像と切り抜き画像）の置き場。
+    # user-api が元画像を書き、ここのバッチ（batC51/52/53）が読んで切り抜き画像を書く。
+    # 配備では両サービスに**同じボリューム**を割り当てる（docker-compose.yml を参照）。
+    storage-root: "${STUDY21_GEOMETRY_AI_STORAGE_ROOT:${user.dir}/data/geometry-ai}"
+    # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
+    stub: "${STUDY21_GEOMETRY_AI_STUB:false}"
+    # AI を呼ぶ実装。langchain4j（既定。LangChain4j の OpenAiChatModel）/ http（従来の
+    # java.net.http.HttpClient。LangChain4j で問題が出たときの切り戻し用）
+    client: "${STUDY21_GEOMETRY_AI_CLIENT:langchain4j}"
+  classroom:
+    # 授業録音の音声の置き場。user-api が書いた音声を、ここのバッチ（batR02 の掃除）が読んで消す。
+    # 配備では両サービスに**同じボリューム**を割り当てる（geometry-ai と同じ考え方）。
+    storage-root: "${STUDY21_CLASSROOM_STORAGE_ROOT:${user.dir}/data/classroom}"
+  classroom-ai:
+    # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
+    stub: "${STUDY21_CLASSROOM_AI_STUB:false}"
   log:
     # 出力先。コンテナ内は /app/logs（NAS 側の logs/ をマウントする）。
     dir: ${STUDY21_LOG_DIR:logs}

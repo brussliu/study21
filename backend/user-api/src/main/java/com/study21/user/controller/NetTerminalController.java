@@ -6,6 +6,7 @@ import com.study21.user.net.NetTerminalService;
 import com.study21.user.security.UserPrincipal;
 import jakarta.validation.Valid;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -66,6 +67,15 @@ public class NetTerminalController {
     }
 
     /** 1 台のモードを変更する。 */
+    /** 端末を削除する。 */
+    @DeleteMapping("/{terminalId}")
+    public ApiResponse<NetTerminalModels.TerminalMutationResult> delete(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long terminalId) {
+        return ApiResponse.ok(netTerminalService.delete(user, terminalId),
+                "端末を削除しました。");
+    }
+
     @PostMapping("/{terminalId}/mode")
     public ApiResponse<NetTerminalModels.TerminalMutationResult> updateMode(
             @AuthenticationPrincipal UserPrincipal user,

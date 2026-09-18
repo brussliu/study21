@@ -1,5 +1,7 @@
 package com.study21.admin.setting;
 
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -11,6 +13,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -26,10 +29,28 @@ public class SettingsServiceImpl implements SettingsService {
 
     private final SettingCatalogMapper catalogMapper;
     private final SettingValueMapper valueMapper;
+    /** ドメイン固有の検証（プロンプトの変数など）。無い構成でも動く。 */
+    private final List<SettingValueValidator> valueValidators;
 
-    public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper) {
+    /**
+     * Spring が使う入口。
+     *
+     * <p>検証は**あっても無くても動く**（{@link ObjectProvider} で受ける）。実装が 1 つも無い配備で
+     * 起動に失敗しないようにするため（型・有効値の検証はここで必ず行う）。</p>
+     */
+    @Autowired
+    public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper,
+                               ObjectProvider<SettingValueValidator> valueValidators) {
+        this(catalogMapper, valueMapper,
+                valueValidators == null ? List.of() : valueValidators.orderedStream().toList());
+    }
+
+    /** 検証を明示的に渡す入口（テストと、検証を持たない構成）。 */
+    public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper,
+                               List<SettingValueValidator> valueValidators) {
         this.catalogMapper = catalogMapper;
         this.valueMapper = valueMapper;
+        this.valueValidators = valueValidators == null ? List.of() : valueValidators;
     }
 
     @Override
@@ -94,6 +115,15 @@ public class SettingsServiceImpl implements SettingsService {
     }
 
     @Override
+    public Optional<String> findGlobal(String pageCode, String settingKey) {
+        SettingValueEntity value = valueMapper.findGlobal(pageCode, settingKey);
+        if (value == null || isBlank(value.getSettingValue())) {
+            return Optional.empty();
+        }
+        return Optional.of(value.getSettingValue().trim());
+    }
+
+    @Override
     public List<SettingValueEntity> listByScope(SettingScope scope, String studentId, String parentId) {
         return valueMapper.findByScope(scope.name(), studentId, parentId);
     }
@@ -105,6 +135,14 @@ public class SettingsServiceImpl implements SettingsService {
 
     @Override
     public void saveGlobal(String pageCode, String settingKey, String value, String note, String operator) {
+        String trimmed = value == null ? null : value.trim();
+        if (trimmed != null && !trimmed.isEmpty()) {
+            Optional<String> problem = domainProblem(pageCode, settingKey, trimmed);
+            if (problem.isPresent()) {
+                throw new SettingsValidationException(List.of(invalid("設定ページ", pageCode, settingKey,
+                        problem.get())));
+            }
+        }
         SettingValueEntity existing = valueMapper.findGlobal(pageCode, settingKey);
         String operatorId = operator == null || operator.isBlank() ? "admin-api" : operator.trim();
 
@@ -112,11 +150,27 @@ public class SettingsServiceImpl implements SettingsService {
         entity.setPageCode(pageCode);
         entity.setSettingKey(settingKey);
         entity.setScope(SettingScope.GLOBAL.name());
-        entity.setSettingValue(value == null ? null : value.trim());
+        entity.setSettingValue(trimmed);
         entity.setNote(note);
         entity.setCreatedBy(existing == null ? operatorId : null);
         entity.setUpdatedBy(operatorId);
         valueMapper.upsertGlobal(entity);
+    }
+
+    /**
+     * ドメイン固有の検証を順に当てる（最初に見つかった理由を返す）。
+     *
+     * <p>画面の保存は 1 回の送信で複数のキーをまとめて保存するので、**1 つでも問題があれば
+     * 何も保存しない**（{@link #saveGlobalSettingFields} が最後に例外を投げる）。</p>
+     */
+    private Optional<String> domainProblem(String pageCode, String settingKey, String value) {
+        for (SettingValueValidator validator : valueValidators) {
+            Optional<String> problem = validator.validate(pageCode, settingKey, value);
+            if (problem.isPresent()) {
+                return problem;
+            }
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -183,6 +237,11 @@ public class SettingsServiceImpl implements SettingsService {
                         normalized = validate("設定ページ", pageCode, ref.settingKey(), type, catalog.getAllowedValues(), raw);
                     } catch (IllegalArgumentException e) {
                         errors.add(invalid("設定ページ", pageCode, ref.settingKey(), e.getMessage()));
+                        continue;
+                    }
+                    Optional<String> problem = domainProblem(pageCode, ref.settingKey(), normalized);
+                    if (problem.isPresent()) {
+                        errors.add(invalid("設定ページ", pageCode, ref.settingKey(), problem.get()));
                         continue;
                     }
                 }

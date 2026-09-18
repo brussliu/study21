@@ -147,6 +147,13 @@ class TodoRepositoryTest {
         assertThat(calendar.cells()).anySatisfy(cell -> {
             assertThat(cell.dueDate()).isEqualTo(LocalDate.of(2026, 12, 31));
             assertThat(cell.openCount()).isGreaterThanOrEqualTo(1);
+            // 件数だけでなく、その日の TODO の中身（タイトル・状態・優先度）も返す
+            assertThat(cell.tasks()).isNotEmpty();
+            assertThat(cell.tasks()).anySatisfy(task -> {
+                assertThat(task.title()).contains(TITLE);
+                assertThat(task.status()).isIn(TodoModels.STATUSES);
+                assertThat(task.priority()).isIn(TodoModels.PRIORITIES);
+            });
         });
         assertThat(todoId).isPositive();
     }

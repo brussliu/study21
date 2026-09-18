@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomSegmentMapper">
+
+    <resultMap id="SegmentMap" type="com.study21.user.classroom.ClassroomSegmentEntity">
+        <id     property="segmentId"         column="転写セグメントID"/>
+        <result property="recordId"          column="授業記録ID"/>
+        <result property="seq"               column="連番"/>
+        <result property="startOffsetSeconds" column="開始オフセット秒"/>
+        <result property="endOffsetSeconds"  column="終了オフセット秒"/>
+        <result property="speaker"           column="話者ラベル"/>
+        <result property="utteranceKey"      column="発話キー"/>
+        <result property="source"            column="音源"/>
+        <result property="text"              column="原文テキスト"/>
+        <result property="language"          column="言語"/>
+        <result property="createdAt"         column="登録日時"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.study21.user.classroom.ClassroomSegmentEntity"
+            useGeneratedKeys="true" keyProperty="segmentId">
+        INSERT INTO public."CR_授業転写セグメント情報" (
+            "授業記録ID", "連番", "開始オフセット秒", "終了オフセット秒", "話者ラベル",
+            "発話キー", "音源", "原文テキスト", "言語"
+        ) VALUES (
+            #{recordId}, #{seq}, #{startOffsetSeconds}, #{endOffsetSeconds}, #{speaker},
+            #{utteranceKey}, #{source}, #{text}, #{language}
+        )
+    </insert>
+
+    <select id="findByUtteranceKey" resultMap="SegmentMap">
+        SELECT "転写セグメントID", "授業記録ID", "連番", "開始オフセット秒", "終了オフセット秒",
+               "話者ラベル", "発話キー", "音源", "原文テキスト", "言語", "登録日時"
+          FROM public."CR_授業転写セグメント情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "発話キー" = #{utteranceKey}
+    </select>
+
+    <update id="updateByUtterance">
+        UPDATE public."CR_授業転写セグメント情報"
+           SET "開始オフセット秒" = #{startOffsetSeconds},
+               "終了オフセット秒" = #{endOffsetSeconds},
+               "原文テキスト" = #{text},
+               "言語" = #{language}
+         WHERE "転写セグメントID" = #{segmentId}
+    </update>
+
+    <select id="maxSeq" resultType="int">
+        SELECT COALESCE(MAX("連番"), 0)
+          FROM public."CR_授業転写セグメント情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <select id="findByRecordAfter" resultMap="SegmentMap">
+        SELECT "転写セグメントID", "授業記録ID", "連番", "開始オフセット秒", "終了オフセット秒",
+               "話者ラベル", "発話キー", "音源", "原文テキスト", "言語", "登録日時"
+          FROM public."CR_授業転写セグメント情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "連番" &gt; #{afterSeq}
+         ORDER BY "連番"
+    </select>
+
+    <select id="findByRecord" resultMap="SegmentMap">
+        SELECT "転写セグメントID", "授業記録ID", "連番", "開始オフセット秒", "終了オフセット秒",
+               "話者ラベル", "発話キー", "音源", "原文テキスト", "言語", "登録日時"
+          FROM public."CR_授業転写セグメント情報"
+         WHERE "授業記録ID" = #{recordId}
+         ORDER BY "連番"
+    </select>
+</mapper>

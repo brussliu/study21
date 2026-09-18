@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.classroomai.ClassroomNoteMapper">
+
+    <resultMap id="NoteMap" type="com.study21.admin.classroomai.ClassroomNoteEntity">
+        <id     property="noteId"          column="授業ノートID"/>
+        <result property="recordId"        column="授業記録ID"/>
+        <result property="kind"            column="種別"/>
+        <result property="phaseNo"         column="フェーズ番号"/>
+        <result property="startSeq"        column="対象開始連番"/>
+        <result property="endSeq"          column="対象終了連番"/>
+        <result property="noteJson"        column="ノートJSON"/>
+        <result property="status"          column="生成状態"/>
+        <result property="aiCallId"        column="AI呼出履歴ID"/>
+        <result property="errorCode"       column="エラーコード"/>
+        <result property="errorMessage"    column="エラーメッセージ"/>
+        <result property="retryCount"      column="再試行回数"/>
+        <result property="version"         column="バージョン"/>
+        <result property="createdBy"       column="登録者アカウントID"/>
+        <result property="createdAt"       column="登録日時"/>
+        <result property="updatedAt"       column="更新日時"/>
+    </resultMap>
+
+    <sql id="NoteColumns">
+        "授業ノートID", "授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番",
+        "ノートJSON"::text AS "ノートJSON", "生成状態", "AI呼出履歴ID", "エラーコード", "エラーメッセージ",
+        "再試行回数", "バージョン", "登録者アカウントID", "登録日時", "更新日時"
+    </sql>
+
+    <select id="findById" resultMap="NoteMap">
+        SELECT <include refid="NoteColumns"/>
+          FROM public."CR_授業ノート情報"
+         WHERE "授業ノートID" = #{noteId}
+    </select>
+
+    <select id="findPhaseTarget" resultMap="NoteMap">
+        SELECT <include refid="NoteColumns"/>
+          FROM public."CR_授業ノート情報"
+         WHERE "種別" = 'PHASE'
+           AND "生成状態" IN ('PENDING','GENERATING')
+         ORDER BY "登録日時", "授業ノートID"
+         LIMIT 1
+    </select>
+
+    <select id="findFinalTarget" resultMap="NoteMap">
+        SELECT <include refid="NoteColumns"/>
+          FROM public."CR_授業ノート情報"
+         WHERE "種別" = 'FINAL'
+           AND "生成状態" IN ('PENDING','GENERATING')
+         ORDER BY "登録日時", "授業ノートID"
+         LIMIT 1
+    </select>
+
+    <update id="markGenerating">
+        UPDATE public."CR_授業ノート情報"
+           SET "生成状態"     = 'GENERATING',
+               "バージョン"   = "バージョン" + 1,
+               "更新元コード" = 'BATCH',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "授業ノートID" = #{noteId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateReady">
+        UPDATE public."CR_授業ノート情報"
+           SET "生成状態"       = 'READY',
+               "ノートJSON"     = #{noteJson}::jsonb,
+               "AI呼出履歴ID"   = #{aiCallId},
+               "エラーコード"   = NULL,
+               "エラーメッセージ" = NULL,
+               "バージョン"     = "バージョン" + 1,
+               "更新元コード"   = 'BATCH',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "授業ノートID" = #{noteId}
+           AND "バージョン" = #{version}
+    </update>
+
+    <update id="updateFailed">
+        UPDATE public."CR_授業ノート情報"
+           SET "生成状態"       = 'FAILED',
+               "エラーコード"   = #{errorCode},
+               "エラーメッセージ" = #{errorMessage},
+               "再試行回数"     = "再試行回数" + 1,
+               "バージョン"     = "バージョン" + 1,
+               "更新元コード"   = 'BATCH',
+               "更新日時"       = CURRENT_TIMESTAMP
+         WHERE "授業ノートID" = #{noteId}
+           AND "バージョン" = #{version}
+    </update>
+</mapper>

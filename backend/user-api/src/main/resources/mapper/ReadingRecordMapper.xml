@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.reading.ReadingRecordMapper">
+
+    <!-- 読書の記録（RED_読書記録情報）。書籍管理画面の「読書履歴」と閲覧画面の記録に使う。 -->
+    <resultMap id="RecordMap" type="com.study21.user.reading.ReadingRecordEntity">
+        <id     property="recordId"  column="記録ID"/>
+        <result property="bookId"    column="書籍ID"/>
+        <result property="bookTitle" column="書籍名"/>
+        <result property="readAt"    column="読書日時"/>
+        <result property="pageStart" column="開始ページ"/>
+        <result property="pageEnd"   column="終了ページ"/>
+        <result property="minutes"   column="読書時間分"/>
+        <result property="markCount" column="標記件数"/>
+        <result property="memo"      column="メモ"/>
+    </resultMap>
+
+    <!--
+        絞り込み。count と list で同じ句を使う（totalElements / totalPages を一致させる）。
+        dateFrom はその日の 0 時から、dateToExclusive は「dateTo の翌日 0 時」なので
+        dateTo の一日ぶんが含まれる。pageNo は「そのページを読んだ記録」
+        （開始ページ <= pageNo かつ 終了ページ が NULL または pageNo 以上）。
+
+        2026-09-14 の追加: **見えない本の記録は返さない**。本を指定しない履歴
+        （書籍管理画面の「読書履歴」）でも他家庭の書籍の記録が混ざらないように、
+        記録の親（RED_書籍情報）の可視条件を必ず当てる（本の一覧と同じ条件）。
+    -->
+    <sql id="RecordWhere">
+        <where>
+            <if test="bookId != null">
+                AND r."書籍ID" = #{bookId}
+            </if>
+            <if test="dateFrom != null">
+                AND r."読書日時" &gt;= #{dateFrom}
+            </if>
+            <if test="dateToExclusive != null">
+                AND r."読書日時" &lt; #{dateToExclusive}
+            </if>
+            <if test="pageNo != null">
+                AND r."開始ページ" &lt;= #{pageNo}
+                AND (r."終了ページ" IS NULL OR r."終了ページ" &gt;= #{pageNo})
+            </if>
+            AND (b."公開範囲コード" = 'GLOBAL'
+            <if test="familyStudentId != null">
+                OR b."所有家族学生ID" = #{familyStudentId}
+            </if>
+                )
+        </where>
+    </sql>
+
+    <select id="count" resultType="long">
+        SELECT count(*)
+          FROM public."RED_読書記録情報" r
+          JOIN public."RED_書籍情報" b ON b."書籍ID" = r."書籍ID"
+        <include refid="RecordWhere"/>
+    </select>
+
+    <!-- 新しい順（2.0 と同じ） -->
+    <select id="list" resultMap="RecordMap">
+        SELECT r."記録ID", r."書籍ID", b."書籍名", r."読書日時", r."開始ページ", r."終了ページ",
+               r."読書時間分", r."標記件数", r."メモ"
+          FROM public."RED_読書記録情報" r
+          JOIN public."RED_書籍情報" b ON b."書籍ID" = r."書籍ID"
+        <include refid="RecordWhere"/>
+         ORDER BY r."読書日時" DESC, r."記録ID" DESC
+         LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <select id="findById" resultMap="RecordMap">
+        SELECT r."記録ID", r."書籍ID", b."書籍名", r."読書日時", r."開始ページ", r."終了ページ",
+               r."読書時間分", r."標記件数", r."メモ"
+          FROM public."RED_読書記録情報" r
+          JOIN public."RED_書籍情報" b ON b."書籍ID" = r."書籍ID"
+         WHERE r."記録ID" = #{recordId}
+    </select>
+
+    <insert id="insert" parameterType="com.study21.user.reading.ReadingRecordEntity"
+            useGeneratedKeys="true" keyProperty="recordId">
+        INSERT INTO public."RED_読書記録情報" (
+            "書籍ID", "読書日時", "開始ページ", "終了ページ", "読書時間分", "標記件数", "メモ",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{bookId}, #{readAt}, #{pageStart}, #{pageEnd}, #{minutes}, #{markCount}, #{memo},
+            #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <delete id="delete">
+        DELETE FROM public."RED_読書記録情報" WHERE "記録ID" = #{recordId}
+    </delete>
+
+    <!-- その書籍の履歴をまとめて消す（【標記クリア】で標記・進捗と一緒に消す）。消した件数を返す。 -->
+    <delete id="deleteByBook">
+        DELETE FROM public."RED_読書記録情報" WHERE "書籍ID" = #{bookId}
+    </delete>
+</mapper>

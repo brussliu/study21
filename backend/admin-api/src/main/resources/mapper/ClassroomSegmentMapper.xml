@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.classroomai.ClassroomSegmentMapper">
+
+    <select id="findTextsByRange" resultType="com.study21.admin.classroomai.ClassroomSegmentEntity">
+        SELECT "連番" AS "seq", "原文テキスト" AS "text"
+          FROM public."CR_授業転写セグメント情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "連番" BETWEEN #{startSeq} AND #{endSeq}
+         ORDER BY "連番"
+    </select>
+</mapper>

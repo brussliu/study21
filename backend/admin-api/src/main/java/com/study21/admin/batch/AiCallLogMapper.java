@@ -43,4 +43,12 @@ public interface AiCallLogMapper {
 
     /** 絞り込みに出すモデル名の一覧（実データにある値）。 */
     List<String> findDistinctModels();
+
+    /**
+     * 1 行記録する（2.1 で新設。2.0 からの移行データしか無かった記録側）。
+     *
+     * <p>NOT NULL は バッチコード / 開始日時 / 結果区分（+ DB 既定 登録元コード='BATCH'）。
+     * 採番された 呼出履歴ID は keyProperty で entity に入る。</p>
+     */
+    int insert(AiCallLogEntity entity);
 }

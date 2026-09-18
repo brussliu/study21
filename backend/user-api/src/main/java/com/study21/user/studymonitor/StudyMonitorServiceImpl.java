@@ -100,13 +100,13 @@ public class StudyMonitorServiceImpl implements StudyMonitorService {
         if (result == null) {
             throw new ValidationException("分析結果を選択してください。");
         }
+        // 修正理由は任意（ユーザーの指定。詳細画面では必須にしない）。
+        // 空のときは NULL で残し、「理由なし」と分かるようにする。
         String reason = request.reason() == null ? "" : request.reason().trim();
-        if (reason.isEmpty()) {
-            throw new ValidationException("修正理由を入力してください。");   // 2.0 と同じく理由は必須
-        }
         if (reason.length() > 2000) {
             throw new ValidationException("修正理由は2000文字以内で入力してください。");
         }
+        String reasonOrNull = reason.isEmpty() ? null : reason;
 
         List<StudyMonitorModels.ManualUpdate> updates = new ArrayList<>();
         for (StudyMonitorModels.ManualUpdate update : request.updates()) {
@@ -123,7 +123,7 @@ public class StudyMonitorServiceImpl implements StudyMonitorService {
 
         int updated = 0;
         for (StudyMonitorModels.ManualUpdate update : updates) {
-            updated += mapper.updateManualAnalysis(update.snapshotId(), update.version(), result, reason,
+            updated += mapper.updateManualAnalysis(update.snapshotId(), update.version(), result, reasonOrNull,
                     user.accountId());
         }
         if (updated != updates.size()) {

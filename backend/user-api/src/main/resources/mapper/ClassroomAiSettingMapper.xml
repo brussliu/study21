@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomAiSettingMapper">
+
+    <!-- GLOBAL の設定値だけを読む（学生・保護者のスコープは扱わない） -->
+    <select id="findByKeys" resultType="com.study21.user.classroom.ClassroomAiSettingEntity">
+        SELECT "設定キー" AS "settingKey", "設定値" AS "settingValue"
+          FROM public."COM_設定情報"
+         WHERE "ページ区分" = #{pageCode}
+           AND "スコープ" = 'GLOBAL'
+           AND "設定キー" IN
+        <foreach collection="settingKeys" item="key" open="(" separator="," close=")">
+            #{key}
+        </foreach>
+    </select>
+</mapper>

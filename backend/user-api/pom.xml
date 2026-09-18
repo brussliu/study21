@@ -49,10 +49,41 @@
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
         </dependency>
+        <!-- セッションは Redis に置く（複数コンテナ・再起動でもログイン状態が消えない）。
+             spring-session-data-redis が HttpSession を Redis 実装に差し替えるので、
+             アプリ側のコード（ログイン時の session.setAttribute）はそのままでよい。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-data-redis</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
+        </dependency>
+        <!-- テスト用の Redis（本物の redis-server を一時的に起動する）。
+             セッションが本当に Redis に入ることを、実サーバー無しで検証するため。
+             本番の依存には入らない（test スコープ）。 -->
+        <dependency>
+            <groupId>com.github.codemonstur</groupId>
+            <artifactId>embedded-redis</artifactId>
+            <version>1.4.3</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!--
+            授業録音の**書き起こし音声の常時接続**（ブラウザ→後端）。
+            HTTP の 1 往復ごとの送信だと、往復が遅いときに音が貯まって遅れが出るため、
+            音源ごとに WebSocket を 1 本つなぎっぱなしにして 100ms ずつ送る
+            （フレーム番号と受け取り確認で、断線後の送り直しも安全にする）。
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-websocket</artifactId>
         </dependency>
     </dependencies>
 
