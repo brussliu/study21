@@ -10,8 +10,18 @@
 | npm | ≥ 10 | 随 Node.js 安装 |
 | Windows PowerShell | 5.1+ 或 PowerShell 7 | （`scripts/*.ps1` は削除済み。必要な場合は git 履歴から復元） |
 | Git | 2.x | 独立仓库 |
+| Redis | 6.x / 7.x | **登录（セッション）の保存先**。user-api は起動時と認証時に Redis へ繋ぐ（未起動だとログインが 500 になる） |
 
 > 本阶段**不要求数据库**。两个后端在没有数据库、没有数据库环境变量的情况下即可启动。
+> ただし **Redis だけは起動しておく**こと（`user-api` のセッションの保存先。2026-09-13 以降）。
+> ローカルで手っ取り早く起動する例（ホストに投入しない場合は `docker run -d -p 6379:6379 redis:7-alpine`）:
+>
+> ```bash
+> docker run -d --name study21-redis-dev -p 6379:6379 redis:7-alpine \
+>   redis-server --requirepass study21dev
+> # アプリ側（パスワード無しで起動した Redis なら STUDY21_REDIS_PASSWORD は不要）
+> STUDY21_REDIS_HOST=127.0.0.1 STUDY21_REDIS_PASSWORD=study21dev <user-api の起動コマンド>
+> ```
 
 ## 2. 环境变量
 
@@ -27,6 +37,9 @@
 | `USER_API_BASE_URL` | `http://localhost:8082` | 前端调用 user-api 的地址 |
 | `ALLOWED_ORIGINS` | `http://localhost:5173,http://localhost:5174` | CORS 允许来源（逗号分隔，禁止 `*`） |
 | `APP_ENV` | `development` | 运行环境标识 |
+| `STUDY21_REDIS_HOST` | `192.168.0.100` | Redis のホスト（セッションの保存先） |
+| `STUDY21_REDIS_PORT` | `6379` | Redis のポート |
+| `STUDY21_REDIS_PASSWORD` | （空） | Redis のパスワード（未設定なら AUTH しない） |
 
 ## 3. 开发端口
 

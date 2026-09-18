@@ -1,6 +1,6 @@
 # Docker 部署（飞牛 NAS / fnOS）
 
-部署单位是 3 个容器（数据库是既有的 PostgreSQL，不由本项目创建）：
+部署单位是 4 个容器（数据库是既有的 PostgreSQL，不由本项目创建）：
 
 | 容器 | 镜像 | 端口（NAS 侧） | 说明 |
 |---|---|---|---|
@@ -8,8 +8,13 @@
 | `study21-admin-api` | Spring Boot JAR | 8081 | 管理员后端 |
 | （上に含む） | 同上（batS01 代理服务） | **7777** | 端末が使う代理ポート。2.0 の 8888 と衝突するため 7777 |
 | `study21-user-api` | Spring Boot JAR | 8082 | 普通用户后端 |
+| `study21-redis` | redis:7-alpine | （不公开） | **登录状态（セッション）の保存先**。user-api だけが使う。有効期限 60 分 |
 
 架构（容器内）：nginx 将 `/api/admin/**` 转发到 `admin-api:8081`、`/api/user/**` 转发到 `user-api:8082`，前端使用相对路径，同源访问，无需 CORS。
+
+前端镜像构建时还会从 `extension/` 打包浏览器扩展（`node extension/build-zip.mjs`），输出到
+nginx 的 `/downloads/study21-extension.zip`。**每次部署都会重新打包**，学生在
+「インターネット利用履歴 → Web閲覧履歴」画面下载的就是这个文件（`docs/BROWSER_EXTENSION.md`）。
 
 ## 三部分独立部署（互不影响）
 
@@ -19,7 +24,12 @@
 docker compose up -d --build admin-api   # 只重建并重启 admin-api
 docker compose up -d --build user-api    # 只重建并重启 user-api
 docker compose up -d --build web         # 只重建并重启前端
+docker compose up -d redis               # 只起/更新 Redis（无需构建）
 ```
+
+> セッションの保存先（Redis）は `user-api` の `depends_on` に入っているので、
+> `docker compose up -d --build user-api` だけでも一緒に起動する。
+> データは名前つきボリューム `study21-redis-data` に残る（コンテナを作り直してもログイン状態は消えない）。
 
 后端为**可执行 JAR（内嵌 Tomcat）**，`java -jar` 直接运行，不需要独立 Tomcat / WAR / JSP——与 study2.0 的「WAR + 独立 Tomcat」不同，但同样是跑在 NAS 上的独立 Docker 服务，两者可并存。
 
@@ -39,6 +49,7 @@ docker compose up -d --build web         # 只重建并重启前端
 - 飞牛 NAS 已安装 **Docker**（fnOS 的「Docker / Container Manager」）。
 - 建议开启 SSH（fnOS 系统设置 → 终端/SSH），用 `docker compose` 命令行操作最稳。
 - 确认 NAS 上 **8090 / 8091 / 8081 / 8082 / 7777** 端口未被占用。
+  （Redis はホストにポートを公開しないので、空きポートを用意する必要はない）
   （7777 是代理服务的端口。旧 2.0 的代理占用 8888，若 7777 也被占用，
   可在 `setting/deploy.env` 里设 `STUDY21_PROXY_PORT` 换一个空闲端口。）
 
@@ -50,7 +61,8 @@ docker compose up -d --build web         # 只重建并重启前端
 <发布位置>/
 ├── webapps/   ← 程序本体（docker compose 项目目录。源码会被复制到这里）
 │   └── docker-compose.yml
-├── files/     ← 用户数据（documents / legacy-documents / temp-files / test-files）
+├── files/     ← 用户数据（documents / legacy-documents / temp-files / test-files /
+│                 reading / legacy-reading）
 └── logs/      ← 日志（backend/ と frontend/。詳細は docs/LOGGING.md）
 ```
 
@@ -92,7 +104,7 @@ cd <发布位置>/webapps
 docker compose up -d --build
 ```
 
-首次构建会拉取 `maven` / `node` / `eclipse-temurin` / `nginx` 基础镜像并编译，耗时较长（视网络而定）。
+首次构建会拉取 `maven` / `node` / `eclipse-temurin` / `nginx` / `redis:7-alpine` 基础镜像并编译，耗时较长（视网络而定）。
 
 ### 方式 B：fnOS 容器管理器（图形界面）
 

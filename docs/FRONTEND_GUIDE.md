@@ -39,7 +39,12 @@ PWA 结构：`public/manifest.webmanifest`、`public/icons/`（实际图标：`i
 | `/student/home` `/student/:screen` | UserLayout | 学生 UI 页面 |
 | `/{area}/site` `/{area}/terminal-control` | Admin/User | サイト管理・端末コントロール（`docs/NET_CONTROL.md`） |
 | `/{area}/daily-report` | Admin/User | 学習日報（`views/daily-report/DailyReportView.vue`。月カレンダー＋マスを開いて授業の追加・まとめ・提出。`database/学習日報/学習日報設計.md`） |
-| `/{area}/internet-usage` | Admin/User | インターネット利用履歴（`views/network/InternetUsageHistoryView.vue`。タブ: サイトアクセス履歴／Web閲覧履歴。どちらも 2.0 から移行した実データ。`docs/NET_CONTROL.md`） |
+| `/{area}/internet-usage` | Admin/User | インターネット利用履歴（`views/network/InternetUsageHistoryView.vue`。タブ: サイトアクセス履歴／Web閲覧履歴。どちらも 2.0 から移行した実データ。Web閲覧履歴の一覧見出しに「接続コード」ボタン＝拡張に設定するコードの発行・再発行はダイアログ。`docs/NET_CONTROL.md`・`docs/BROWSER_EXTENSION.md`） |
+| `/{area}/japanese-word` `/{area}/japanese-test` `/{area}/japanese-word-status` | Admin/User | 日本語勉強（親メニュー【日本語勉強】）。単語情報管理＝単語の一覧・検索・登録/修正/削除・AI 詳細（語義・例文・発音・コロケーション・関連語・使用注意）・お気に入り/習得済（`views/japanese/JapaneseWordView.vue`）、単語テスト＝テストの作成（種別 A〜E）・出題・回答/判定・結果・履歴（`views/japanese/JapaneseTestView.vue`）、単語勉強状況＝サマリ・日次・語別/技能別の習得（`views/japanese/JapaneseWordStatusView.vue`）。データは 2.0（study3 DB）から移行した `JPN_*` 10 テーブル。`database/日本語勉強/日本語勉強設計.md` |
+| `/{area}/reading-books` `/{area}/reading-reader` | Admin/User | 読書管理（親メニュー【読書管理】）。**書籍管理＝保護者向け**。本棚（分類ごと・表紙・PDF の有無）・書籍の登録/修正/削除/置頂・**本文 PDF と表紙のアップロード（ドラッグ＆ドロップ／貼り付け。総ページ数は PDF から自動）**・**PDF のダウンロード**・分類（追加/改名/並べ替え/削除）。進捗・読書履歴・「読む」導線は置かない（`views/reading/BookManagementView.vue`）。**書籍閲覧＝生徒向け**。分類ごとの本棚から本を開き、**本文 PDF を pdf.js（同梱 3.11.174）で表示して読む**・ページ送り/拡大・標記（語彙・ハイライト・下線・メモ・手書き）・読書記録・読書履歴（**本棚と読書履歴はタブで分ける**。履歴は読書日 From/To・ページ番号で絞り、1 ページの件数を 20/50/100 で選べる。**削除は置かない**）（`views/reading/BookReaderView.vue`。**旧画面としてそのまま残す＝バックアップ**）。データは 2.0 から移行した `RED_*` 5 テーブル（`RED_書籍分類情報` / `RED_書籍ファイル情報` を含む）。言語は `RED_書籍情報.言語`（中国語/英語/日本語）、分類は**ジャンルだけ**（小説 / 雑誌・ガイド）。`database/読書管理/読書管理設計.md` |
+| `/{area}/reading-shelf` | Admin/User | **書籍閲覧2**（親メニュー【読書管理】）。実際の本棚のように背表紙が並び（本ごとに色が変わる）、ホバーで本が手前に出て**表紙画像**と読書進捗（%）を表示し、クリックで棚から抜き出されて開く演出つき（`prefers-reduced-motion` では演出なし）。開くと本文 PDF を pdf.js で表示し、標記・読書記録・その本の履歴も使える（`views/reading/BookShelfView.vue`）。本棚／読書履歴はタブで分ける。`features/reading/reading-shelf.css` |
+| `/{area}/geometry` `/{area}/geometry-draw` `/{area}/geometry-ai` | Admin/User | 図形管理（親メニュー【数学勉強】＞【図形管理】）。一覧＝キーワード/種類/タグ/並び替え/削除済みも表示・ページング・カード（サムネイル・タグ・メモ・作図データの文字数）・コピー・削除（`views/geometry/GeometryView.vue`）、作図＝GeoGebra アプレット（作図タイプで `geometry`/`graphing` を切り替え）・コマンド入力・保存/名前を付けて保存/全消去/中央表示/サムネイル更新（`views/geometry/GeometryDrawView.vue`。`?geometryId=` で編集）。データは 2.0 から移行した `GEO_図形情報`（`database/図形管理/図形管理設計.md`） |
+| `/{area}/geometry-ai` | Admin/User | **AI 生図**（画像から作図。一覧の【新規】＞「AI で作図する（画像から）」、または選択ダイアログから）。①画像をアップロード（ドラッグ＆ドロップ／クリック選択）②切り抜き（8 方向のハンドル）③分類の指定（関数グラフ／図形／判別が難しい複合図形 ＋ 補足指示）④送信前の確認（切り抜いた画像＋条件＋保存されるメタ情報）の 4 ステップ。**処理は未実装**で、【AI に送る】と【図形作成で開く】は `disabled`（`title="AI 生成の API はまだありません。"`）、結果プレビューは「（準備中）」の定型文だけを出し、ネットワーク呼び出しは行わない（`views/geometry/GeometryAiView.vue`・`features/geometry/geometry-crop.ts`）。作図画面には**AI 画図助手**（指示から作図を直す折りたたみパネル。処理は同じく未実装）を置く。設定はシステム設定「AI 生図（図形管理）」に**項目だけ**を用意し、**保存は未実装**（`GeometryAiSettingsSection.vue`。設定の保存 API は未定義キーを 400 で拒否するため、画面からは保存しない） |
 | `/{area}/batch` | Admin/User | バッチ一覧（`views/batch/BatchListView.vue`） |
 | `/{area}/batch-history` | Admin/User | バッチ実行履歴（`views/batch/BatchHistoryView.vue`。実データ `BAT_バッチ実行履歴情報`） |
 | `/{area}/batch-ai-history` | Admin/User | AI呼出履歴（`views/batch/AiCallHistoryView.vue`。2.0 の `BAT_AI呼出履歴情報` を全件移行。`database/バッチ/BAT_バッチ管理設計.md` §5.5） |
@@ -94,6 +99,9 @@ PWA 结构：`public/manifest.webmanifest`、`public/icons/`（实际图标：`i
   狭い画面では設計システムの `responsive.css` が `.pagination__size` を隠す。
 - 件数を変えたら 1 ページ目から取り直す（画面ごとの `search()` を呼ぶ）。
 - 選択肢は 20 / 50 / 100 件（API の上限は 100 件）。
+  - 例外: **図形管理**（`/{area}/geometry`）は **24 / 48 / 96 件**（利用者の指定）。
+  - **書籍管理**（`/{area}/reading-books`）は**ページングを置かない**（本が少ないため全件を出す。
+    API には `page=1&size=100` で読む）。
 
 ## 3.11 検索条件カードの並べ方
 

@@ -53,8 +53,10 @@ DB は 2.0 の 4 テーブルを 2.1 の規約で再設計して移行済み
 | 詳細の保存 | primary + `check`（`data-action="detail-apply"`。モーダル内の「閉じる」は secondary） |
 
 一括変更は分析結果（学習中／休憩中／ゲーム中／離席／判定不能）と**修正理由**を必須にし、
-2.0 と同じく理由なしでは適用できない。詳細モーダルも同じ（分析結果 ＋ 修正理由 ＋ 保存）で、
+2.0 と同じく理由なしでは適用できない（画面側で止める）。
+詳細モーダルは 分析結果 ＋ 修正理由（**任意**。ユーザーの指定。2026-09-13）＋ 保存 で、
 **分析済み（`COMPLETED`）の画像だけ**直せる（未分析・エラーはその旨を出す）。
+理由が空のときは DB に NULL で残す（「理由なし」と分かるように）。
 送信は一括・1 枚とも `PATCH /api/user/study-monitor/snapshots`（`{updates:[{snapshotId,version}], result, reason}`）。
 
 ## 3. 未実装（2.1 での後続タスク）
@@ -79,7 +81,9 @@ API を作るときは `GET /api/user/study-monitor/snapshots`（対象日・時
 
 - 単体/コンポーネント: `frontend/pc-web/tests/study-monitor.spec.ts`
   （時間軸が時間帯全体を見ること、詳細は編集アイコンからだけ開くこと、詳細で修正できること、
-  未分析は修正できないことを含む）
+  詳細は修正理由が空でも保存できること、未分析は修正できないことを含む）
+- 業務ルール（サーバー）: `backend/user-api/src/test/java/com/study21/user/studymonitor/StudyMonitorServiceImplTest.java`
+  （修正理由は任意・空は NULL で保存・2000 文字超は拒否・分析結果は必須）
 - ブラウザ E2E（レイアウト）: `tmp/e2e/e2e-study-monitor-layout.mjs`（39 項目）
   - API と画像は puppeteer の interception で差し替えるので、**実 DB を触らず・画像が未コピーでも**
     検証できる（前提: `tmp/e2e/vite.e2e.config.ts` の vite dev 5199）

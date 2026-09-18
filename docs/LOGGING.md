@@ -9,6 +9,8 @@
 ├── webapps/                        ← 程序（docker compose 项目目录）
 ├── files/                          ← 用户数据
 │   ├── documents/  legacy-documents/  temp-files/  test-files/
+│   ├── reading/                    ← 書籍の本文 PDF・表紙（読書管理）
+│   └── legacy-reading/             ← 2.0 の webapps/file/ENGLISH_READING（読取専用）
 └── logs/
     ├── backend/                    ← 后端日志（admin-api / user-api 各自写自己的文件）
     │   ├── admin-api-app.log       ← 通常日志（INFO 以上、SQL 与 ERROR 除外）

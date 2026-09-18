@@ -11,6 +11,18 @@
 - 与 PC 相同，`frontend/mobile-web` 产出 `dist/`。
 - `manifest.webmanifest` 与图标随 `dist/` 一起部署。
 
+## 2.5 Redis（セッションの保存先）
+
+ログイン状態（セッション）は Redis に置く（2026-09-13 以降）。`user-api` だけが使い、
+admin-api は `STATELESS`（セッションを使わない）ため接続しない。
+
+- コンテナ: `study21-redis`（`redis:7-alpine`、compose のネットワーク内のみ。ホストには公開しない）
+- パスワード: `STUDY21_REDIS_PASSWORD`（`setting/deploy.env`。未設定だとデプロイが止まる）
+- 有効期限: **60 分**（`spring.session.timeout`。最後のアクセスから数える）
+- 中を見る: `docker exec -it study21-redis redis-cli -a <パスワード>` →
+  `KEYS study21:session:user*`
+- 消しても実害は「全員が再ログイン」だけ（`FLUSHDB` してよい）
+
 ## 3. admin-api 部署
 
 - `mvn package`（在 `backend`）产出 `backend/admin-api/target/admin-api-0.1.0.jar`。
