@@ -58,6 +58,9 @@ CREATE TABLE IF NOT EXISTS public."NET_Web閲覧履歴情報" (
     "アクセス日時"       TIMESTAMP    NOT NULL,
     "滞在秒数"           INTEGER      NULL,
     "閲覧回数"           INTEGER      NULL,
+    -- 拡張がイベントごとに付ける一意な ID（UUID）。送信の再試行で二重登録しないための鍵。
+    -- 2.0 からの移行データは NULL（重複しないので UNIQUE 索引と共存できる）
+    "イベント識別子"     VARCHAR(100) NULL,
     -- 拡張が送ってきた元の JSON（調査用。通常の一覧では使わない）
     "JSON詳細"           TEXT         NULL,
     -- ブラウザ拡張は人が操作しないため通常 NULL（記録元は 登録元コード で表す）
@@ -90,6 +93,12 @@ CREATE TABLE IF NOT EXISTS public."NET_Web閲覧履歴情報" (
         CHECK ("閲覧回数" IS NULL OR "閲覧回数" >= 0)
 );
 
+-- 追補（2026-09-13）: 拡張からの受信 API を作るにあたって イベント識別子 を追加した。
+-- すでにテーブルを作ってある環境でも、このファイルをもう一度実行すれば当たる
+-- （CREATE TABLE IF NOT EXISTS は素通りするので、下の ALTER が実体）。
+ALTER TABLE public."NET_Web閲覧履歴情報"
+    ADD COLUMN IF NOT EXISTS "イベント識別子" VARCHAR(100) NULL;
+
 -- 時系列の一覧（履歴画面は新しい順に出す）。
 CREATE INDEX IF NOT EXISTS idx_net_web_history_accessed
     ON public."NET_Web閲覧履歴情報" ("アクセス日時" DESC, "閲覧履歴ID" DESC);
@@ -110,6 +119,11 @@ CREATE INDEX IF NOT EXISTS idx_net_web_history_user
 CREATE INDEX IF NOT EXISTS idx_net_web_history_event
     ON public."NET_Web閲覧履歴情報" ("イベント種別");
 
+-- 拡張の再送による二重登録を防ぐ（端末 + イベント識別子）。
+-- イベント識別子 が NULL の行（2.0 からの移行データ）は UNIQUE 違反にならない。
+CREATE UNIQUE INDEX IF NOT EXISTS uq_net_web_history_event_id
+    ON public."NET_Web閲覧履歴情報" ("端末識別子", "イベント識別子");
+
 COMMENT ON TABLE public."NET_Web閲覧履歴情報" IS
     'ブラウザ拡張が送ってくる Web 閲覧イベントの履歴（1 行 = 1 イベント）。2.0 の TRN_ブラウザ閲覧履歴情報';
 COMMENT ON COLUMN public."NET_Web閲覧履歴情報"."利用者アカウントID" IS
@@ -123,3 +137,12 @@ COMMENT ON COLUMN public."NET_Web閲覧履歴情報"."アクティブフラグ" 
 COMMENT ON COLUMN public."NET_Web閲覧履歴情報"."JSON詳細" IS '拡張が送ってきた元の JSON（調査用）';
 COMMENT ON COLUMN public."NET_Web閲覧履歴情報"."登録元コード" IS
     'BROWSER=拡張からの記録 / MIGRATION=2.0 からの移行 / APP=アプリからの登録';
+COMMENT ON COLUMN public."NET_Web閲覧履歴情報"."イベント識別子" IS
+    '拡張がイベントごとに付ける UUID。送信の再試行で二重登録しないための鍵（移行データは NULL）';
+
+-- ============================================================================
+-- 追補（2026-09-13）: 拡張からの受信 API を作るにあたって イベント識別子 を追加した。
+-- 追加の ALTER は上の CREATE TABLE の直後に置いてある（既存環境でもこのファイルを
+-- もう一度実行すれば当たる）。ここは経緯の記録。
+-- ============================================================================
+

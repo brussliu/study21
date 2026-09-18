@@ -117,9 +117,9 @@ CREATE INDEX IF NOT EXISTS idx_bat_ai_call_execution
 COMMENT ON TABLE public."BAT_AI呼出履歴情報" IS
     'バッチの AI（LLM）呼び出し履歴（1 行 = 1 呼び出し）。プロンプトとレスポンスの本文を含む';
 COMMENT ON COLUMN public."BAT_AI呼出履歴情報"."実行ID" IS
-    '2.0 の 実行ID。バッチ実行に紐づかない呼び出しもあり、2.1 に存在しない ID もある';
+    '2.0 の 実行ID。2.1 のバッチから記録するときは BAT_バッチ実行履歴情報.実行ID を入れる（画面からの同期呼び出し＝AI 画図助手は NULL）';
 COMMENT ON COLUMN public."BAT_AI呼出履歴情報"."バッチコード" IS
-    '2.0 の タスクコード（batC04-1 などの枝番つきも含むため BAT_バッチコントロール情報 への FK は張らない）';
+    '2.0 の タスクコード（batC04-1 などの枝番つきも含むため BAT_バッチコントロール情報 への FK は張らない）。バッチ以外の呼び出しは機能コードを入れる（例: ''geometry-ai-assist''）';
 COMMENT ON COLUMN public."BAT_AI呼出履歴情報"."結果区分" IS 'SUCCESS=成功 / FAILURE=失敗（2.0 の 成功 / 失敗）';
 COMMENT ON COLUMN public."BAT_AI呼出履歴情報"."プロンプト" IS 'AI に送ったプロンプト本文';
 COMMENT ON COLUMN public."BAT_AI呼出履歴情報"."レスポンス" IS 'AI から受け取ったレスポンス本文（最大 200KB 超になる）';

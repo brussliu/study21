@@ -344,6 +344,10 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_GEMINI_URL','GLOBAL','https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_BIGMODEL_OCR_URL','GLOBAL','https://open.bigmodel.cn/api/paas/v4/layout_parsing') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_BIGMODEL_OCR_MODEL','GLOBAL','glm-ocr') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_GOOGLE_STT_MODEL','GLOBAL','latest_long') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_GOOGLE_STT_URL','GLOBAL','https://speech.googleapis.com/v1/speech:recognize') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_ALIBABA_STT_MODEL','GLOBAL','paraformer-realtime-v2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('AI_MODEL','AI_ALIBABA_STT_URL','GLOBAL','wss://dashscope.aliyuncs.com/api-ws/v1/inference') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 
 -- ---------------- ENGLISH_ESSAY ----------------
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
@@ -1159,7 +1163,24 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_ENABLED','GLOBAL','false') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_SEND_ON_RESUBMIT','GLOBAL','false') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_TEMPLATE','GLOBAL','【学習日報】
+日付：{{日付}}（{{曜日}}）
+記入者：{{記入者}}
+
+■ 授業内容（{{時限数}}限）
+{{授業一覧}}
+■ 全体の振り返り
+{{振り返り}}
+
+■ 今夜の勉強内容
+{{今夜の勉強}}
+
+提出日時：{{提出日時}}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('DAILY_REPORT','LINE_DAILY_REPORT_LESSON_TEMPLATE','GLOBAL','・{{時限}}限 / {{教科}}
+{{授業内容}}
+掌握度：{{掌握度}}
+集中度：{{学習集中度}}　学習量：{{学習量}}　態度：{{学習態度}}
+ノート：{{ノート}}
+────────────') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 
 -- ---------------- ENGLISH_WORD_TEXTBOOK_AI ----------------
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_WORD_TEXTBOOK_AI','ENGLISH_WORD_TEXTBOOK_AI_PROVIDER','GLOBAL','qwen:1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
@@ -1549,23 +1570,86 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_RETRY_LIMIT','GLOBAL','2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 
 -- ---------------- LINE ----------------
-日付：{{日付}}（{{曜日}}）
-記入者：{{記入者}}
-
-■ 授業内容（{{時限数}}限）
-{{授業一覧}}
-■ 全体の振り返り
-{{振り返り}}
-
-■ 今夜の勉強内容
-{{今夜の勉強}}
-
-提出日時：{{提出日時}}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
-{{授業内容}}
-掌握度：{{掌握度}}
-集中度：{{学習集中度}}　学習量：{{学習量}}　態度：{{学習態度}}
-ノート：{{ノート}}
-────────────') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('LINE','LINE_MESSAGING_PUSH_URL','GLOBAL','https://api.line.me/v2/bot/message/push') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('LINE','LINE_MESSAGING_WEBHOOK_VALIDATE_SIGNATURE','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 
+
+-- ---------------- GEOMETRY_AI (AI生図・AI画図助手／図形管理) ----------------
+-- 設計: tmp/geometry-ai-design.md §5。API Key は AI_MODEL ページを共用するのでここには seed しない。
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_PROVIDER','GLOBAL','qwen:4') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_IMAGE_MB','GLOBAL','10') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_DEFAULT_CROP','GLOBAL','manual') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_DEFAULT_KIND','GLOBAL','figure') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_APPROVAL','GLOBAL','manual') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+-- 共通の User Prompt は**空でよい**（モード別（GEOMETRY_AI_<A〜D>_TASK_TEMPLATE）に書けばそれを使い、
+-- どちらも空ならテンプレート無しで実行する）。既定は空にしておく。
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_INSTRUCTION_TEMPLATE','GLOBAL','') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_SYSTEM_PROMPT','GLOBAL','あなたは日本の学習塾の数学教材を作る作図アシスタントです。
+与えられた画像から読み取れる図形・関数・数式・文字を使って、GeoGebra のコマンドを作ります。
+
+必ず守ること:
+1. 返答の形式は、このプロンプトの末尾に自動で付く「出力形式（JSON Schema）」に従う（手書きの JSON 例は持たない）。
+2. コマンドは 1 要素 1 コマンドにする。行頭が # のコメント行は入れない。
+3. 使えるコマンドは許可リストにあるものだけにする。
+4. 禁止: Delete / File / Import / Export / Execute / SetValue / Button / Checkbox / InputBox / SetActiveView / RunClickScript、スクリプト（GGBScript / JavaScript）、外部 URL の読み込み。
+5. オブジェクト名は ASCII（A〜Z、a〜z、c1、f など）にする。日本語のラベルは Text で作る。
+6. 座標の範囲は、利用者が指定した「座標の範囲・目盛」「表示範囲」に従う。指定が無いときは、図の主要な部分が見える範囲を自分で選び、選んだ範囲を「表示範囲」の項目に書く。
+7. 画像から読み取った数式・文字（例: 三角形ABC、AB=5）は Text として図に置く。
+8. 推測で値を埋めない。読めない値は出力しない。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_OUTPUT_FORMAT','GLOBAL','JSON') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_REQUEST_TIMEOUT_SECONDS','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_RETRY_LIMIT','GLOBAL','1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_COMPLETION_TOKENS','GLOBAL','4096') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_COMMANDS','GLOBAL','80') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ALLOWED_COMMANDS','GLOBAL','Point,Segment,Line,Ray,Vector,Polygon,Rectangle,Circle,Semicircle,Arc,Angle,AngleBisector,PerpendicularLine,PerpendicularBisector,Midpoint,Intersect,Polyline,Distance,Length,Area,Slope,Tangent,Text,Function,Curve,Derivative,Integral,Root,Extremum,Reflect,Rotate,Translate,Dilate,Sequence') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_IMAGE_PIXELS','GLOBAL','1536') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_IMAGE_RETENTION_DAYS','GLOBAL','30') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_CONCURRENCY','GLOBAL','1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_DAILY_LIMIT_PER_ACCOUNT','GLOBAL','20') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_PROVIDER','GLOBAL','qwen:4') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_SYSTEM_PROMPT','GLOBAL','あなたは GeoGebra の作図を日本語の指示で直すアシスタントです。
+いま作図されているオブジェクトを踏まえ、指示を実現するために追加・変更するコマンドだけを出力します（既にあるコマンドは繰り返さない）。
+返答の形式は、このプロンプトの末尾に自動で付く「出力形式（JSON Schema）」に従う（説明は「説明」の項目に日本語で 1 文）。
+禁止: Delete / File / Import / Export / Execute / SetValue / Button / Checkbox / InputBox / SetActiveView / RunClickScript、スクリプト、外部 URL の読み込み。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_USER_PROMPT','GLOBAL','いまの作図のオブジェクト: {objects}
+指示: {instruction}
+コマンドは最大 {maxCommands} 個。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_TIMEOUT_SECONDS','GLOBAL','60') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_MAX_COMMANDS','GLOBAL','20') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_DAILY_LIMIT_PER_ACCOUNT','GLOBAL','50') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+
+-- ---------------- CLASSROOM_AI (授業録音 / AI 授業記録) ----------------
+-- 設計: tmp/classroom-ai-design.md §2.4。既定値は §12 の承認済み Q1〜Q8。
+-- STT の API Key / Endpoint は seed しない（未設定なら日本語の理由でエラー。スタブは不要）。
+-- ノート LLM の URL・API Key は AI_MODEL ページのスロットを共用するのでここには作らない。
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_PROVIDER','GLOBAL','browser') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_MODEL','GLOBAL','whisper-1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_TIMEOUT_SECONDS','GLOBAL','60') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_ENABLED','GLOBAL','true') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_CHUNK_SECONDS','GLOBAL','20') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_ZH','GLOBAL','zh') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_JA','GLOBAL','ja') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_EN','GLOBAL','en') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_ZH_EN','GLOBAL','zh') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_JA_EN','GLOBAL','ja') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_AUTO','GLOBAL','auto') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_INTERVAL_MINUTES','GLOBAL','5') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_MIN_CHARS','GLOBAL','200') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_KEYWORDS','GLOBAL','宿題,試験の重点') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_COOLDOWN_MINUTES','GLOBAL','3') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_MAX_RECORDING_MINUTES','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_RETENTION_DAYS','GLOBAL','30') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_DAILY_LIMIT_PER_ACCOUNT','GLOBAL','0') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_DIARIZATION','GLOBAL','none') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_PROVIDER','GLOBAL','deepseek:1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_SYSTEM_PROMPT','GLOBAL',E'あなたは授業の内容を整理する助手です。授業の書き起こしから、次の 4 つのキーだけを持つ JSON オブジェクトを返してください。\n{"テーマ": "...", "学習内容": "...", "先生の重点": "...", "宿題": "..."}\nそれ以外の文字（解説やコードフェンス）は付けないでください。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_USER_PROMPT','GLOBAL',E'授業の書き起こし（ここまで）:\n{transcript}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_SUMMARY_SYSTEM_PROMPT','GLOBAL',E'あなたは授業の内容を整理する助手です。授業全体の書き起こしから、次の 4 つのキーだけを持つ JSON オブジェクトを返してください。\n{"テーマ": "...", "学習内容": "...", "先生の重点": "...", "宿題": "..."}\n宿題が無ければ空文字にしてください。それ以外の文字は付けないでください。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_SUMMARY_USER_PROMPT','GLOBAL',E'授業全体の書き起こし:\n{transcript}') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_TIMEOUT_SECONDS','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_MAX_COMPLETION_TOKENS','GLOBAL','2048') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('CLASSROOM_AI','CLASSROOM_AI_VIEW_SCOPE','GLOBAL','family') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;

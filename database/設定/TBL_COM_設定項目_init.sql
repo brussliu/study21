@@ -261,6 +261,24 @@ ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('AI_MODEL','AI_BIGMODEL_OCR_MODEL','TEXT','1',NULL,'AIモデル：BigModel / 智谱 OCR モデル指定')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_GOOGLE_STT_MODEL','TEXT','1',NULL,'AIモデル：Google Speech-to-Text モデル指定（既定 latest_long）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_GOOGLE_STT_API_KEY','TEXT','1',NULL,'AIモデル：Google Speech-to-Text apiKey（Google Cloud の API キー。seed しない）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_GOOGLE_STT_URL','TEXT','1',NULL,'AIモデル：Google Speech-to-Text URL（既定 https://speech.googleapis.com/v1/speech:recognize）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_ALIBABA_STT_MODEL','TEXT','1',NULL,'AIモデル：Alibaba Paraformer-Realtime-V2 モデル指定（既定 paraformer-realtime-v2）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_ALIBABA_STT_API_KEY','TEXT','1',NULL,'AIモデル：Alibaba Paraformer-Realtime-V2 apiKey（DashScope の API Key。千問と同じキーを使える。seed しない）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('AI_MODEL','AI_ALIBABA_STT_URL','TEXT','1',NULL,'AIモデル：Alibaba Paraformer-Realtime-V2 URL（既定 wss://dashscope.aliyuncs.com/api-ws/v1/inference）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 
 -- ---------------- ENGLISH_ESSAY (英作文AI添削) ----------------
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
@@ -770,4 +788,187 @@ VALUES ('LINE','LINE_MESSAGING_CHANNEL_SECRET','TEXT','1',NULL,'LINE Webhook：C
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('LINE','LINE_MESSAGING_WEBHOOK_VALIDATE_SIGNATURE','ENUM','1','true,false','LINE Webhook：署名検証（true/false）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+
+-- ---------------- GEOMETRY_AI (AI生図・AI画図助手／図形管理) ----------------
+-- 設計: tmp/geometry-ai-design.md §5。画面は「AI 生図（図形管理）」セクション
+-- （frontend/pc-web/src/views/admin/system-settings/GeometryAiSettingsSection.vue）。
+-- 画面に出すのは 7 キー（*_ENABLED / *_PROVIDER / *_MAX_IMAGE_MB / *_DEFAULT_CROP /
+-- *_DEFAULT_KIND / *_APPROVAL / *_INSTRUCTION_TEMPLATE）で、残りはバッチ専用。
+-- API Key は AI_MODEL ページ（AI_QWEN_API_KEY 等）を共用するのでここには作らない。
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ENABLED','ENUM','1','true,false','AI生図とAI画図助手：有効／無効（無効なら【新規】に AI の導線を出さず、API は 409）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_PROVIDER','ENUM','1','qwen:1,qwen:2,qwen:3,qwen:4,qwen:5,doubao:1,doubao:2,deepseek:1,deepseek:2,chatgpt:1,chatgpt:2','AI生図：使用する視覚モデル（URL・API Key は AIモデルページの同じスロットを共用）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_IMAGE_MB','INTEGER','1','1..50','AI生図：画像 1 枚の最大サイズ（MB。画面のスライダーと同じ 1〜50）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_DEFAULT_CROP','ENUM','1','manual,center,all','AI生図：画面を開いたときの切り抜きの初期状態（manual=毎回指定 / center=中央 70% / all=全体）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_DEFAULT_KIND','ENUM','1','figure,function,mixed','AI生図：分類の初期値（figure=図形 / function=関数グラフ / mixed=判別が難しい複合図形）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_APPROVAL','ENUM','1','manual,auto','AI生図：処理結果の承認フロー（manual=作図画面で確認してから保存 / auto=そのまま保存。サーバーに GeoGebra が無いため当面 manual のみ）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_INSTRUCTION_TEMPLATE','TEXT','0',NULL,'AI生図：共通の User Prompt（タスクテンプレート）。空でよい（モード別（GEOMETRY_AI_<A〜D>_TASK_TEMPLATE）に書けばそれを使い、どちらも無ければテンプレート無しで実行する）。変数: {mode} {modeLabel} {resultType} {resultTypeLabel} {note} {supplements} {keepLabels} {maxCommands} {allowedCommands} {outputFormat} {outputSchema}')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_SYSTEM_PROMPT','TEXT','1',NULL,'AI生図：共通の System Prompt（必須）。モード別の System Prompt があれば、その前に連結して使う（モード側で上書きしない）。共通＋モード別＋DTO から自動生成した出力 Schema の順に 1 つのプロンプトになる。変数: {allowedCommands} {maxCommands} {outputSchema} など')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_OUTPUT_FORMAT','ENUM','1','JSON,COMMAND','AI生図：AI の出力契約（JSON=1 個の JSON / COMMAND=コマンド行のみ）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_REQUEST_TIMEOUT_SECONDS','INTEGER','1','30..1800','AI生図：AI API への 1 回の通信を待つ最大秒数（30〜1800）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_RETRY_LIMIT','INTEGER','1','0..3','AI生図：タイムアウト・5xx・JSON 不正時の再実行回数（0〜3。回数分だけ課金される）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_TEMPERATURE','ENUM','1','0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0','AI生図：Temperature（低めにして出力を安定させる）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_COMPLETION_TOKENS','INTEGER','1','1024..16384','AI生図：最大出力 Token 数（1024〜16384）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_COMMANDS','INTEGER','1','1..200','AI生図：生成コマンドの上限（検証 batC53 で使用。1〜200）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ALLOWED_COMMANDS','TEXT','1',NULL,'AI生図：許可コマンドのホワイトリスト（カンマ区切り。先頭トークンで判定する）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_IMAGE_PIXELS','INTEGER','1','512..8192','AI生図：AI へ送る画像の最大辺ピクセル（超える場合は縮小。512〜8192）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_IMAGE_RETENTION_DAYS','INTEGER','1','1..365','AI生図：元画像・切り抜き画像の保持日数（batR02 のクリーンアップで削除。1〜365）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_MAX_CONCURRENCY','INTEGER','0','1..4','AI生図：同時に AI を呼ぶ数（非同期ワーカー導入時に使用。既定 1）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_DAILY_LIMIT_PER_ACCOUNT','INTEGER','1','0..100','AI生図：1 アカウント 1 日の生図回数（0=無制限。0〜100）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_ENABLED','ENUM','0','true,false','AI画図助手：有効／無効（無効なら作図画面の助手パネルを出さない）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_PROVIDER','ENUM','0','qwen:1,qwen:2,qwen:3,qwen:4,qwen:5,doubao:1,doubao:2,deepseek:1,deepseek:2,chatgpt:1,chatgpt:2','AI画図助手：使用するモデル')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_SYSTEM_PROMPT','TEXT','0',NULL,'AI画図助手：System Prompt（現在の作図を踏まえてコマンドの差分だけを返させる）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_USER_PROMPT','TEXT','0',NULL,'AI画図助手：User Prompt（{objects} {instruction} {maxCommands} を置換する）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_TIMEOUT_SECONDS','INTEGER','0','10..300','AI画図助手：1 リクエストのタイムアウト秒（10〜300。画面は同期で待つ）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_MAX_COMMANDS','INTEGER','0','1..50','AI画図助手：返せるコマンド数の上限（1〜50）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('GEOMETRY_AI','GEOMETRY_AI_ASSIST_DAILY_LIMIT_PER_ACCOUNT','INTEGER','0','0..200','AI画図助手：1 アカウント 1 日の指示回数（0=無制限。0〜200）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+
+-- ---------------- CLASSROOM_AI (授業録音 / AI 授業記録) ----------------
+-- 設計: tmp/classroom-ai-design.md §2.4。
+-- 画面（システム設定「AI 授業記録（授業録音）」）に出して保存するのは 7 キー
+-- （*_ENABLED / *_STT_PROVIDER / *_CHUNK_SECONDS / *_TRIGGER_INTERVAL_MINUTES /
+--  *_TRIGGER_MIN_CHARS / *_TRIGGER_KEYWORDS / *_MAX_RECORDING_MINUTES）で、
+-- 残り（STT 接続・言語マトリクス・クールダウン・保存期間・日次上限・話者分離・
+-- ノート LLM の接続とプロンプトなど）はバッチ/ランタイム専用で画面には出さない
+-- （GeometryAiSettingsSection と同じ方針。SettingPageFields には 7 キーだけ定義する）。
+-- ノート LLM の URL・API Key は AI_MODEL ページのスロットを共用する（API Key はここでは seed しない）。
+-- STT の API Key は seed しない（未設定なら日本語の理由でエラーにする）。
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_ENABLED','ENUM','1','true,false','授業録音と AI 授業ノート：有効／無効（無効なら録音 API は 409）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_PROVIDER','ENUM','1','browser,stub,whisper,azure,google,other','STT プロバイダ（browser=ブラウザ音声認識（Chrome/Edge・キー不要・既定） / stub=ローカル開発用スタブ / whisper=OpenAI Whisper / azure / google / other）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_ENABLED','BOOLEAN','0','true,false','授業の AI 解析（フェーズノート batC61 / 最終まとめ batC62）を使うか（既定 true。false なら書き起こしだけ）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_ENDPOINT','TEXT','0',NULL,'STT エンドポイント URL（OpenAI 互換 /audio/transcriptions 想定）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_API_KEY','TEXT','0',NULL,'STT API Key（seed しない。未設定なら日本語の理由でエラー）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_MODEL','TEXT','0',NULL,'STT モデル名（例 whisper-1）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_STT_TIMEOUT_SECONDS','INTEGER','0','5..300','STT API への 1 回の通信を待つ最大秒数（5〜300）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_CHUNK_SECONDS','INTEGER','1','5..120','アップロード分塊の長さ（秒。既定 20）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_ZH','TEXT','0',NULL,'言語モード 中国語 → STT 言語コード（既定 zh）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_JA','TEXT','0',NULL,'言語モード 日本語 → STT 言語コード（既定 ja）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_EN','TEXT','0',NULL,'言語モード 英語 → STT 言語コード（既定 en）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_ZH_EN','TEXT','0',NULL,'言語モード 中国語＋英語 → STT 言語コード（既定 zh）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_JA_EN','TEXT','0',NULL,'言語モード 日本語＋英語 → STT 言語コード（既定 ja）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_LANG_AUTO','TEXT','0',NULL,'言語モード 自動判別 → STT 言語コード（既定は空=自動）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_INTERVAL_MINUTES','INTEGER','1','3..20','間隔トリガー：直前フェーズからこの分経過したらノート更新（既定 5）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_MIN_CHARS','INTEGER','1','100..10000','文字量トリガー：累積転写文字数がこの文字数を超えたら更新（既定 200）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_KEYWORDS','TEXT','1',NULL,'キーワードトリガー（カンマ区切り。例 宿題,試験の重点）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_TRIGGER_COOLDOWN_MINUTES','INTEGER','0','1..30','連発防止クールダウン（前回フェーズからこの分未満なら抑制。既定 3）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_MAX_RECORDING_MINUTES','INTEGER','1','1..240','録音最大時間（分。既定 120。超えた分はアップロードを拒否）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_RETENTION_DAYS','INTEGER','1','1..365','保存期間（日。既定 30。batR02 のクリーンアップで掃除）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_DAILY_LIMIT_PER_ACCOUNT','INTEGER','0','0..100','1 アカウント 1 日の録音回数（0=無制限。0〜100）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_PROVIDER','ENUM','1','qwen:1,qwen:2,qwen:3,qwen:4,qwen:5,doubao:1,doubao:2,deepseek:1,deepseek:2,chatgpt:1,chatgpt:2','ノート/要約の LLM スロット（URL・API Key は AIモデルページの同じスロットを共用）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_SYSTEM_PROMPT','TEXT','0',NULL,'フェーズノートの System Prompt（4 つのキーを持つ JSON を返させる）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_USER_PROMPT','TEXT','0',NULL,'フェーズノートの User Prompt（{transcript} を置換する）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_SUMMARY_SYSTEM_PROMPT','TEXT','0',NULL,'最終まとめの System Prompt')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_SUMMARY_USER_PROMPT','TEXT','0',NULL,'最終まとめの User Prompt（{transcript} を置換する）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_TIMEOUT_SECONDS','INTEGER','0','30..600','ノート生成 API への 1 回の通信を待つ最大秒数（30〜600）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_NOTE_MAX_COMPLETION_TOKENS','INTEGER','0','512..16384','ノート生成の最大出力 Token 数（512〜16384）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('CLASSROOM_AI','CLASSROOM_AI_VIEW_SCOPE','ENUM','0','self,family','閲覧範囲（self=自分のみ / family=自分の家族。既定 family）')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
