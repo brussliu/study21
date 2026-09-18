@@ -67,8 +67,8 @@ class FigureOutputDtosTest {
         assertThat(FigureMode.of("b")).contains(FigureMode.B);
         assertThat(FigureMode.of(" batC51-C ")).contains(FigureMode.C);
         assertThat(FigureMode.of("batC51-D")).contains(FigureMode.D);
-        // 歴史的な batC51（モードが無い要求）は A として扱う（利用者の指示）
-        assertThat(FigureMode.of("batC51")).contains(FigureMode.A);
+        // モードが無い時代の裸の batC51 は解決しない（バッチも削除済み。利用者の指示）
+        assertThat(FigureMode.of("batC51")).isEmpty();
         assertThat(FigureMode.of(null)).isEmpty();
         assertThat(FigureMode.of("X")).isEmpty();
     }
@@ -108,14 +108,14 @@ class FigureOutputDtosTest {
     // ------------------------------------------------------------------ 登録
 
     @Test
-    @DisplayName("4 つのモード DTO がバッチコードで登録され、歴史的な batC51 も残る")
+    @DisplayName("4 つのモード DTO がバッチコードで登録され、裸の batC51 は登録しない")
     void dtoRegistration() {
         assertThat(AiResponseDtos.dtoOf("batC51-A")).contains(BatC51AResultDto.class);
         assertThat(AiResponseDtos.dtoOf("batC51-B")).contains(BatC51BResultDto.class);
         assertThat(AiResponseDtos.dtoOf("batC51-C")).contains(BatC51CResultDto.class);
         assertThat(AiResponseDtos.dtoOf("batC51-D")).contains(BatC51DResultDto.class);
-        // 歴史的な要求・履歴（batC51）は今までどおり読める
-        assertThat(AiResponseDtos.dtoOf("batC51")).contains(BatC51ResultDto.class);
+        // モードが無い時代のコード（裸の batC51）は登録しない（バッチも削除済み）
+        assertThat(AiResponseDtos.dtoOf("batC51")).isEmpty();
         assertThat(AiResponseDtos.dtoOf("batC52")).contains(BatC52ResultDto.class);
         for (FigureMode mode : FigureMode.values()) {
             assertThat(AiResponseDtos.dtoOf(mode.taskCode())).contains(mode.dtoClass());

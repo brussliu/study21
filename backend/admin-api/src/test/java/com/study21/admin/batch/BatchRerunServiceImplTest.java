@@ -166,12 +166,12 @@ class BatchRerunServiceImplTest {
     void rerunIsRejectedForCallBatchesEvenWhenTheHandlerExists() {
         // 種別 C（呼出）は他の処理から呼ばれるバッチなので、画面の【再実行】では起動しない
         // （業務処理＝ハンドラがあっても同じ。利用者の指示）
-        RecordingHandler callHandler = new RecordingHandler("batC51");
+        RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
                 executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler));
-        when(registry.findByCode("batC51")).thenReturn(definition("batC51", BatchTaskType.C, false));
+        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
 
-        assertThatThrownBy(() -> callService.rerun("batC51", "admin"))
+        assertThatThrownBy(() -> callService.rerun("batC52", "admin"))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining("画面から実行できません");
 
@@ -183,13 +183,13 @@ class BatchRerunServiceImplTest {
     void callBatchesCanStillBeStartedByOtherProcessing() {
         // 止めるのは「画面からの入口」だけ。他の処理（AI 生図の流水線・授業ノートなど）からの
         // 呼出（rerunStep）は今までどおり動く
-        RecordingHandler callHandler = new RecordingHandler("batC51");
+        RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
                 executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler));
-        when(registry.findByCode("batC51")).thenReturn(definition("batC51", BatchTaskType.C, false));
-        when(executionMapper.findRunningByBatchCode("batC51")).thenReturn(null);
+        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
+        when(executionMapper.findRunningByBatchCode("batC52")).thenReturn(null);
 
-        Map<String, Object> result = callService.rerunStep("batC51", "APP", "{\"aiRequestId\":164}");
+        Map<String, Object> result = callService.rerunStep("batC52", "APP", "{\"assistId\":12}");
 
         assertThat(callHandler.calls).isEqualTo(1);
         assertThat(result).containsEntry("success", true);
@@ -200,12 +200,12 @@ class BatchRerunServiceImplTest {
         // 一覧の行が返す 2 つのフラグの意味:
         //   canManualRerun = 画面の【再実行】ボタンを出すか（種別 C は出さない）
         //   canRerun       = そのボタンを押せるか（ハンドラ未実装は押せない）
-        RecordingHandler callHandler = new RecordingHandler("batC51");
+        RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl listService = new BatchServiceImpl(registry, mock(SettingsService.class),
                 executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(handler, callHandler));
         when(registry.findAll()).thenReturn(List.of(
                 definition("batS01", BatchTaskType.S, true),
-                definition("batC51", BatchTaskType.C, false),
+                definition("batC52", BatchTaskType.C, false),
                 definition("batR02", BatchTaskType.R, false)));
         when(controlMapper.findAll()).thenReturn(List.of());
         when(executionMapper.findLatestPerBatch()).thenReturn(List.of());
@@ -214,7 +214,7 @@ class BatchRerunServiceImplTest {
                 .containsEntry("canManualRerun", true)
                 .containsEntry("canRerun", true);
         // 種別 C はハンドラがあってもボタンを出さない（押せる扱いにもしない）
-        assertThat(rowOf(listService, "batC51"))
+        assertThat(rowOf(listService, "batC52"))
                 .containsEntry("canManualRerun", false)
                 .containsEntry("canRerun", false);
         // 種別 R はハンドラが無いので、ボタンは出すが押せない（2.1 では未実装）

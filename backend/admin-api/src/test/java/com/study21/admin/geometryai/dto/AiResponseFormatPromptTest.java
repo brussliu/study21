@@ -15,8 +15,8 @@ class AiResponseFormatPromptTest {
             new AiResponseFormatPrompt(new AiResponseSchemaService(new ObjectMapper()));
 
     @Test
-    void batC51の出力形式を足す() {
-        String result = prompt.appendTo("あなたは作図アシスタントです。", "batC51");
+    void batC51Aの出力形式を足す() {
+        String result = prompt.appendTo("あなたは作図アシスタントです。", "batC51-A");
 
         assertThat(result).startsWith("あなたは作図アシスタントです。");
         assertThat(result).contains("## 出力形式（JSON Schema）");
@@ -39,7 +39,7 @@ class AiResponseFormatPromptTest {
 
     @Test
     void システムプロンプトが空でも出力形式だけは渡す() {
-        String result = prompt.appendTo(null, "batC51");
+        String result = prompt.appendTo(null, "batC51-A");
 
         assertThat(result).startsWith("## 出力形式（JSON Schema）");
         assertThat(result).contains("\"コマンド\"");

@@ -21,8 +21,9 @@ import java.util.Optional;
  * <p>モードごとに**独立したバッチ**（batC51-A〜D）として登録し、プロンプトと出力 DTO も別に持つ。
  * 処理（画像・モデル呼び出し・コマンド検証・保存）は共通の部品を使う。</p>
  *
- * <p><strong>歴史的な {@code batC51}（モード欄が無い要求・実行履歴）は A として扱う</strong>
- * （利用者の指示。結果種別は当時の分類から読み替える）。</p>
+ * <p>{@code 作図モード} が NULL の時代の要求（モード欄が無い行）は **A として扱う**
+ * （利用者の指示。結果種別は当時の分類から読み替える）。モードが無い時代の**裸の batC51**
+ * （バッチコード）は 2026-09-19 に削除したので、{@link #of(String)} は解決しない（空を返す）。</p>
  */
 public enum FigureMode {
 
@@ -35,8 +36,8 @@ public enum FigureMode {
     D("文章と図を合わせて作図",
             "文章の条件と参考図の両方を使って作図します。");
 
-    /** 歴史的な要求・実行履歴のコード（モードが無い時代のもの）。 */
-    public static final String LEGACY_TASK_CODE = "batC51";
+    /** モード別バッチのコードの接頭辞（{@code batC51-A}〜{@code batC51-D} の {@code batC51} の部分）。 */
+    public static final String TASK_CODE_PREFIX = "batC51";
 
     private final String label;
     private final String description;
@@ -58,7 +59,7 @@ public enum FigureMode {
 
     /** このモードのバッチコード（batC51-A〜D。**連字符つきの接尾辞**を使う）。 */
     public String taskCode() {
-        return LEGACY_TASK_CODE + "-" + name();
+        return TASK_CODE_PREFIX + "-" + name();
     }
 
     /** このモードの出力 DTO（モードごとに独立。共通項目は {@link FigureOutputDto}）。 */
@@ -83,18 +84,16 @@ public enum FigureMode {
 
     /**
      * 画面の値（{@code A}〜{@code D}。小文字・前後の空白も許す）と、バッチコード（{@code batC51-A}）の
-     * どちらからでも解決する。歴史的な {@code batC51} は {@link #A} として扱う。
+     * どちらからでも解決する。モード欄が無い時代の値（{@code null} / 空 / 未知）は空を返すので、
+     * 呼ぶ側が「A として扱う」（`orElse(A)`）を決める。
      */
     public static Optional<FigureMode> of(String value) {
         if (value == null || value.isBlank()) {
             return Optional.empty();
         }
         String normalized = value.trim().toUpperCase(Locale.ROOT);
-        if (LEGACY_TASK_CODE.toUpperCase(Locale.ROOT).equals(normalized)) {
-            return Optional.of(A);
-        }
-        if (normalized.startsWith(LEGACY_TASK_CODE.toUpperCase(Locale.ROOT) + "-")) {
-            normalized = normalized.substring(LEGACY_TASK_CODE.length() + 1);
+        if (normalized.startsWith(TASK_CODE_PREFIX.toUpperCase(Locale.ROOT) + "-")) {
+            normalized = normalized.substring(TASK_CODE_PREFIX.length() + 1);
         }
         for (FigureMode mode : values()) {
             if (mode.name().equals(normalized)) {

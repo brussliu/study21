@@ -18,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>確かめる接縫:</p>
  * <ol>
  *   <li>4 つのモード別バッチ（batC51-A〜D）が**別々に**登録されている（入れ子のハンドラも走査される）</li>
- *   <li>歴史的な batC51 の入口も残っている（要求行が無いときの再実行・互換）</li>
+ *   <li>モードが無い時代の裸の batC51 の入口は**残さない**（実行の入口が無くなったため。利用者の指示）</li>
  *   <li>バッチ定義の設定ページは GEOMETRY_AI（必須設定はモード共通の分）</li>
  * </ol>
  */
@@ -32,14 +32,14 @@ class FigureBatchRegistrationTest {
     private BatchTaskRegistry taskRegistry;
 
     @Test
-    @DisplayName("4 つのモード別バッチと歴史的な batC51 が別々に登録されている")
+    @DisplayName("4 つのモード別バッチが登録され、裸の batC51 は登録されていない")
     void registersFourModeBatches() {
         List<String> codes = handlers.stream().map(BatchTaskHandler::taskCode).toList();
         assertThat(codes).contains("batC51-A", "batC51-B", "batC51-C", "batC51-D");
         // 同じコードが 2 つ登録されていない（どちらが使われるか分からない状態を作らない）
         assertThat(codes).doesNotHaveDuplicates();
-        // 歴史的なコードの入口も残す
-        assertThat(codes).contains(FigureMode.LEGACY_TASK_CODE);
+        // モードが無い時代のコード（裸の batC51）の入口は残さない
+        assertThat(codes).doesNotContain("batC51");
     }
 
     @Test
@@ -55,6 +55,7 @@ class FigureBatchRegistrationTest {
             assertThat(definition.requiredSettings())
                     .anyMatch(requirement -> "GEOMETRY_AI_SYSTEM_PROMPT".equals(requirement.settingKey()));
         }
-        assertThat(taskRegistry.findByCode(FigureMode.LEGACY_TASK_CODE)).isNotNull();
+        // モードが無い時代の裸の batC51 は定義にも残さない
+        assertThat(taskRegistry.findByCode("batC51")).isNull();
     }
 }

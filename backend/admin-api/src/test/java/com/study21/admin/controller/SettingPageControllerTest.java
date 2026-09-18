@@ -51,15 +51,23 @@ class SettingPageControllerTest {
     }
 
     @Test
-    void batC51のスキーマを返す() throws Exception {
-        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC51"))
+    void batC51Aのスキーマを返す() throws Exception {
+        // 画面（システム設定 > AI 設定）はモード別のバッチコード（batC51-A〜D）で Data TAB を出す
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC51-A"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.taskCode").value("batC51"))
-                .andExpect(jsonPath("$.data.dto").value("BatC51ResultDto"))
+                .andExpect(jsonPath("$.data.taskCode").value("batC51-A"))
+                .andExpect(jsonPath("$.data.dto").value("BatC51AResultDto"))
                 .andExpect(jsonPath("$.data.schema.type").value("object"))
                 .andExpect(jsonPath("$.data.schema.properties.コマンド.type").value("array"))
-                .andExpect(jsonPath("$.data.schema.properties.分類.enum[0]").value("FIGURE"))
-                .andExpect(jsonPath("$.data.schema.properties.図形名.description").isNotEmpty());
+                .andExpect(jsonPath("$.data.schema.properties.作図オブジェクト.type").value("array"))
+                .andExpect(jsonPath("$.data.schema.properties.画像オブジェクト.type").value("array"));
+    }
+
+    @Test
+    void 裸のbatC51はスキーマを返さない() throws Exception {
+        // モードが無い時代の batC51 はバッチごと削除した。DTO の表にも無いので拒否される
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC51"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

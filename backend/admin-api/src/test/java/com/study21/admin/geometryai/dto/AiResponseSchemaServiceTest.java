@@ -106,8 +106,10 @@ class AiResponseSchemaServiceTest {
 
     @Test
     void バッチコードからDTOを引ける() {
-        assertThat(AiResponseDtos.dtoOf("batC51")).contains(BatC51ResultDto.class);
+        assertThat(AiResponseDtos.dtoOf("batC51-A")).contains(BatC51AResultDto.class);
         assertThat(AiResponseDtos.dtoOf("batC52")).contains(BatC52ResultDto.class);
+        // モードが無い時代の裸の batC51 はバッチごと削除した（DTO の表にも無い）
+        assertThat(AiResponseDtos.dtoOf("batC51")).isEmpty();
         assertThat(AiResponseDtos.dtoOf("batC99")).isEmpty();
     }
 

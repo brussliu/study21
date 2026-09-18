@@ -46,7 +46,7 @@ import static org.mockito.Mockito.when;
  *   <li>既に `GENERATED` なら AI を呼ばない（無駄な課金をしない）</li>
  *   <li>モード別バッチは**自分のモードの要求だけ**を処理する（取り違えたらスキップ）</li>
  *   <li>NEEDS_INPUT / UNSUPPORTED は「コマンドが空で正常」なので再質問しない（1 回で確定）</li>
- *   <li>履歴的な batC51（モードが無い要求）は A として処理し、結果種別は当時の分類から読み替える</li>
+ *   <li>作図モードが無い要求（モード欄が NULL の時代の行）は A として処理し、結果種別は当時の分類から読み替える</li>
  *   <li>追跡用の設定スナップショットを残す（鍵は入らない）</li>
  * </ol>
  */
@@ -307,10 +307,10 @@ class AiFigureGenerateStepTest {
         verify(aiClient, org.mockito.Mockito.times(1)).call(any());
     }
 
-    // ------------------------------------------------------------------ 歴史的な要求
+    // ------------------------------------------------------------------ モード欄が無い要求
 
     @Test
-    @DisplayName("歴史的な batC51（モードが無い要求）は A として処理し、結果種別を分類から読み替える")
+    @DisplayName("作図モードが無い要求（NULL）は A として処理し、結果種別を分類から読み替える")
     void treatsLegacyRequestAsModeA() {
         stubSettings(0);
         GeometryAiRequestEntity entity = request("PREPROCESSED", null);
@@ -321,7 +321,7 @@ class AiFigureGenerateStepTest {
         when(requestMapper.findById(REQUEST_ID)).thenReturn(entity);
         when(aiClient.call(any())).thenReturn(ok("{\"判定\":\"GENERATABLE\",\"コマンド\":[\"f(x) = x^2\"]}"));
 
-        Map<String, Object> result = step.run(execution(REQUEST_ID, "batC51"), null);
+        Map<String, Object> result = step.run(execution(REQUEST_ID, "batC51-A"), FigureMode.A);
 
         assertThat(result.get("mode")).isEqualTo("A");
         assertThat(result.get("requestedOutputType")).isEqualTo("GRAPH");

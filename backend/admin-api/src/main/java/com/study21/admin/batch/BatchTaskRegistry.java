@@ -184,10 +184,11 @@ public class BatchTaskRegistry {
                 "STUDY_MONITOR_FIRST_USER_PROMPT"));
 
         // ---- 図形管理（AI生図 / AI画図助手）----
-        // 利用者の指示で、AI 生図の流水線は「前処理（通常コード）→ batC51（AI 生成）→ 検証（通常コード）」
-        // に変更した。バッチとして登録するのは AI 生成の batC51 だけ（前処理・検証はバッチではない）。
+        // 利用者の指示で、AI 生図の流水線は「前処理（通常コード）→ AI 生成（バッチ）→ 検証（通常コード）」
+        // になった。バッチとして登録するのは AI 生成だけ（前処理・検証はバッチではない）。
         // AI 画図助手もバッチ（batC52）として実行する（依頼 → その場で即時実行）。
-        // 種別 C（呼出）＝画面から随時実行する。S（起動時）にはしない（起動時に AI を呼ばない）。
+        // 種別 C（呼出）＝他の処理（流水線・授業ノートなど）が工程として呼ぶ。画面からは起動しない
+        // （`BatchTaskDefinition#canManualRerun()`。起動時に AI を呼ばないので S にもしない）。
         // 必須設定は**工程クラスが宣言したもの**を使う（定義と実装が食い違わないように）
         // AI 生図の AI 生成は**モードごとに 1 バッチ**（batC51-A〜D）。連字符つきの接尾辞は
         // 既存の batC15-1〜3 と同じ扱い（バッチコードの列は VARCHAR(20) で収まる）。
@@ -197,11 +198,12 @@ public class BatchTaskRegistry {
                     "AI生図 " + mode.label() + "（GeoGebra コマンド生成）", false, null, null,
                     "GEOMETRY_AI", AiFigureGenerateStep.REQUIRED_SETTINGS));
         }
-        // 歴史的な batC51（モードが無い時代の要求・実行履歴）用の入口。要求行が無いときは
-        // モード A の生成待ちを拾う（利用者の指示: 歴史的な要求は A として扱う）
-        list.add(new BatchTaskDefinition(FigureMode.LEGACY_TASK_CODE, BatchTaskType.C,
-                "AI生図 AI生成（歴史的なコード。モード A として処理）", false, null, null,
-                "GEOMETRY_AI", AiFigureGenerateStep.REQUIRED_SETTINGS));
+        // モードが無い時代の裸の batC51 は登録しない（利用者の指示。2026-09-19）。
+        // 流水線は `FigureMode.of(要求.作図モード).orElse(A).taskCode()` でモード別のコードを使い、
+        // 画面の【再実行】も種別 C では出さないので、裸の batC51 を起動する入口が無くなった。
+        // 要求行の 作図モード が NULL の時代の行は、今までどおり**モード A として処理**する
+        // （`FigureMode.of(null)` → 空 → `orElse(A)`）。過去の実行履歴（バッチコード batC51）は
+        // 消さずにそのまま残す（履歴画面はコードをそのまま表示する）。
         list.add(new BatchTaskDefinition("batC52", BatchTaskType.C,
                 "AI画図助手 生成", false, null, null,
                 "GEOMETRY_AI", AiAssistGenerateStep.REQUIRED_SETTINGS));

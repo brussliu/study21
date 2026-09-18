@@ -18,7 +18,7 @@ import java.util.Map;
  *
  * <p>利用者の指示で、流水線は「前処理（通常コード）→ **AI 生成（モード別のバッチ）** → 検証（通常コード）」の
  * 3 工程になった。**バッチとして実行し、`BAT_バッチ実行履歴情報` に残るのは AI 生成の 1 行だけ**
- * （モード A〜D で batC51-A〜batC51-D。歴史的な要求は batC51＝モード A として実行する）。
+ * （モード A〜D で batC51-A〜batC51-D）。作図モードが NULL の時代の要求はモード A として実行する。
  * 前処理・検証はバッチではなく、このサービスの通常コードとして直接実行する（履歴には残らない）。</p>
  *
  * <p>失敗した工程で止める。`要求内容` に {@code {"aiRequestId": N, "requestNo": "...", "stage": "GENERATE"}}
@@ -29,16 +29,13 @@ import java.util.Map;
  * そのまま処理中の状態（`PREPROCESSED` など）で残すと、働き手が**同じ行を拾い続けて
  * 後ろの要求がまったく進まなくなる**（お金も時間も無駄になる）。</p>
  *
- * <p>**画面から見れば 1 操作 = 1 ボタン**のまま。AI の再課金を最小化するため、batC51 だけを
- * 単体で【再実行】できる。</p>
+ * <p>**画面から見れば 1 操作 = 1 ボタン**のまま。AI の再課金を最小化するため、AI 生成の工程
+ * （モード別のバッチ）だけを単体で動かせる。</p>
  */
 @Service
 public class AiFigurePipelineService {
 
     private static final Logger log = LoggerFactory.getLogger(AiFigurePipelineService.class);
-
-    /** バッチとして実行する工程（AI 生成だけ）。モードごとに 1 つ（batC51-A〜D）。 */
-    private static final String LEGACY_BATCH_CODE = "batC51";
 
     private static final String OPERATOR_FALLBACK = "geometry-ai";
 
@@ -64,9 +61,9 @@ public class AiFigurePipelineService {
     }
 
     /**
-     * 1 件の AI 生図を前処理（コード）→ batC51（AI・バッチ）→ 検証（コード）の順に進める。
+     * 1 件の AI 生図を前処理（コード）→ AI 生成（モード別バッチ）→ 検証（コード）の順に進める。
      *
-     * @return バッチで実行した工程の結果（`steps`。batC51 の 1 件だけ）と、止まった工程
+     * @return バッチで実行した工程の結果（`steps`。AI 生成の 1 件だけ）と、止まった工程
      *         （`stoppedAt`。PREPROCESS / GENERATE / VALIDATE。最後まで進めば null）
      */
     public Map<String, Object> run(long aiRequestId, String operator) {

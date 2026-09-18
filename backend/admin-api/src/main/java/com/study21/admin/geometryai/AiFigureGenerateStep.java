@@ -48,14 +48,15 @@ import java.util.Map;
  * 4xx（キー・モデル不正）は再試行しない。**JSON 破損・空応答は 1 回だけ再質問する**が、
  * NEEDS_INPUT / UNSUPPORTED（コマンドが空で正常）は再質問しない。</p>
  *
- * <p>歴史的な {@code batC51}（モードが無い要求・実行履歴）は**モード A として扱う**。</p>
+ * <p>{@code 作図モード} が NULL の時代の要求は**モード A として扱う**（`FigureMode.of(null)` → 空 →
+ * `orElse(A)`）。結果種別も当時の分類から読み替える。</p>
  */
 @Component
 public class AiFigureGenerateStep {
 
     private static final Logger log = LoggerFactory.getLogger(AiFigureGenerateStep.class);
 
-    /** 歴史的なコードでも動くように、必須設定はモード共通の分を宣言する。 */
+    /** 必須設定はモード共通の分を宣言する（モード別の項目は「未設定なら共通を継承」する）。 */
     public static final List<com.study21.admin.setting.SettingRequirement> REQUIRED_SETTINGS =
             FigureProcessorSettings.requiredSettings();
 
@@ -96,20 +97,16 @@ public class AiFigureGenerateStep {
         this.responseFormatPrompt = responseFormatPrompt;
     }
 
-    /** 1 件を生成する（歴史的な batC51 の入口。モードは要求行から決める）。 */
-    public Map<String, Object> run(BatchExecutionEntity execution) {
-        return run(execution, null);
-    }
-
     /**
      * 1 件を生成する。
      *
-     * @param pinnedMode モード別バッチ（batC51-A〜D）から呼ぶときのモード。歴史的な batC51 は null
+     * @param pinnedMode モード別バッチ（batC51-A〜D）から呼ぶときのモード。**必ず指定する**
+     *                   （モードが無い時代の裸の batC51 の入口は 2026-09-19 に削除した）
      */
     public Map<String, Object> run(BatchExecutionEntity execution, FigureMode pinnedMode) {
         Long requestedId = AiFigurePayload.requestId(execution);
         GeometryAiRequestEntity entity = requestedId == null
-                ? requestMapper.findGenerateTarget(pinnedMode == null ? null : pinnedMode.name())
+                ? requestMapper.findGenerateTarget(pinnedMode.name())
                 : requestMapper.findById(requestedId);
         Map<String, Object> result = new LinkedHashMap<>();
         if (entity == null) {
@@ -122,7 +119,7 @@ public class AiFigureGenerateStep {
 
         FigureMode mode = FigureMode.of(entity.getMode()).orElse(FigureMode.A);
         result.put("mode", mode.name());
-        if (pinnedMode != null && pinnedMode != mode) {
+        if (pinnedMode != mode) {
             // モード別バッチが別モードの要求を拾った（要求行が正。取り違えたら実行しない）
             result.put("skipped", true);
             result.put("message", "この要求の作図モードは " + mode.name() + " です（"

@@ -21,8 +21,9 @@ public final class AiResponseDtos {
         for (FigureMode mode : FigureMode.values()) {
             BY_TASK_CODE.put(mode.taskCode(), mode.dtoClass());
         }
-        // 歴史的な batC51（モードが無い時代の要求・実行履歴）は今までどおりの DTO で読む
-        BY_TASK_CODE.put(FigureMode.LEGACY_TASK_CODE, BatC51ResultDto.class);
+        // モードが無い時代の裸の batC51 は登録しない（バッチごと削除した。利用者の指示。2026-09-19）。
+        // `BatC51ResultDto` 自体は、生成した結果（BAT_AI呼出履歴情報 の本文）を読む共通の DTO として
+        // 使い続ける（`GeometryAiResponseParser`）。
         BY_TASK_CODE.put("batC52", BatC52ResultDto.class);
     }
 

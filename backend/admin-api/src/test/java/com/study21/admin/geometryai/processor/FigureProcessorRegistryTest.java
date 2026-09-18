@@ -129,10 +129,12 @@ class FigureProcessorRegistryTest {
     }
 
     @Test
-    @DisplayName("歴史的な batC51 はモード A として解決する（要求・実行履歴の互換）")
+    @DisplayName("モード別バッチのコードから解決する。裸の batC51 は解決しない")
     void resolvesLegacyTaskCode() {
-        assertThat(registry.ofTaskCode("batC51")).contains(processorA);
+        assertThat(registry.ofTaskCode("batC51-A")).contains(processorA);
         assertThat(registry.ofTaskCode("batC51-C")).contains(processorC);
+        // モードが無い時代の裸の batC51 はもう無い（バッチも削除済み。利用者の指示）
+        assertThat(registry.ofTaskCode("batC51")).isEmpty();
         assertThat(registry.ofTaskCode("batC52")).isEmpty();
         assertThat(FigureProcessorSettings.requiredSettings()).isNotEmpty();
     }

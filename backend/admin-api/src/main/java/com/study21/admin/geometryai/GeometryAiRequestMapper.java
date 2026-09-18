@@ -8,8 +8,8 @@ import java.util.List;
 /**
  * GEO_AI生図リクエスト情報（AI 生図の要求）の Mapper（admin-api 側）。
  *
- * <p>AI を呼ぶ 3 工程（batC51/52/53）が使う。画面向けの入口は user-api にあり、
- * 両サービスは互いを呼べないので**この表の状態列だけ**で橋渡しする。</p>
+ * <p>AI 生図の 3 工程（前処理・AI 生成（モード別バッチ batC51-A〜D）・検証）が使う。
+ * 画面向けの入口は user-api にあり、両サービスは互いを呼べないので**この表の状態列だけ**で橋渡しする。</p>
  *
  * <p>更新は必ず**楽観的ロック（バージョン）**を伴う。画面（取消・確定）とバッチが同じ行を
  * 触るため、取った行の版数が変わっていたら何も書かない（0 行更新）。</p>
@@ -20,15 +20,18 @@ public interface GeometryAiRequestMapper {
     GeometryAiRequestEntity findById(@Param("requestId") long requestId);
 
     /**
-     * 前処理（batC51）が拾う 1 件。
+     * 前処理（通常コード。バッチではない）が拾う 1 件。
      * `QUEUED`（受付済）と `FAILED(PREPROCESS)`（前処理で失敗した）の最古のもの。
      */
     GeometryAiRequestEntity findPreprocessTarget();
 
     /**
-     * AI 生成（batC52）が拾う 1 件。
+     * AI 生成（モード別バッチ batC51-A〜D）が拾う 1 件。
      * `PREPROCESSED`（前処理済）・`GENERATING`（前回の呼び出し中に落ちた残骸）・
      * `FAILED(GENERATE)`（生成で失敗した）の最古のもの。
+     *
+     * <p>モードは**必ず指定する**。{@code A} のときだけ `作図モード` が NULL の行も対象にする
+     * （モード欄が無い時代の要求を A として扱うため）。</p>
      */
     GeometryAiRequestEntity findGenerateTarget(@Param("mode") String mode);
 

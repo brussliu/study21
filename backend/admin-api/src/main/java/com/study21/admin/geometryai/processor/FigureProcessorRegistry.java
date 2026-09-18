@@ -52,9 +52,10 @@ public class FigureProcessorRegistry {
     }
 
     /**
-     * バッチコードのプロセッサ。
+     * バッチコードのプロセッサ（{@code batC51-A} ならモード A のプロセッサ）。
      *
-     * <p>{@code batC51}（歴史的なコード）と {@code batC51-A}（モード A）のどちらでも A を返す。</p>
+     * <p>モードが無い時代の裸の {@code batC51} は 2026-09-19 に削除したので、空を返す
+     * （{@link FigureMode#of(String)} が解決しない）。</p>
      */
     public Optional<FigureProcessor> ofTaskCode(String taskCode) {
         if (taskCode == null || taskCode.isBlank()) {
