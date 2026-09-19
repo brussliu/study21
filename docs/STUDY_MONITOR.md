@@ -59,23 +59,53 @@ DB は 2.0 の 4 テーブルを 2.1 の規約で再設計して移行済み
 理由が空のときは DB に NULL で残す（「理由なし」と分かるように）。
 送信は一括・1 枚とも `PATCH /api/user/study-monitor/snapshots`（`{updates:[{snapshotId,version}], result, reason}`）。
 
-## 3. 未実装（2.1 での後続タスク）
+## 3. バッチ（batL02 / batL03）— 2026-09-19 に実装
 
-2.0 では次のバッチが実データを作っていた。2.1 は**テーブルとデータの移行までは済んでいる**
-（`database/学習状況モニター/学習状況モニター設計.md`）が、バッチと API が未実装のため、
-画面はまだ仮データで動かしている（`studyMonitorMock.ts` のコメント参照）。
+2.0 の 2 つのバッチを 2.1 の admin-api に移植した（`com.study21.admin.studymonitor`）。
+実行のきっかけは**統一スケジューラ**（30 秒ごと。実行間隔とずらしは設定。`docs/BATCH_SCHEDULE.md`）。
 
-| 2.0 のバッチ | 役割 | 2.1 の状態 |
+| バッチ | 役割 | 実装 |
 |---|---|---|
-| batL02 | 録画ファイルの取込とスナップショット切り出し | 未実装 |
-| batL03 | スナップショットの AI 分析（結果・確信度・理由の書き込み） | 未実装 |
+| batL02 | 録画ファイルの取込とスナップショット切り出し（ffmpeg） | `StudyMonitorImportHandler` |
+| batL03 | スナップショットの AI 分析（結果・信頼度・理由の書き込み） | `StudyMonitorAnalyzeHandler` |
 
-`docs/BAT_バッチ管理設計.md` のタスク一覧に両バッチは登録済みだが、
-`バッチ実行履歴情報` に実績がないため未使用（`database/バッチ/TBL_BAT_バッチ実行履歴情報.sql`）。
+- **batL02**: `checked/` を先に処理 → ソースフォルダーの動画（最新の 1 本は「125MB 超かつ更新から
+  5 分以上」のときだけ）を `checked/` へ移してから取り込む。処理対象時間帯の外は `bak/` へ移す
+  （判定は**ファイル名の撮影時刻**で、跨日も扱う）。1 回の実行で最大 5 本。
+  ffprobe で長さを読み、ffmpeg（`-vf fps=1/切出間隔秒`）で切り出して、日付フォルダー
+  （`<snapshot-root>/<yyyyMMdd>/snapshot_%06d.jpg`）へ移す。DB には
+  `MON_学習モニター動画情報`（`取込状態コード='IMPORTED'`）と
+  `MON_学習モニタースナップショット情報`（`切出状態コード='CREATED'`）を書き、`保存パス` は
+  **保存ルートからの相対パス**にする。監査は `登録元コード='BAT_L02'`。
+- **batL03**: `切出状態コード='CREATED'` かつ**最新版（`最新版フラグ='1'`）の分析行が無い**
+  スナップショットを古い順に `STUDY_MONITOR_AI_BATCH_LIMIT` 枚だけ取る。画像を設定解像度へ縮小して
+  1 枚ずつ vision AI に渡し、`判定（status）`・`confidence`・`reason` を検証して
+  `MON_学習モニター画像分析情報` に書く（`最終採用段階コード='FLASH'`、二次判定は
+  `二次判定要否='0'` / `二次分析状態コード='NOT_REQUIRED'`）。失敗は `ERROR` 行。
+  AI 呼出は `BAT_AI呼出履歴情報` に 1 行ずつ残す。監査は `登録元コード='BAT_L03'`。
+  - **2.0 の欠陥を直した**: 2.0 は実行のたびに `分析状態='ERROR'` の全行を DELETE してから
+    対象を選んでいたため、壊れた画像が**永久に再試行**され、最古の数枚が毎回枠を埋めて
+    後続が餓死した（実測 532 枚が未分析のまま）。2.1 は **ERROR 行を消さない**
+    （最新版フラグが立つので対象から外れる）。自動リトライはしない（画面で ERROR を見て人が直す）。
+  - **L03 は時間ではなくスナップショットの完成状態で選ぶ**（「L02 の時刻がずれているから
+    済んでいるはず」とは考えない）。
 
-API を作るときは `GET /api/user/study-monitor/snapshots`（対象日・時刻範囲・動画 ID）を
-`docs/API_CONVENTIONS.md` に従って追加し、`studyMonitorMock.ts` の呼び出しを差し替える。
-分析結果の修正は `PATCH /api/user/study-monitor/snapshots`（一括）にする予定。
+### 3.1 配備の前提（動画と画像の置き場）
+
+| 設定 | 置き場 | 備考 |
+|---|---|---|
+| `STUDY_MONITOR_VIDEO_SOURCE_DIRECTORY` | 監視カメラの録画フォルダ | **書き込み可**でマウントする（取り込んだ動画を `checked/`・`bak/` へ移すため） |
+| `study21.study-monitor.snapshot-root`（`STUDY21_STUDY_MONITOR_SNAPSHOT_ROOT`） | スナップショットの保存ルート | **user-api と同じ場所**を指す（user-api は読み取り専用、admin-api は書き込み可） |
+| `study21.study-monitor.ffmpeg-command` / `ffprobe-command` | 実行ファイル | 既定 `ffmpeg` / `ffprobe`（admin-api のイメージに同梱。docker-compose.yml を参照） |
+
+2.0 の設定 `STUDY_MONITOR_SNAPSHOT_OUTPUT_DIRECTORY`（絶対パス）は**使わない**
+（配備ごとに場所を変えられるよう、2.1 はプロパティ＋相対パスにした）。値が違えば batL02 が
+警告ログで知らせる（画面の欄は 2.0 との対応のために残してある）。
+
+**移行の確認（重要）**: 動画・スナップショット・分析の ID は 2.0 から維持したため、ID の連番
+（シーケンス）が実データより遅れていると、batL02 / batL03 の INSERT が**主キー重複で失敗**する。
+実測で 3 つのシーケンスが遅れていたので `database/移行/MIG_シーケンス同期_20260919.sql` で
+同期する（冪等。引っ越しの直後に流す）。
 
 ## 4. 検証
 

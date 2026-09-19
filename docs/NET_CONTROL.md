@@ -111,11 +111,18 @@
 
 2.0 はサイト・端末の更新後に **batL01（プロキシサービス／再起動）** を起動していた
 （`triggerBatL01AfterSiteControl` / `triggerBatL01AfterTerminalControl`）。
-2.1 のプロキシサービスは **batS01** として実装済み（`docs/PROXY.md`）だが、
-**サイト・端末の更新時に自動では起動しない**（DB 更新だけを行う）。プロキシは
-admin-api の起動時に batS01 が立ち上げ、落ちた場合はバッチ管理画面の【再実行】で復旧する。
-呼び出し箇所にはその旨のコメントを残している
-（`NetSiteServiceImpl` の create/update/delete/approve/reject/approveMany、`NetTerminalServiceImpl` の updateMode/updateModes）。
+2.1 のプロキシサービスは **batS01** として実装済み（`docs/PROXY.md`）で、起動の入口は
+①admin-api の起動時 ②バッチ管理画面の【再実行】③**batR03 / batR04**（ネット利用の終了／開始）の 3 つ。
+
+- **画面からのサイト・端末の更新では自動起動しない**（DB 更新だけを行う）。プロキシは端末モードを
+  **1 リクエストごとに DB から読む**ので、モードを書き換えれば次のリクエストから効く
+  （プロキシが動いていれば再起動は不要）。呼び出し箇所にはその旨のコメントを残している
+  （`NetSiteServiceImpl` の create/update/delete/approve/reject/approveMany、
+  `NetTerminalServiceImpl` の updateMode/updateModes）。
+- **batR03 / batR04 は端末モードの一括切替のあとにプロキシの稼働を保証する**
+  （`NetworkUsageService` → `ProxyServerService#startIfNeeded`）。設定は実行時刻だけで、
+  有効／無効はバッチ一覧のスイッチ（`BAT_バッチコントロール情報`）が唯一の正。
+  実行の仕組みは `docs/BATCH_SCHEDULE.md`。
 
 ## 4. データ移行
 
@@ -165,7 +172,8 @@ cd backend && STUDY21_DATASOURCE_PASSWORD=<パスワード> mvn -pl user-api -am
 
 | 項目 | 補足 |
 |---|---|
-| batL01 の起動 | batL01 実装後、上記コメント箇所から起動する |
+| batL01 の起動 | 2.1 は batS01（プロキシ）＋ **batR03 / batR04 が稼働を保証**する（§3）。画面からのサイト・端末の更新では自動起動しない |
+| インターネット利用の開始／停止 | **batR03 / batR04** が端末モードを S / T に一括切替して行う（実装済み。`docs/BATCH_SCHEDULE.md`）。画面のボタンは置かない（§1） |
 | 端末の**削除** | 画面からの登録・編集は 2.1 で実装した（2026-09-12）。削除は用意していない（使わなくなった端末は `状態='0'` で無効にする） |
 | `最終接続日時` の更新 | プロキシ（未実装）が更新する想定 |
 | サイトの通信履歴 | `NET_プロキシ通信履歴情報`（2.0 から 138,840 件を移行済み。`docs/PROXY.md`） |
