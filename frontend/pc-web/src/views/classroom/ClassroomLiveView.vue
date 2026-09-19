@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError, useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
   endClassroomRecord,
   fetchClassroomChunks,
+  type ClassroomChunkManifest,
+  type ClassroomFinalizeCheck,
   fetchClassroomOptions,
   fetchClassroomRecord,
   fetchClassroomSegments,
@@ -134,6 +136,25 @@ const audioMode: ClassroomAudioMode = audioModeFromQuery()
 /** 二つの音を混ぜるモードか（マイク＋スピーカー）。 */
 const mixing = audioMode !== 'mic'
 
+/** 主画面に出す音源の説明（短く。技術的な設定値は詳細情報へ）。 */
+const audioModeLabel = computed(() => (
+  mixing ? 'マイク＋共有の音' : 'マイク'
+))
+
+/**
+ * AI 授業ノートの枠を出すか（**使っていないときは出さない**。空の枠で画面を埋めない）。
+ *
+ * <p>出さない条件: AI 解析が無効・録音前でノートが 1 件も無い・終了後でノートが 1 件も無い。</p>
+ */
+const notePanelVisible = computed(() => (
+  !aiNotesOff.value && (notes.value.length > 0 || recording.value || finishing.value)
+))
+
+/** 話者の色分けの説明（色だけに頼らないよう、ラベルでも分かるようにする）。 */
+const speakerLegend = computed(() => (
+  mixing ? ['先生（共有の音）', '学生（マイク）'] : ['講義']
+))
+
 /**
  * **この記録の音源の設定**（書き起こしの**話者**はこれで決める）。
  *
@@ -193,6 +214,16 @@ const syncError = ref('')
 const sttStreamNotice = ref('')
 /** 操作が失敗したときの理由（日本語）。 */
 const actionError = ref('')
+/**
+ * 送った分塊の一覧（**画面が停止のあとに宣言する**）。
+ *
+ * <p>サーバーはこれで「最後の分塊の取りこぼし」を見つける（保存済みの行の最大連番だけでは、
+ * まだ届いていない最後の分塊が分からない）。**`localStorage` に残す**ので、停止の直後に
+ * ページを閉じても・開き直しても同じ一覧で確かめられる。</p>
+ */
+const chunkManifest = ref<ClassroomChunkManifest | null>(null)
+/** サーバーが返した「終了してよいかの下見」（欠けている連番を含む）。 */
+const finalizeCheck = ref<ClassroomFinalizeCheck | null>(null)
 /** このブラウザで録音できないときの案内。 */
 const recorderNotice = ref('')
 /** 終了時にサーバーが返した補足（書き起こしが無く最終まとめを作らなかったときなど）。 */
@@ -502,21 +533,34 @@ async function loadChunkState(): Promise<boolean> {
     const recorded = response.data.recordedSeconds ?? 0
     timeline.restore(Math.round(recorded * TIMELINE_SAMPLE_RATE))
     lastChunkEndSeconds = Math.max(recorded, timeline.positionSeconds())
-      return true
+    // サーバーが判断した「終了してよいか」と、画面が残した一覧を使う（開き直しても同じ判断）
+    finalizeCheck.value = response.data.finalizeCheck ?? null
+    if (chunkSeq === 0) {
+      // 保存済みの分塊が無い＝**これから最初の分塊**。古い一覧（前の録音のもの）は捨てる
+      clearChunkManifest()
+    } else {
+      const saved = loadChunkManifest(id)
+      // 一覧を残していない（別の端末・保存できない環境）ときは、保存済みの連番から作る
+      chunkManifest.value = saved ?? { lastSeq: chunkSeq, totalCount: chunkSeq }
+    }
+    return true
   } catch (caught) {
     recorderNotice.value = messageOf(caught, '保存済みの音声の状態を確認できませんでした。')
     return false
   }
 }
 
+/** 送り直しをあきらめた分塊があるか（利用者に【再試行】を頼むべき状態）。 */
+const pendingGiveUp = computed(() => pendingChunks.value.some(
+  (chunk) => chunk.attempts >= RETRY_MAX_ATTEMPTS))
+
 /** 送信待ちの件数を画面に出す（0 のときは何も出さない）。 */
 const pendingNotice = computed(() => {
   const count = pendingChunks.value.length
   if (count === 0) return ''
-  const giving = pendingChunks.value.some((chunk) => chunk.attempts >= RETRY_MAX_ATTEMPTS)
-  return giving
-    ? `送れなかった音声が ${count} 件あります（電波の良い所で【送り直す】を押してください）。`
-    : `音声を送り直しています…（待ち ${count} 件）`
+  return pendingGiveUp.value
+    ? `音声の一部を保存できませんでした（${count} 件）。再試行してください。`
+    : `音声を保存しています…（待ち ${count} 件）`
 })
 
 function sendChunk(blob: Blob, sttPcm: Blob | null = null): void {
@@ -542,6 +586,8 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     }
     // 送れたら待ち行列から外す
     pendingChunks.value = pendingChunks.value.filter((item) => item.seq !== chunk.seq)
+    // **送れた分塊**を一覧に数える（停止のあとにサーバーへ渡す。最後の分塊の取りこぼしを見つける）
+    rememberSentChunk(chunk.seq, chunk.offsets.endSeconds)
     schedulePendingRetry()
     const runPath = response.data.runPath
     if (response.data.triggered && runPath !== null && runPath !== '') {
@@ -616,7 +662,10 @@ async function flushPendingChunks(): Promise<void> {
 function appendSegments(appended: ClassroomSegment[], source?: ClassroomSource): void {
   if (appended.length === 0) return
   const tagged = source === undefined ? appended : appended.map((segment) => ({ ...segment, source }))
+  const before = segments.value.length
   segments.value = mergeClassroomSegments(segments.value, tagged)
+  // 新しい行が入ったら、下を見ているときだけ追いかける（読んでいる位置を飛ばさない）
+  if (segments.value.length !== before) onTranscriptAppended()
 }
 
 /**
@@ -902,6 +951,62 @@ function saveTimelineState(): void {
   if (timelineStore === null) return
   const snapshot: TimelineSnapshot = timeline.snapshot()
   timelineStore.save(snapshot)
+}
+
+/* ---------- 送った分塊の一覧（停止のあとにサーバーへ渡す） ---------- */
+
+/** 分塊の一覧を残す鍵（記録 ID ごとに 1 つ）。 */
+function chunkManifestKey(id: number): string {
+  return `study21.classroom.chunkManifest.${id}`
+}
+
+/** 送った分塊の一覧を残す（`localStorage`。保存できない環境でも録音は続ける）。 */
+function saveChunkManifest(): void {
+  const id = recordId.value
+  const manifest = chunkManifest.value
+  if (id === null || manifest === null) return
+  try {
+    window.localStorage.setItem(chunkManifestKey(id), JSON.stringify(manifest))
+  } catch {
+    // 覚えられなくても録音・終了は続けられる（サーバーの下見を使う）
+  }
+}
+
+/** 送った分塊の一覧を読む（開き直しても同じ一覧で確かめられる）。 */
+function loadChunkManifest(id: number): ClassroomChunkManifest | null {
+  try {
+    const raw = window.localStorage.getItem(chunkManifestKey(id))
+    if (raw === null) return null
+    const parsed = JSON.parse(raw) as Partial<ClassroomChunkManifest>
+    if (typeof parsed.lastSeq !== 'number' || typeof parsed.totalCount !== 'number') return null
+    return { lastSeq: parsed.lastSeq, totalCount: parsed.totalCount, endSample: parsed.endSample }
+  } catch {
+    return null
+  }
+}
+
+/** 分塊を 1 つ送った（送った数と最後の連番を覚える）。 */
+function rememberSentChunk(seq: number, recordedSeconds: number | null): void {
+  const count = (chunkManifest.value?.totalCount ?? 0) + 1
+  chunkManifest.value = {
+    lastSeq: Math.max(seq, chunkManifest.value?.lastSeq ?? 0),
+    totalCount: count,
+    // 最後の分塊が終わる位置（録音回放の時間軸）。分塊の経過秒と同じ基準
+    endSample: recordedSeconds === null ? undefined : Math.round(recordedSeconds * TIMELINE_SAMPLE_RATE)
+  }
+  saveChunkManifest()
+}
+
+/** 分塊の一覧を捨てる（記録を消したとき・最初から録り直すとき）。 */
+function clearChunkManifest(): void {
+  chunkManifest.value = null
+  const id = recordId.value
+  if (id === null) return
+  try {
+    window.localStorage.removeItem(chunkManifestKey(id))
+  } catch {
+    // 消せない環境でも続ける
+  }
 }
 const captures: Partial<Record<ClassroomSource, PcmCapture>> = {}
 
@@ -1400,7 +1505,8 @@ async function startSourceStreamsForRecorder(context: AudioContext | null): Prom
     recordId: () => recordId.value ?? id,
     onSegments: (added) => appendSegments(added, source),
     onInterim: (text) => { interimOf[source].value = text },
-    onNotice: (message) => { noticeOf[source].value = message },
+    // 音源ごとの案内は**詳細情報**へ回す（主画面は状態 1 つにまとめる）
+    onNotice: (message) => { noticeOf[source].value = message; deepNotice.value = message },
     onMissingRange: (range) => { missingOf[source].value = [...missingOf[source].value, range] },
     // 送った位置を時間軸へ知らせる（送り直し・張り直しで時間が戻らないように）
     onSent: (samples, from, frameNo) => {
@@ -1691,13 +1797,39 @@ function finishLesson(): void {
  * ただし【授業を終了】だけは格上げする: 停止だけの収尾が走っている最中に終了を押したら、
  * 押した操作を黙って捨てず、その収尾の続きとして記録の終了まで進める。</p>
  */
-function requestFinalize(kind: FinalizeKind): void {
+function requestFinalize(kind: FinalizeKind, force = false): void {
   if (finalizeRunning) {
     if (kind === 'finish') finalizeKind.value = 'finish'
     return
   }
-  void runFinalize(kind)
+  /*
+   * **その場で**「収尾が走っている」印を立てる（`await` の前）。
+   *
+   * <p>ここで立てないと、停止を押した直後の 1 描画のあいだ**終了の入口が押せたまま**になり、
+   * 二度押しや「保存が終わる前に終了」が起きる（利用者の指摘 ③・④-3）。状態欄も同時に
+   * 「音声を保存しています」へ変わる。</p>
+   */
+  finishing.value = true
+  finalizeKind.value = kind
+  void runFinalize(kind, force)
 }
+
+/**
+ * **音声の一部を失うことを確認したうえで**終了する（明示の不完全終了）。
+ *
+ * <p>欠けている分塊があるときだけ出す入口。押したときだけサーバーへ `force` を送る
+ * （既定は断るので、黙って音を失わない）。</p>
+ */
+function finishIncomplete(): void {
+  requestFinalize('finish', true)
+}
+
+/** いま「不完全なまま終了」を出すべきか（欠けている分塊が分かっているときだけ）。 */
+const canFinishIncomplete = computed(() => (
+  !finishing.value
+  && finalizeCheck.value !== null
+  && finalizeCheck.value.complete === false
+))
 
 /**
  * 収尾の本体（**「録音を停止」と「授業を終了」で同じ 1 つ**の処理。冪等）。
@@ -1713,7 +1845,7 @@ function requestFinalize(kind: FinalizeKind): void {
  * <p>失敗したら**成功と言わない**（詳細へ進まない・最終まとめを起動しない・欠落の記録を消さない）。
  * 済んだ段は覚えているので、やり直し（{@link retryFinalize}）は**まだ済んでいない段だけ**を実行する。</p>
  */
-async function runFinalize(kind: FinalizeKind): Promise<void> {
+async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
   // 二度押しはその場で止める（`await` より前に立てる）
   if (finalizeRunning) return
   finalizeRunning = true
@@ -1758,7 +1890,7 @@ async function runFinalize(kind: FinalizeKind): Promise<void> {
     // 3) 記録の終了（データベースへの保存）。済んでいれば送り直さない
     let outcome = finalizeProgress.recordEnd
     if (outcome === null) {
-      outcome = await endRecord(id)
+      outcome = await endRecord(id, force)
       // 失敗は覚えない（やり直しでもう一度だけ送る）
       if (outcome.kind !== 'failed') finalizeProgress.recordEnd = outcome
     }
@@ -1807,6 +1939,229 @@ function retryFinalize(): void {
   requestFinalize(finalizeKind.value)
 }
 
+/* ---------- 画面の状態（1 か所にまとめる。利用者に推測させない） ---------- */
+
+/** いまの状態の種類（表示の色と文言をこれで決める）。 */
+type LiveStatusCode =
+  /** 録音していない（開始を待っている）。 */
+  | 'idle'
+  /** 録音中。 */
+  | 'recording'
+  /** 音声を保存している（停止のあと・送り残しがある）。 */
+  | 'saving'
+  /** 書き起こしを仕上げている。 */
+  | 'transcribing'
+  /** 授業を終えられる。 */
+  | 'ready'
+  /** やり直せば直る失敗がある（【再試行】を出す）。 */
+  | 'retry'
+  /** やり直しても直らない失敗（利用者の操作が要る）。 */
+  | 'failed'
+
+/** 画面に出す 1 つの状態（見出し・理由・次にできること）。 */
+interface LiveStatus {
+  code: LiveStatusCode
+  /** 見出し（短い日本語）。 */
+  title: string
+  /** いま起きていること（空なら出さない）。 */
+  detail: string
+  /** 次にできること（空なら出さない）。 */
+  hint: string
+  /** やり直しの入口を出すか。 */
+  retry: boolean
+}
+
+/**
+ * **画面の状態を 1 つにまとめる**（音源ごと・段ごとの案内を並べない）。
+ *
+ * <p>見る順は「終わりの状態が先、録音中の状態が後」:</p>
+ * <ol>
+ *   <li>直らない失敗（音楽の保存・書き起こしの確定ができない）</li>
+ *   <li>やり直せる失敗（【再試行】を出す）</li>
+ *   <li>収尾の途中（音声を保存 → 書き起こしを仕上げる）</li>
+ *   <li>録音中／終了できる</li>
+ * </ol>
+ *
+ * <p><b>「音声は保存されています」は、サーバーが「全部そろっている」と確認したときだけ</b>
+ * 出す（送っただけで約束しない）。</p>
+ */
+const statusSummary = computed<LiveStatus>(() => {
+  // ① 直らない失敗（利用者がすること: 詳細を確かめる・新しく録り直す）
+  if (finalizeError.value !== '' && finalizeFailedStage.value === 'note') {
+    return {
+      code: 'failed',
+      title: '最終まとめを作れませんでした',
+      detail: finalizeError.value,
+      hint: '音声と書き起こしは残っています。詳細画面から結果を確かめられます。',
+      retry: true
+    }
+  }
+  // ② やり直せる失敗
+  if (finalizeError.value !== '') {
+    const stage = finalizeStageLabel.value === '' ? '' : `（${finalizeStageLabel.value}）`
+    return {
+      code: 'retry',
+      title: `音声の保存を完了できませんでした${stage}`,
+      detail: finalizeError.value,
+      hint: '【再試行】を押すと、まだ済んでいないところから続けます。',
+      retry: true
+    }
+  }
+  // ③ 収尾の途中（何を待っているかを書く。割合は出さない）
+  if (finishing.value || finishPhase.value === 'stopping' || finishPhase.value === 'sending-tail') {
+    return {
+      code: 'saving',
+      title: '音声を保存しています…',
+      detail: finishPhaseLabel.value,
+      hint: '保存が終わるまで画面を閉じないでください。',
+      retry: false
+    }
+  }
+  if (finishPhase.value === 'transcribing') {
+    return {
+      code: 'transcribing',
+      title: '文字起こしを仕上げています…',
+      detail: '最後の文を取り込んでから、記録を終えます。',
+      hint: 'そのままお待ちください（やり直しは要りません）。',
+      retry: false
+    }
+  }
+  // 送れずに残っている音声（再送中・あきらめた分）
+  if (pendingChunks.value.length > 0) {
+    const giving = pendingChunks.value.some((chunk) => chunk.attempts >= RETRY_MAX_ATTEMPTS)
+    return {
+      code: 'retry',
+      title: giving ? '音声の一部を保存できませんでした' : '音声を保存しています…',
+      detail: pendingNotice.value,
+      hint: giving ? '【再試行】を押してください（押すまで消えません）。' : '',
+      retry: giving
+    }
+  }
+  // ④ 収尾が済んで、終了できる（**サーバーが確認したときだけ**「保存されています」と言う）
+  if (!recording.value && finishPhase.value === 'done') {
+    return {
+      code: 'ready',
+      title: '授業を終了できます',
+      detail: finalizeCheck.value?.complete === true
+        ? '音声は保存されています。'
+        : '書き起こしの最終結果まで受け取りました。',
+      hint: '【授業を終了】を押すと、最終まとめを作って詳細画面へ進みます。',
+      retry: false
+    }
+  }
+  // ⑤ 録音中（音源が止まっていればそれも書く。中身は 1 か所にまとめる）
+  if (recording.value) {
+    const interrupted = sourceNoticeText.value
+    return {
+      code: 'recording',
+      title: '録音中',
+      detail: interrupted,
+      hint: interrupted === '' ? '' : 'マイクの録音は続いています。',
+      retry: false
+    }
+  }
+  return {
+    code: 'idle',
+    title: '録音を開始できます',
+    detail: resumeNotice.value,
+    hint: '【録音を開始】を押すと、音声の保存と書き起こしを始めます。',
+    retry: false
+  }
+})
+
+/**
+ * 音源ごとの案内を**1 つにまとめる**（同じことを 2 か所に出さない）。
+ *
+ * <p>正常に動いている音源の案内（「送信しています」など）は出さない。**止まった音源**と
+ * **送れていない音源**の理由だけを残す。</p>
+ */
+const sourceNoticeText = computed(() => {
+  const parts: string[] = []
+  for (const source of SOURCES) {
+    const notice = noticeOf[source].value
+    if (notice === '') continue
+    parts.push(source === 'shared' ? notice : `【${SOURCE_LABELS[source]}】${notice}`)
+  }
+  return parts.join(' ')
+})
+
+/** 「詳細情報」を開いているか（**既定は閉じる**。診断の値を主画面に出さない）。 */
+const showDetails = ref(false)
+
+/**
+ * 詳細情報に出す**直近の出来事**（新しい順・件数を絞る）。
+ *
+ * <p>DOM を無限に増やさない: 配列を**上限で切る**（CSS で隠すだけにしない）。</p>
+ */
+const DETAIL_LIMIT = 20
+const detailEvents = computed(() => {
+  const events: { at: string; text: string }[] = []
+  const push = (text: string): void => {
+    if (text.trim() === '') return
+    events.push({ at: nowClock(), text })
+  }
+  push(pcmNotice.value)
+  push(syncError.value)
+  push(sttStreamNotice.value)
+  push(deepNotice.value)
+  for (const source of SOURCES) push(noticeOf[source].value)
+  push(browserSttNotice.value)
+  push(recorderNotice.value)
+  for (const range of missingOf.mic.value) {
+    push(`マイク: ${range.fromSample}〜${range.toSample} サンプルが抜けました`)
+  }
+  for (const range of missingOf.shared.value) {
+    push(`共有の音: ${range.fromSample}〜${range.toSample} サンプルが抜けました`)
+  }
+  return events.slice(0, DETAIL_LIMIT)
+})
+
+/** 詳細情報の時刻（画面の時計ではなく経過時間。録音の時間軸と同じ基準ではないと明記する）。 */
+function nowClock(): string {
+  return formatElapsed(elapsedSeconds.value)
+}
+
+/** 長い案内（詳細情報へ回す。主画面には出さない）。 */
+const deepNotice = ref('')
+
+/** 転写の一覧（**読み手が下を見ているときは勝手に一番下へ飛ばさない**）。 */
+const transcriptBody = ref<HTMLElement | null>(null)
+const pinnedToLatest = ref(true)
+/** 未読（下へ戻る入口を出すか）。 */
+const hasNewBelow = ref(false)
+
+/** 転写の一覧が下まで見えているか（見えていれば追いかける）。 */
+function updatePinned(): void {
+  const body = transcriptBody.value
+  if (body === null) return
+  const distance = body.scrollHeight - body.scrollTop - body.clientHeight
+  pinnedToLatest.value = distance <= 24
+  if (pinnedToLatest.value) hasNewBelow.value = false
+}
+
+/** 新しい行が来た（下を見ているときだけ追いかける）。 */
+function onTranscriptAppended(): void {
+  void nextTick(() => {
+    const body = transcriptBody.value
+    if (body === null) return
+    if (pinnedToLatest.value) {
+      body.scrollTop = body.scrollHeight
+      hasNewBelow.value = false
+    } else {
+      hasNewBelow.value = true
+    }
+  })
+}
+
+/** 【最新へ】で一番下へ戻る。 */
+function scrollToLatest(): void {
+  const body = transcriptBody.value
+  if (body === null) return
+  body.scrollTop = body.scrollHeight
+  pinnedToLatest.value = true
+  hasNewBelow.value = false
+}
+
 /** 収尾を失敗として止める（**成功と言わない**・最終まとめを起動しない・欠落の記録は消さない）。 */
 function stopFinalize(reason: string): void {
   /*
@@ -1825,13 +2180,24 @@ function stopFinalize(reason: string): void {
  * <p>後端は収尾を取り切れなかった・保存できなかったときに理由を入れて返す。理由を無視して
  * 「終わった」と言うと、尾部の文が最終まとめに入らない（画面からは成功に見える静かな取りこぼし）。</p>
  */
-async function endRecord(id: number): Promise<EndOutcome> {
+async function endRecord(id: number, force: boolean): Promise<EndOutcome> {
   try {
-    const response = await endClassroomRecord(id)
+    // **送った分塊の一覧を添える**（サーバーはこれで最後の分塊の取りこぼしを見つける）
+    const response = await endClassroomRecord(id, {
+      force,
+      manifest: chunkManifest.value ?? undefined
+    })
     const reason = response.data.error
     if (typeof reason === 'string' && reason !== '') {
       stopFinalize(`終了処理を完了できませんでした（${reason}）。`)
       return { kind: 'failed' }
+    }
+    finalizeCheck.value = {
+      complete: response.data.complete !== false,
+      missingSeqs: response.data.missingSeqs ?? [],
+      storedChunks: chunkManifest.value?.totalCount ?? 0,
+      expectedChunks: chunkManifest.value?.lastSeq ?? 0,
+      reason: null
     }
     return { kind: 'ended', result: response.data }
   } catch (caught) {
@@ -1842,7 +2208,17 @@ async function endRecord(id: number): Promise<EndOutcome> {
       toast.info(finishNotice.value)
       return { kind: 'already' }
     }
-    stopFinalize(messageOf(caught, '授業を終了できませんでした。'))
+    /*
+     * サーバーが「分塊がそろっていない」と断ったら、**欠けている連番**を画面に残す
+     * （利用者はその分塊だけ送り直せる）。それ以外の失敗は今までどおり理由を出す。
+     */
+    const refusal = messageOf(caught, '授業を終了できませんでした。')
+    if (refusal.includes('分塊') || refusal.includes('連番')) {
+      stopFinalize(`${refusal} 音声の一部を失うことを確認したうえで終える場合は`
+        + '【不完全なまま終了】を押してください。')
+      return { kind: 'failed' }
+    }
+    stopFinalize(refusal)
     return { kind: 'failed' }
   }
 }
@@ -1912,6 +2288,7 @@ onMounted(async () => {
       + '続きを録音するには【録音を開始】を押してください。'
   }
   await pullSegments()
+  window.addEventListener('beforeunload', onBeforeUnload)
   // 音声機器が変わった（マイクを抜いた・差した）ときは知らせる（録音は止めない）
   if (navigator.mediaDevices !== undefined) {
     const media = navigator.mediaDevices as MediaDevices & { ondevicechange?: () => void }
@@ -1931,9 +2308,29 @@ onMounted(async () => {
   }
 })
 
+/**
+ * 画面を離れるときの確認（**未アップロードの音声を持ったまま消えない**）。
+ *
+ * <p>録音中・保存中・送り残しがあるあいだは確認を出す。全部送り切って収尾が済んだら出さない
+ * （利用者を無駄に止めない）。</p>
+ */
+function hasUnsavedAudio(): boolean {
+  if (recording.value || finishing.value) return true
+  if (pendingChunks.value.length > 0) return true
+  return !sttFinalized
+}
+
+function onBeforeUnload(event: BeforeUnloadEvent): void {
+  if (!hasUnsavedAudio()) return
+  event.preventDefault()
+  // ブラウザによっては returnValue を見る（文言は指定できない）
+  event.returnValue = ''
+}
+
 onBeforeUnmount(() => {
-  // 続きから録れるように、時間軸の位置を残してから片付ける
+  // 続きから録れるように、時間軸の位置と送った分塊の一覧を残してから片付ける
   saveTimelineState()
+  window.removeEventListener('beforeunload', onBeforeUnload)
   stopTimer()
   stopPolling()
   stopSourceStreams()
@@ -1950,19 +2347,19 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="cr-page" data-cr-live>
-    <p class="cr-notice">
-      <AppIcon name="info" size="sm" />
-      <span>
-        録音中の画面です。左にリアルタイムの書き起こし、右に AI 授業ノートが出ます。
-        録音はブラウザで行い、分塊ごとにサーバーへ送って書き起こし（STT）を作ります
-        （AI ノートはまとまりごとに段階的に更新します）。
-      </span>
-    </p>
-
+    <!--
+      UI の確認用の印（テストと実機の両方で「いまどの状態か」を 1 か所から読めるようにする）。
+      診断の値そのものはここに出さない（`詳細情報` の中だけ）。
+    -->
+    <span class="cr-page__state" hidden data-cr-state>{{ statusSummary.code }}</span>
+    <!--
+      主画面は「授業名・録音の長さ・音源・いまの状態・主な操作」だけにする（利用者の指摘 ④-1）。
+      分塊の番号・サンプル位置・ミリ秒の区間・STT の中の状態・API や実装の説明は
+      **既定で閉じた【詳細情報】**の中だけに出す（DOM も無限に増やさない）。
+    -->
     <section class="card">
       <div class="card__header cr-list-head">
         <h2 class="card__title"><AppIcon name="mic" size="sm" /> {{ lessonName }}</h2>
-        <span class="badge badge--neutral">{{ subject }}</span>
         <div class="cr-list-head__spacer"></div>
         <div class="search-panel__actions">
           <button type="button" class="btn btn--secondary" data-cr-back-list @click="backToList">
@@ -1971,7 +2368,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <!-- 録音中指示・経過時間・言語モード・前置詞 -->
+      <!-- 録音の長さ・音源・いまの状態 -->
       <div class="cr-live__top">
         <span class="cr-live__status" data-cr-recording-status>
           <span class="cr-recording-dot" :class="{ 'is-recording': recording }" aria-hidden="true"></span>
@@ -1980,91 +2377,161 @@ onBeforeUnmount(() => {
           </span>
         </span>
         <span class="cr-timer" data-cr-timer>{{ elapsedLabel }}</span>
-        <span class="cr-live__meta">
-          <span class="cr-live__meta-label">言語モード</span>
-          <span class="cr-live__meta-value" data-cr-live-language-mode>{{ languageMode }}</span>
+        <span v-if="subject !== '（未指定）'" class="cr-live__meta">
+          <span class="cr-live__meta-label">科目</span>
+          <span class="cr-live__meta-value">{{ subject }}</span>
         </span>
         <span class="cr-live__meta">
-          <span class="cr-live__meta-label">前置詞</span>
-          <span class="cr-live__meta-value" data-cr-live-preset>{{ preset }}</span>
+          <span class="cr-live__meta-label">音源</span>
+          <span class="cr-live__meta-value" data-cr-live-audio-mode>{{ audioModeLabel }}</span>
         </span>
-        <span class="cr-live__meta">
-          <span class="cr-live__meta-label">分塊</span>
-          <span class="cr-live__meta-value" data-cr-live-chunk>{{ chunkSeconds }} 秒</span>
-        </span>
-        <span class="cr-live__meta">
-          <span class="cr-live__meta-label">書き起こし</span>
-          <span class="cr-live__meta-value" data-cr-live-stt-mode>{{ sttModeLabel }}</span>
-        </span>
+        <div class="cr-list-head__spacer"></div>
+        <button
+          type="button" class="btn btn--ghost btn--sm" data-cr-details-toggle
+          :aria-expanded="showDetails" @click="showDetails = !showDetails"
+        >
+          {{ showDetails ? '詳細情報を閉じる' : '詳細情報' }}
+        </button>
       </div>
 
-      <p v-if="actionError !== ''" class="alert alert--danger" data-cr-live-error>{{ actionError }}</p>
       <!--
-        収尾（停止・終了）が途中で止まったとき: **止まった段**と本当の理由、そして**やり直し**を出す
-        （成功と言わない）。やり直しは**まだ済んでいない段だけ**を走らせるので、何回失敗しても押せる。
+        ① 状態は**1 か所**にまとめる（音源ごと・段ごとの案内を並べない）。
+        正常に動いているときは赤い警告を出さない。やり直せるものだけ【再試行】を出す。
       -->
-      <p v-if="finalizeError !== ''" class="alert alert--danger" data-cr-finalize-error>
-        <AppIcon name="alert" size="sm" />
-        <span v-if="finalizeStageLabel !== ''" data-cr-finalize-stage>【{{ finalizeStageLabel }}】</span>
-        <span>{{ finalizeError }}</span>
+      <div
+        class="cr-status" :class="`cr-status--${statusSummary.code}`" data-cr-status
+        :data-cr-status-code="statusSummary.code"
+      >
+        <div class="cr-status__body">
+          <span class="cr-status__title" data-cr-status-title>{{ statusSummary.title }}</span>
+          <span v-if="statusSummary.detail !== ''" class="cr-status__detail" data-cr-status-detail>
+            {{ statusSummary.detail }}
+          </span>
+          <span v-if="statusSummary.hint !== ''" class="cr-status__hint">{{ statusSummary.hint }}</span>
+        </div>
         <button
-          type="button" class="btn btn--secondary btn--sm" :disabled="finishing"
+          v-if="statusSummary.retry" type="button" class="btn btn--secondary btn--sm"
           data-cr-retry-finalize @click="retryFinalize"
         >
-          続きをやり直す
+          再試行
+        </button>
+      </div>
+
+      <!--
+        送れずに残っている音声（**黙って消さない**）。再送中は淡々と、あきらめたら警告として出し、
+        【再試行】を出す（状態欄にも同じ内容が出る＝利用者が探さなくてよい）。
+      -->
+      <p
+        v-if="pendingChunks.length > 0"
+        class="alert" :class="pendingGiveUp ? 'alert--warning' : 'alert--info'"
+        data-cr-pending-uploads
+      >
+        <AppIcon name="alert" size="sm" />
+        <span>{{ pendingNotice }}</span>
+        <button
+          type="button" class="btn btn--secondary btn--sm" data-cr-retry-uploads
+          @click="flushPendingChunks"
+        >
+          再試行
         </button>
       </p>
-      <p v-if="finishNotice !== ''" class="alert alert--warning" data-cr-finish-notice>{{ finishNotice }}</p>
-      <p v-if="resumeNotice !== ''" class="alert alert--info" data-cr-resume-notice>{{ resumeNotice }}</p>
-      <p v-if="recorderNotice !== ''" class="alert alert--warning" data-cr-recorder-notice>{{ recorderNotice }}</p>
-      <p v-if="browserSttNotice !== ''" class="alert alert--warning" data-cr-browser-stt-notice>{{ browserSttNotice }}</p>
-      <p v-if="pcmNotice !== ''" class="alert alert--warning" data-cr-pcm-notice>{{ pcmNotice }}</p>
-      <!-- 音源ごとの状態（片方が失敗しても、もう片方は続いていることが分かるように） -->
-      <template v-for="source in SOURCES" :key="`notice-${source}`">
-        <p v-if="noticeOf[source].value !== ''" class="alert alert--warning" :data-cr-source-notice="source">
-          【{{ SOURCE_LABELS[source] }}】{{ noticeOf[source].value }}
-        </p>
-        <p
-          v-if="missingOf[source].value.length > 0" class="alert alert--info"
-          :data-cr-source-missing="source"
-        >
-          【{{ SOURCE_LABELS[source] }}】送れずに飛ばした区間：
-          <span v-for="range in missingOf[source].value" :key="`${range.fromSeconds}-${range.toSeconds}`">
-            {{ range.fromSeconds }}〜{{ range.toSeconds }} 秒
-          </span>
-          （録音した音声には全部入っているので、後から補書き起こしできます）
-        </p>
-      </template>
-      <!-- 二音源＋ブラウザ認識: スピーカーの音は文字にならない（黙って半分を見せない） -->
-      <p v-if="micOnlyTranscript" class="alert alert--warning" data-cr-mic-only-stt-notice>
-        <AppIcon name="alert" size="sm" />
-        <span>
-          いまの設定はブラウザ音声認識なので、書き起こしは<strong>マイクの音だけ</strong>です
-          （スピーカーから出る先生の声は文字になりません。録音した音声には両方入っています）。
-          両方を文字にするには、システム設定「授業録音」の STT プロバイダーを
-          <strong>サーバー認識</strong>（阿里巴巴 など）にしてください。
-        </span>
-      </p>
-      <p v-if="aiNotesOff" class="alert alert--info" data-cr-ai-notes-off>
-        AI 解析（フェーズノート・最終まとめ）は現在オフです。書き起こしだけを行います
-        （システム設定「AI 授業記録（授業録音）」で戻せます）。
-      </p>
-      <p v-if="sttStreamNotice !== ''" class="alert alert--warning" data-cr-live-stt-notice>
-        {{ sttStreamNotice }}
-      </p>
-      <p v-if="syncError !== ''" class="alert alert--warning" data-cr-live-sync-error>{{ syncError }}</p>
 
-      <!-- 二段組：リアルタイム STT 転写 ＋ AI 授業ノート -->
-      <div class="cr-live__columns">
-        <section class="cr-column" data-cr-transcript>
+      <!-- 操作の失敗（利用者がすぐ直せるもの。これは主画面に出す） -->
+      <p v-if="actionError !== ''" class="alert alert--danger" data-cr-live-error>{{ actionError }}</p>
+      <!-- 録音の準備に失敗した理由（共有が許可されない・機器が変わった など） -->
+      <p v-if="recorderNotice !== ''" class="alert alert--warning" data-cr-recorder-notice>
+        {{ recorderNotice }}
+      </p>
+      <p v-if="pcmNotice !== ''" class="alert alert--warning" data-cr-pcm-notice>{{ pcmNotice }}</p>
+      <p v-if="browserSttNotice !== ''" class="alert alert--warning" data-cr-browser-stt-notice>
+        {{ browserSttNotice }}
+      </p>
+      <p v-if="resumeNotice !== ''" class="alert alert--info" data-cr-resume-notice>{{ resumeNotice }}</p>
+      <!-- 収尾の失敗は状態欄と【再試行】に集約する（理由だけ残す） -->
+      <p v-if="finalizeError !== ''" class="alert alert--danger" data-cr-finalize-error hidden>
+        <span v-if="finalizeStageLabel !== ''" data-cr-finalize-stage>【{{ finalizeStageLabel }}】</span>
+        <span>{{ finalizeError }}</span>
+      </p>
+      <p v-if="finishNotice !== ''" class="alert alert--warning" data-cr-finish-notice>{{ finishNotice }}</p>
+
+      <!--
+        診断の値は**既定で閉じた【詳細情報】**の中だけ（主画面を診断で埋めない・文字を縦に潰さない）。
+        件数は上限つき（DOM を無限に増やさない）。
+      -->
+      <section class="cr-details" :hidden="!showDetails" data-cr-details>
+        <p class="cr-details__lead">
+          うまくいかないときだけ開いてください（先生から問い合わせがあったときに伝える情報です）。
+        </p>
+        <dl class="cr-details__list">
+          <div><dt>音源</dt><dd data-cr-live-audio-mode>{{ audioModeLabel }}</dd></div>
+          <div><dt>分塊の長さ</dt><dd data-cr-live-chunk>{{ chunkSeconds }} 秒</dd></div>
+          <div><dt>書き起こし</dt><dd data-cr-live-stt-mode>{{ sttModeLabel }}</dd></div>
+          <div><dt>言語モード</dt><dd data-cr-live-language-mode>{{ languageMode }}</dd></div>
+          <div><dt>前置詞</dt><dd data-cr-live-preset>{{ preset }}</dd></div>
+          <div><dt>保存した分塊</dt><dd>{{ finalizeCheck?.storedChunks ?? 0 }} 件</dd></div>
+          <div v-if="finalizeCheck !== null && finalizeCheck.missingSeqs.length > 0">
+            <dt>足りない連番</dt><dd data-cr-details-missing>{{ finalizeCheck.missingSeqs.join(', ') }}</dd>
+          </div>
+        </dl>
+        <!-- 音源ごとの案内（送れていない・準備できないときの理由） -->
+        <template v-for="source in SOURCES" :key="`notice-${source}`">
+          <p v-if="noticeOf[source].value !== ''" :data-cr-source-notice="source">
+            【{{ SOURCE_LABELS[source] }}】{{ noticeOf[source].value }}
+          </p>
+        </template>
+        <!-- 音源ごとの欠落（あとで補書き起こしする手がかり。ふだんは出さない） -->
+        <template v-for="source in SOURCES" :key="`missing-${source}`">
+          <p
+            v-if="missingOf[source].value.length > 0" class="cr-details__missing"
+            :data-cr-source-missing="source"
+          >
+            【{{ SOURCE_LABELS[source] }}】送れずに飛ばした区間：
+            <span v-for="range in missingOf[source].value" :key="`${range.fromSample}-${range.toSample}`">
+              {{ range.fromSeconds }}〜{{ range.toSeconds }} 秒
+            </span>
+          </p>
+        </template>
+        <ul v-if="detailEvents.length > 0" class="cr-details__events" data-cr-details-events>
+          <li v-for="(event, index) in detailEvents" :key="`${index}-${event.text}`">
+            <span class="cr-details__at">{{ event.at }}</span>
+            <span>{{ event.text }}</span>
+          </li>
+        </ul>
+      </section>
+
+      <p v-if="micOnlyTranscript" class="cr-hint" data-cr-mic-only-stt-notice>
+        いまの設定はブラウザ音声認識なので、書き起こしは<strong>マイクの音だけ</strong>です
+        （スピーカーから出る先生の声は文字になりません。録音した音声には両方入っています）。
+        両方を文字にするには、システム設定「授業録音」の STT プロバイダーを
+        <strong>サーバー認識</strong>にしてください。
+      </p>
+
+      <!--
+        ② 転写を**主役**にする（利用者の指摘 ④-4）。AI ノートが無いときはその枠を出さない。
+        話者は**ラベルと色の両方**で分かるようにする（色だけに頼らない）。
+      -->
+      <div class="cr-live__columns" :class="{ 'cr-live__columns--single': !notePanelVisible }">
+        <section class="cr-column cr-column--transcript" data-cr-transcript>
           <div class="cr-column__head">
-            <h3 class="cr-column__title"><AppIcon name="list" size="sm" /> リアルタイム STT 転写</h3>
+            <h3 class="cr-column__title"><AppIcon name="list" size="sm" /> 書き起こし</h3>
             <span v-if="micOnlyTranscript" class="badge badge--warning" data-cr-transcript-mic-only>
               マイクのみ
             </span>
             <span class="cr-hint">{{ orderedSegments.length }} 行</span>
+            <!-- 話者は**ラベルでも**分かるようにする（色だけに頼らない） -->
+            <span
+              v-for="legend in speakerLegend" :key="legend" class="cr-speaker-legend"
+              :data-cr-speaker-legend="legend"
+            >{{ legend }}</span>
+            <div class="cr-list-head__spacer"></div>
+            <button
+              v-if="hasNewBelow" type="button" class="btn btn--secondary btn--sm"
+              data-cr-scroll-latest @click="scrollToLatest"
+            >
+              最新へ
+            </button>
           </div>
-          <div class="cr-column__body">
+          <div ref="transcriptBody" class="cr-column__body" data-cr-transcript-body @scroll="updatePinned">
             <template v-if="segments.length > 0">
               <p
                 v-for="segment in orderedSegments" :key="segment.seq" class="cr-transcript__line"
@@ -2072,16 +2539,14 @@ onBeforeUnmount(() => {
                 :data-cr-transcript-line="segment.seq"
                 :data-cr-transcript-speaker="speakerLabelOf(segment)"
               >
+                <!-- 時刻は**1 文に 1 つだけ**（分:秒）。ミリ秒や区間は出さない -->
                 <span class="cr-transcript__time">[{{ formatSegmentTime(segment.startOffsetSeconds) }}]</span>
                 <span class="cr-transcript__speaker">{{ speakerLabelOf(segment) }}：</span>
                 <span class="cr-transcript__text">{{ segment.text }}</span>
               </p>
             </template>
             <p v-else class="cr-column__placeholder">
-              録音を開始すると、ここにリアルタイムの書き起こしが表示されます（1 文ずつ、時刻つき）。
-              表示例：[10:15:02] 講義：それでは今日の授業を始めます。
-              ※ MVP では話者を 1 つ（「講義」）だけにします。話者の欄は将来の「先生／生徒を分ける」
-              設定（two_speaker）用に予約しています。
+              録音を開始すると、ここに書き起こしが出ます（1 文ずつ、時刻つき）。
             </p>
             <!-- ブラウザ認識の途中経過（保存は final だけ。ここは見せるだけ） -->
             <p
@@ -2106,7 +2571,8 @@ onBeforeUnmount(() => {
           </div>
         </section>
 
-        <section class="cr-column" data-cr-note>
+        <!-- AI 授業ノート: 使っていないときは**空の枠を出さない**（短い状態だけ） -->
+        <section v-if="notePanelVisible" class="cr-column cr-column--note" data-cr-note>
           <div class="cr-column__head">
             <h3 class="cr-column__title"><AppIcon name="wand" size="sm" /> AI 授業ノート</h3>
             <span class="cr-hint">{{ notes.length }} 件</span>
@@ -2142,16 +2608,25 @@ onBeforeUnmount(() => {
               </article>
             </template>
             <p v-else class="cr-column__placeholder">
-              録音を開始すると、AI がノートを「毎文ではなく、まとまりごとに」段階的に更新します。
-              以下の 4 つの段落に整理します：
-              ・本時のテーマ
-              ・学習内容
-              ・先生の重点
-              ・宿題
+              録音が進むと、AI がまとまりごとにノートを更新します。
             </p>
           </div>
         </section>
       </div>
+
+      <p v-if="!notePanelVisible" class="cr-hint" data-cr-ai-notes-off>
+        AI 解析（フェーズノート・最終まとめ）は現在オフです。書き起こしだけを行います。
+      </p>
+
+      <!-- 話者の決め方（色だけに頼らない） -->
+      <p v-if="mixing" class="cr-hint cr-speaker-note" data-cr-speaker-note>
+        共有した音は<strong>「先生」</strong>、マイクは<strong>「学生」</strong>として書き起こします
+        （共有に混じる他の人の声も「先生」扱いです）。イヤホンを使うと、スピーカーの音が
+        マイクに入って二重に録れるのを防げます。
+      </p>
+      <p v-else class="cr-hint cr-speaker-note" data-cr-speaker-note-single>
+        話者は<strong>「講義」</strong>です（マイクだけの録音）。
+      </p>
 
       <!--
         音源は【新しい授業】で選ぶ（この画面には選択を置かない。利用者の指示）。
@@ -2164,7 +2639,7 @@ onBeforeUnmount(() => {
         マイクに入って二重に録れるのを防げます。
       </p>
 
-      <section v-if="mixing || recording" class="cr-source" data-cr-audio-source>
+      <section v-if="recording" class="cr-source" data-cr-audio-source>
         <div class="cr-levels" data-cr-audio-levels>
           <span class="cr-levels__item">
             マイク
@@ -2181,18 +2656,6 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </section>
-
-      <!-- 送れなかった音声（黙って消さない） -->
-      <p v-if="pendingNotice !== ''" class="alert alert--warning" data-cr-pending-uploads>
-        <AppIcon name="alert" size="sm" />
-        <span>{{ pendingNotice }}</span>
-        <button
-          type="button" class="btn btn--secondary btn--sm" data-cr-retry-uploads
-          @click="flushPendingChunks"
-        >
-          送り直す
-        </button>
-      </p>
 
       <!-- 録音開始・停止 ／ 授業を終了 -->
       <div class="cr-live__foot">
@@ -2213,9 +2676,31 @@ onBeforeUnmount(() => {
         >
           <AppIcon name="check" size="sm" /> {{ finishButtonLabel }}
         </button>
-        <span v-if="finishPhaseLabel !== ''" class="cr-hint" data-cr-finish-phase>{{ finishPhaseLabel }}</span>
-        <span v-else class="cr-hint">
-          授業を終了すると、AI が最終まとめ（テーマ／学習内容／先生の重点／宿題）を作り、詳細画面へ進みます。
+        <!--
+          欠けている分塊があるときだけ出す**明示の不完全終了**（利用者が影響を確認して押す）。
+          既定ではサーバーが断るので、黙って音を失わない。
+        -->
+        <button
+          v-if="canFinishIncomplete" type="button" class="btn btn--ghost btn--sm"
+          data-cr-finish-incomplete @click="finishIncomplete"
+        >
+          不完全なまま終了（音声の一部を失います）
+        </button>
+        <!--
+          収尾の段（何を待っているか）。**空のときも要素は出しておく**: 画面が
+          「いま何を待っているか」を出す場所が無いと、利用者は推測することになる。
+        -->
+        <span
+          class="cr-hint" data-cr-finish-phase data-cr-finalize-phase
+        >{{ finishPhaseLabel }}</span>
+        <span
+          v-if="!finishing && finalizeError === '' && finalizeCheck !== null
+            && finalizeCheck.missingSeqs.length > 0"
+          class="cr-hint" data-cr-missing-seq
+        >
+          足りない連番: {{ finalizeCheck.missingSeqs.join('、') }}
+        </span>
+        <span v-else-if="!finishing && finalizeError === ''" class="cr-hint">
           録音は最大 {{ maxRecordingMinutes }} 分で自動的に止まります。
         </span>
       </div>

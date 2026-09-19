@@ -127,12 +127,13 @@ public class ScheduleConfigService {
         if (isBackoffActive() || isFallbackBackoffActive(taskCode)) {
             return current;
         }
+        long sequence = requestSequence.incrementAndGet();
         synchronized (refreshLock) {
             ScheduleConfigSnapshot again = snapshot.get();
             if (again.statusOf(taskCode).usable() || isBackoffActive() || isFallbackBackoffActive(taskCode)) {
                 return again;   // 他のスレッドが先に読んだ／退避中
             }
-            refreshLocked("托底: " + taskCode);
+            refreshLocked("托底: " + taskCode, sequence);
             ScheduleConfigSnapshot loaded = snapshot.get();
             if (!loaded.statusOf(taskCode).usable()) {
                 // 読めたが、そのタスクの設定が無い・不正だった。
@@ -165,12 +166,13 @@ public class ScheduleConfigService {
         long sequence = requestSequence.incrementAndGet();
         synchronized (refreshLock) {
             if (sequence <= publishedSequence) {
-                // 自分より後に要求された更新が先に発行済み（古い結果で上書きしない）
+                // 自分より後に要求された更新が先に発行済み（古い結果で上書きしない）。
+                // ここで捨てた要求は**読み込みもしない**ので「発行済み」にはしない
                 log.debug("古いスケジュール設定の更新要求を破棄しました。reason={} sequence={} published={}",
                         reason, sequence, publishedSequence);
                 return RefreshResult.discarded(snapshot.get().version());
             }
-            return refreshLocked(reason);
+            return refreshLocked(reason, sequence);
         }
     }
 
@@ -217,17 +219,19 @@ public class ScheduleConfigService {
 
     // ------------------------------------------------------------------ 内部
 
-    private RefreshResult refreshLocked(String reason) {
+    private RefreshResult refreshLocked(String reason, long sequence) {
         Instant now = clock.instant();
         lastRefreshAt = now;
         try {
             ScheduleConfigLoader.ScheduleSourceData data =
                     loader.load(catalog.requiredSettingKeys(), catalog.taskCodes());
             ScheduleConfigSnapshot built = build(data, now);
-            long sequence = requestSequence.get();
             ScheduleConfigSnapshot published = built.next(now,
                     built.tasks(), built.statuses(), null);
             snapshot.set(published);
+            // **この要求自身の番号**を発行済みにする。requestSequence.get() を使うと、
+            // まだ読み込んでいない後続の要求まで「発行済み」になり、
+            // その要求が破棄されて**最新の設定が反映されない**（取りこぼし）
             publishedSequence = sequence;
             consecutiveFailures = 0;
             nextRetryAt = null;
@@ -274,16 +278,60 @@ public class ScheduleConfigService {
         return BACKOFF[index];
     }
 
+    /**
+     * 読んだ値からスナップショットを作る。
+     *
+     * <p><b>設定の適用時刻（effectiveFrom）</b>をここで決める。利用者が実行時刻・間隔・ずらしを変えたら、
+     * その時刻**より前**の計画実行点は実行しない（22:00 に「停止 23:30 → 21:00」と変えても、
+     * 21:00 の点を今さら実行しないため）。サービス再起動のときは DB に保存した適用時刻を使い、
+     * **「利用者の設定変更」と「再起動の補執行」を区別**する（再起動では適用時刻を進めない）。</p>
+     */
     private ScheduleConfigSnapshot build(ScheduleConfigLoader.ScheduleSourceData data, Instant loadedAt) {
         Map<String, TaskSchedule> tasks = new LinkedHashMap<>();
         Map<String, TaskConfigStatus> statuses = new LinkedHashMap<>();
+        ScheduleConfigSnapshot previous = snapshot.get();
+        boolean firstLoad = !previous.loadedOnce();
+        LocalDateTime nowLocal = LocalDateTime.ofInstant(loadedAt, ZONE);
+
         for (ScheduleTaskRule rule : catalog.rules()) {
+            String taskCode = rule.taskCode();
             Resolved resolved = resolve(rule, data);
-            statuses.put(rule.taskCode(), resolved.status());
-            resolved.schedule().ifPresent(schedule -> tasks.put(rule.taskCode(), schedule));
+            statuses.put(taskCode, resolved.status());
+            if (resolved.schedule().isEmpty()) {
+                continue;
+            }
+            TaskSchedule schedule = resolved.schedule().orElseThrow();
+            TaskSchedule before = previous.taskOf(taskCode).orElse(null);
+            LocalDateTime effectiveFrom;
+            if (firstLoad) {
+                // 起動時: DB に保存されている適用時刻を引き継ぐ（再起動で過去の点を実行しない）
+                effectiveFrom = data.configEffectiveFrom().get(taskCode);
+            } else if (before != null && before.sameTiming(schedule)) {
+                // 変わっていない → 前の適用時刻をそのまま
+                effectiveFrom = before.effectiveFrom();
+            } else {
+                // **利用者が設定を変えた**（または未設定から使えるようになった）→ いまから有効
+                effectiveFrom = nowLocal;
+                persistEffectiveFrom(taskCode, effectiveFrom);
+            }
+            tasks.put(taskCode, schedule.withEffectiveFrom(effectiveFrom));
         }
         // loadedAt は refresh 側で入れるのでここでは現在の版をそのまま使う
-        return new ScheduleConfigSnapshot(snapshot.get().version(), loadedAt, ZONE, tasks, statuses, null);
+        return new ScheduleConfigSnapshot(previous.version(), loadedAt, ZONE, tasks, statuses, null);
+    }
+
+    /**
+     * 設定の適用時刻を DB に保存する（再起動しても「この時刻より前の点は実行しない」を保つ）。
+     * 保存に失敗しても反映そのものは続ける（メモリでは効いている。再起動で失われる可能性を警告する）。
+     */
+    private void persistEffectiveFrom(String taskCode, LocalDateTime effectiveFrom) {
+        try {
+            loader.saveConfigEffectiveFrom(taskCode, effectiveFrom);
+            log.info("実行設定の適用時刻を記録しました。taskCode={} effectiveFrom={}", taskCode, effectiveFrom);
+        } catch (RuntimeException cause) {
+            log.warn("実行設定の適用時刻を保存できませんでした（再起動で過去の計画実行点を実行する可能性があります）。"
+                    + "taskCode={} effectiveFrom={} reason={}", taskCode, effectiveFrom, messageOf(cause));
+        }
     }
 
     private Resolved resolve(ScheduleTaskRule rule, ScheduleConfigLoader.ScheduleSourceData data) {
@@ -319,14 +367,17 @@ public class ScheduleConfigService {
         TaskSchedule schedule = current.tasks().get(taskCode);
         if (schedule == null) {
             return new ScheduleConfigReport.TaskStatus(taskCode, status.name(), status.label(), null,
-                    status.label(), null, null, null, List.of(), null, status.label());
+                    status.label(), null, null, null, List.of(), null, status.label(), null);
         }
-        LocalDateTime next = schedule.nextPointAfter(now);
+        // 画面の「次回実行時刻」は**スケジューラが実際に実行する点**と同じ規則で出す
+        // （設定の適用時刻より前の点は実行しないため、そこは飛ばす）
+        LocalDateTime next = schedule.nextRunnablePointAfter(now);
         return new ScheduleConfigReport.TaskStatus(taskCode, status.name(), status.label(), schedule.enabled(),
                 schedule.describe(), schedule.intervalMinutes(), schedule.offsetMinutes(),
                 schedule.kind() == ScheduleKind.DAILY ? schedule.dailyTime().toString() : null,
                 schedule.pointsOfDay(now.toLocalDate()).stream().map(LocalTime::toString).toList(),
-                next, next.format(DATE_TIME_LABEL));
+                next, next.format(DATE_TIME_LABEL),
+                schedule.effectiveFrom() == null ? null : schedule.effectiveFrom().format(DATE_TIME_LABEL));
     }
 
     private static String messageOf(Throwable cause) {

@@ -33,6 +33,10 @@ CREATE TABLE IF NOT EXISTS public."BAT_スケジュール状態情報" (
     "バッチコード"       VARCHAR(20)  NOT NULL,
     -- 最後に確保した計画実行点（Asia/Tokyo のローカル時刻。未確保なら NULL）
     "最終予定日時"       TIMESTAMP    NULL,
+    -- いまの実行設定が**効き始めた時刻**（利用者が最後に時刻・間隔・ずらしを変えた時刻）。
+    -- この時刻以前の計画実行点は実行しない（設定を変えた直後に過去の点を今さら実行しないため）。
+    -- サービス再起動でもこの値を引き継ぎ、「設定変更」と「再起動の補執行」を区別する
+    "設定適用日時"       TIMESTAMP    NULL,
     -- その計画実行点で登録した実行ID（BAT_バッチ実行履歴情報。監査用。FK は張らない）
     "最終実行ID"         BIGINT       NULL,
     -- 確保した時刻（デバッグ・監視用）
@@ -53,6 +57,8 @@ COMMENT ON COLUMN public."BAT_スケジュール状態情報"."バッチコー�
     'バッチコード（batR03 / batR04 / batL02 / batL03 など）';
 COMMENT ON COLUMN public."BAT_スケジュール状態情報"."最終予定日時" IS
     '最後に確保した計画実行点（Asia/Tokyo のローカル時刻）。この値より新しい点だけを確保できる';
+COMMENT ON COLUMN public."BAT_スケジュール状態情報"."設定適用日時" IS
+    'いまの実行設定が効き始めた時刻（Asia/Tokyo）。この時刻以前の計画実行点は実行しない';
 COMMENT ON COLUMN public."BAT_スケジュール状態情報"."最終実行ID" IS
     'その計画実行点で登録した BAT_バッチ実行履歴情報.実行ID（監査用。FK は張らない）';
 COMMENT ON COLUMN public."BAT_スケジュール状態情報"."最終確保日時" IS

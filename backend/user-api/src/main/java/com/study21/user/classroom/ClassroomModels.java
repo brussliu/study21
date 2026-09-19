@@ -301,7 +301,53 @@ public final class ClassroomModels {
             int maxSeq,
             int nextSeq,
             long totalBytes,
-            Double recordedSeconds) {
+            Double recordedSeconds,
+            /**
+             * 終了してよいかの下見（画面の【授業を終了】の状態表示に使う）。
+             *
+             * <p>画面を開き直してもサーバーから同じ判断が取れるように返す（画面のメモリだけに
+             * 頼らない）。</p>
+             */
+            ChunkChecklist finalizeCheck) {
+    }
+
+    /**
+     * 終了前の確認の結果（分塊が**1 から連続しているか**）。
+     *
+     * <p>「少なくとも 1 つある」では足りない: 途中が欠けていても気づけず、最後の分塊が
+     * 届いていなくても終われてしまう（音は後から作り直せない）。欠けている連番を返して
+     * 画面が**その分塊だけ送り直せる**ようにする。</p>
+     */
+    public record ChunkChecklist(
+            /** 分塊が 1 から連続していて、全部そろっているか（＝終了できる）。 */
+            boolean complete,
+            /** 足りない連番（連続していないところ・実体が無いところ）。 */
+            List<Integer> missingSeqs,
+            /** 保存できている分塊の数。 */
+            int storedChunks,
+            /** 画面が宣言した（送ったつもりの）最後の連番。分からなければ 0。 */
+            int expectedChunks,
+            /** 画面に出す理由（日本語。終了できるときは null）。 */
+            String reason) {
+
+        /** 終了できるときの形。 */
+        public static ChunkChecklist ready(int stored) {
+            return new ChunkChecklist(true, List.of(), stored, stored, null);
+        }
+    }
+
+    /**
+     * 画面が停止のあとに送る「送った分塊の一覧」（終了前の確認に使う）。
+     *
+     * @param lastSeq    画面が送った最後の分塊の連番（1 から連続して送っている）
+     * @param totalCount 画面が送った分塊の数
+     * @param endSample  最後の分塊が終わる**録音回放の時間軸**の位置（16kHz のサンプル数。任意）
+     */
+    public record ChunkManifest(int lastSeq, int totalCount, Long endSample) {
+    }
+
+    /** 終了の要求（不完全なまま終える明示と、送った分塊の一覧）。 */
+    public record EndRequest(boolean force, ChunkManifest manifest) {
     }
 
     /** 分塊アップロードの結果。トリガーが成立したら pendingNoteId と runPath を返す（画面が admin-api を呼ぶ）。 */
@@ -336,7 +382,13 @@ public final class ClassroomModels {
             /** 最終まとめ（batC62）を起動する入口（admin-api）へ渡す URL。finalNoteId が null のときも null */
             String runPath,
             /** 画面に出す補足（日本語）。通常は null、最終まとめを作らなかったときだけ入る */
-            String notice) {
+            String notice,
+            /** 音声が**全部そろっているか**（「音声は保存されています」と言ってよいのは true のときだけ）。 */
+            boolean complete,
+            /** 足りない分塊の連番（あれば。画面はこの連番を送り直す）。 */
+            List<Integer> missingSeqs,
+            /** 明示の「不完全なまま終了」で終えたか。 */
+            boolean forced) {
     }
 
     // ------------------------------------------------------------------ 削除

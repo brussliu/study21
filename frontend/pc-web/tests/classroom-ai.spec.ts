@@ -830,15 +830,26 @@ describe('授業録音：録音中', () => {
     expect(wrapper.get('[data-cr-live-language-mode]').text()).toBe('日本語')
     expect(wrapper.get('[data-cr-live-preset]').text()).toBe('通常の授業')
 
+    /*
+     * 転写が画面の主役（利用者の指摘 ④-4）。旧い説明（MVP・two_speaker・話者を分けない案内）は
+     * **出さない**（過時な開発の説明を利用者に見せない）。無内容のときは短い操作の案内だけ。
+     */
     const transcript = wrapper.get('[data-cr-transcript]')
-    expect(transcript.text()).toContain('リアルタイム STT 転写')
-    expect(transcript.text()).toContain('[10:15:02] 講義：')
-    expect(transcript.text()).toContain('two_speaker')
+    expect(transcript.text()).toContain('書き起こし')
+    expect(transcript.text()).toContain('録音を開始すると')
+    expect(transcript.text()).not.toContain('two_speaker')
+    expect(transcript.text()).not.toContain('MVP')
 
-    const note = wrapper.get('[data-cr-note]')
-    expect(note.text()).toContain('AI 授業ノート')
-    expect(note.text()).toContain('本時のテーマ')
-    expect(note.text()).toContain('宿題')
+    /*
+     * AI 解析が無効でノートも無いときは、**空の枠を出さない**（短い案内だけ。利用者の指摘 ④-4）。
+     */
+    expect(wrapper.find('[data-cr-note]').exists()).toBe(false)
+    expect(wrapper.get('[data-cr-ai-notes-off]').text()).toContain('書き起こしだけ')
+
+    // 技術情報は【詳細情報】の中だけ（既定は畳まれている）
+    const details = wrapper.get('[data-cr-details]')
+    expect(details.attributes('hidden')).toBeDefined()
+    expect(details.text()).toContain('20 秒')
   })
 
   it('録音を開始すると API を呼び、経過時間が動き、停止できる', async () => {
@@ -2434,6 +2445,7 @@ describe('授業録音：録音中', () => {
     await flushPromises()
 
     // 全部済んでから「終了しました」と言う
+    // 段の表示は「済んだ」と言ってよい状態でだけ出す（`data-cr-status-title` と同じ段）
     expect(phase()).toContain('終了しました')
     expect(calls.some((call) => call.url.includes('/classroom/12/end'))).toBe(true)
   })
@@ -3266,7 +3278,7 @@ describe('授業録音：録音中', () => {
 
     // 失敗した分塊は待ち行列に入り、画面に件数が出る
     expect(wrapper.find('[data-cr-pending-uploads]').exists()).toBe(true)
-    expect(wrapper.get('[data-cr-pending-uploads]').text()).toContain('送り直')
+    expect(wrapper.get('[data-cr-pending-uploads]').text()).toContain('保存')
 
     // 【送り直す】で送れる
     await wrapper.get('[data-cr-retry-uploads]').trigger('click')

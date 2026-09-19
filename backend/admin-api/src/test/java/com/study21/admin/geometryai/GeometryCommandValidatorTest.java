@@ -1,5 +1,6 @@
 package com.study21.admin.geometryai;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -169,5 +170,64 @@ class GeometryCommandValidatorTest {
         assertThat(result.isSuccess()).isFalse();
         // 日本語の名前は弾く（日本語のラベルは Text で作る）
         assertThat(result.errorCode()).isIn("COMMAND_NOT_ALLOWED", "COMMAND_SYNTAX");
+    }
+
+    // ------------------------------------------------------------ Text の位置の言葉
+
+    /**
+     * `Text("文章", A, "left")` の**位置の言葉**はこの版の GeoGebra の引数に無い（実測で必ず false）。
+     * 意味を変えずに外せるので、**落とさずに直して通す**（そのままにすると作図が 1 行も入らない）。
+     */
+    @Test
+    @DisplayName("Text の 3 番目の位置の言葉は外して通す（実機で必ず失敗する形）")
+    void dropsTextPositionArgument() {
+        GeometryCommandValidator.Result result = validator.validate(
+                List.of("A = (0, 0)", "Text(\"A\", A, \"left\")"), "Point,Text", 80);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.commands()).containsExactly("A = (0, 0)", "Text(\"A\", A)");
+    }
+
+    @Test
+    @DisplayName("Text の位置の言葉（座標のあと）も外す")
+    void dropsTextPositionArgumentAfterCoordinate() {
+        GeometryCommandValidator.Result result = validator.validate(
+                List.of("Text(\"CD ⊥ AB\", (2, -0.5), \"center\")"), "Point,Text", 80);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.commands()).containsExactly("Text(\"CD ⊥ AB\", (2, -0.5))");
+    }
+
+    @Test
+    @DisplayName("Text の 3 番目が true / false のときは触らない（正しい形）")
+    void keepsTextBooleanArgument() {
+        GeometryCommandValidator.Result result = validator.validate(
+                List.of("A = (0, 0)", "Text(\"A\", A, true)", "Text(\"B\", (1, 1), false)"),
+                "Point,Text", 80);
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.commands())
+                .containsExactly("A = (0, 0)", "Text(\"A\", A, true)", "Text(\"B\", (1, 1), false)");
+    }
+
+    @Test
+    @DisplayName("定義の形（t = Text(...)）でも位置の言葉は外れる（変換そのものの確認）")
+    void dropsTextPositionArgumentInDefinition() {
+        // 定義の右辺は式として扱われるので文字列は通らないが、変換の規則としては同じ形を直す
+        assertThat(GeometryCommandValidator.dropTextPositionArgument("t = Text(\"あ\", A, \"right\")"))
+                .isEqualTo("t = Text(\"あ\", A)");
+    }
+
+    @Test
+    @DisplayName("形が違うもの（引数の順が違う・Text の外に続きがある）は触らない")
+    void keepsUnknownTextShapes() {
+        assertThat(GeometryCommandValidator.dropTextPositionArgument("Text(\"A\", \"left\", A)"))
+                .isEqualTo("Text(\"A\", \"left\", A)");
+        assertThat(GeometryCommandValidator.dropTextPositionArgument("f(x) = Text(\"A\", A, \"left\") + 1"))
+                .isEqualTo("f(x) = Text(\"A\", A, \"left\") + 1");
+        assertThat(GeometryCommandValidator.dropTextPositionArgument("Text(\"A\", A)"))
+                .isEqualTo("Text(\"A\", A)");
+        assertThat(GeometryCommandValidator.dropTextPositionArgument("Segment(A, B)"))
+                .isEqualTo("Segment(A, B)");
     }
 }

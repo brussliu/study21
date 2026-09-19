@@ -74,7 +74,14 @@ public final class GeometryCommandSignatureCard {
               Root(f) / Root(f, a, b) / Roots(f) / Extremum(f) / Extremum(f, a, b)
               使えない: Zeroes（→ Roots を使う）
               Sequence(式, t, 1, n) / Sequence(式, t, 1, n, 増分) / If(条件, 真) / If(条件, 真, 偽)
-              Text("文章", (x, y)) / Polyline(A, B, C)
+              Polyline(A, B, C)
+            文字（Text）の形（**位置の言葉は引数にできない**。実機で必ず失敗する）:
+              Text("文章", (x, y))           座標のところに置く（位置は座標で決める）
+              Text("文章", A)                点 A に付ける（点を動かすと一緒に動く）
+              Text("文章", A, true)          3 番目は **true / false だけ**（変数を置き換えるか）
+              使えない: Text("A", A, "left") / Text("A", (1, 2), "center")
+                        （"left" "right" "above" "below" "center" は引数ではない。
+                          左右上下に置きたいときは座標を少しずらして Text("文章", (x, y)) にする）
             表示:
               使えない: SetColor / SetLineThickness / SetLabelMode / ShowLabel / SetVisibleInView
               （この版ではコマンドから色・太さ・ラベルを変えられない。見た目の指定は書かない）

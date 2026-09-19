@@ -668,10 +668,164 @@
   border-top: 1px solid var(--color-border);
 }
 
+/* 書き起こしを主役にする（AI ノートが無いときは片側いっぱい） */
+.cr-live__columns--single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.cr-column--transcript {
+  min-height: 420px;
+}
+
+.cr-column--note {
+  min-height: 320px;
+}
+
 @media (max-width: 1100px) {
   .cr-live__columns {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* ------------------------------------------------------------------ 状態欄（1 か所にまとめる） */
+
+.cr-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: 0 var(--sp-5) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-left-width: 4px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.cr-status__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cr-status__title {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  word-break: break-word;
+}
+
+.cr-status__detail,
+.cr-status__hint {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  word-break: break-word;
+}
+
+/* 正常に動いているあいだは赤くしない。やり直し・失敗だけ色を変える */
+.cr-status--recording {
+  border-left-color: var(--color-danger, #dc2626);
+}
+
+.cr-status--saving,
+.cr-status--transcribing {
+  border-left-color: var(--color-primary);
+}
+
+.cr-status--ready {
+  border-left-color: var(--color-success, #16a34a);
+}
+
+.cr-status--retry,
+.cr-status--failed {
+  border-left-color: var(--color-warning, #d97706);
+}
+
+/* ------------------------------------------------------------------ 詳細情報（既定は畳む） */
+
+.cr-details {
+  margin: 0 var(--sp-5) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.cr-details[hidden] {
+  display: none;
+}
+
+.cr-details__lead {
+  margin: 0 0 var(--sp-2);
+  word-break: break-word;
+}
+
+.cr-details__list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 2px var(--sp-4);
+  margin: 0 0 var(--sp-2);
+}
+
+.cr-details__list div {
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.cr-details__list dt {
+  color: var(--color-text-subtle);
+  white-space: nowrap;
+}
+
+.cr-details__list dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--color-text);
+  word-break: break-word;
+}
+
+.cr-details__events {
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cr-details__events li {
+  display: flex;
+  gap: var(--sp-2);
+  word-break: break-word;
+}
+
+.cr-details__at {
+  color: var(--color-text-subtle);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cr-details__missing {
+  margin: var(--sp-2) 0 0;
+  word-break: break-word;
+}
+
+/* 話者の凡例（色だけに頼らない） */
+.cr-speaker-legend {
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.cr-speaker-note {
+  margin: 0 var(--sp-5) var(--sp-3);
 }
 
 /* 削除の確認（一覧のカードごと） */

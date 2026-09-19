@@ -13,6 +13,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -75,11 +76,13 @@ class ClassroomServiceImplTest {
         // 無効のケースは各テストで上書きする。
         lenient().when(settings.noteEnabled(any())).thenReturn(true);
         stubChunkTable();
+        stubChunkStorage();
     }
 
     @Test
     @DisplayName("書き起こしが無いまま終了しても 200 で終わり、最終まとめの行は作らない")
     void endWithoutTranscriptSkipsFinalNote() {
+        stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
         when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
@@ -99,6 +102,7 @@ class ClassroomServiceImplTest {
     @Test
     @DisplayName("書き起こしがあれば最終まとめの行を全範囲（1〜最後）で作る")
     void endWithTranscriptCreatesFinalNote() {
+        stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
         when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
@@ -128,6 +132,8 @@ class ClassroomServiceImplTest {
     void endRejectsWhenVersionConflicts() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
+        // 分塊は 1 から連続している（分塊の確認で断らないように）
+        storedChunks(1);
         when(recordMapper.updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt())).thenReturn(0);
 
         assertThat(org.junit.jupiter.api.Assertions.assertThrows(
@@ -148,6 +154,7 @@ class ClassroomServiceImplTest {
     @Test
     @DisplayName("終了: 収尾が済んでいない音源があれば 409 で断り、記録も終わらせない")
     void endRefusesWhenFinalizeIncomplete() {
+        stubContinuousChunks();
         stubFinalize(new ClassroomSttStreamService.FinalizeStatus(RECORD_ID, "AUDIO_ACCEPTING",
                 "書き起こし中です", false, true, true,
                 "書き起こしの収尾が済んでいない音源があります。",
@@ -182,14 +189,14 @@ class ClassroomServiceImplTest {
         when(settings.load()).thenReturn(snapshot);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(2);
         // 分塊の表は空（音声が 1 つも保存されていない）
-        when(chunkMapper.countByRecord(RECORD_ID)).thenReturn(0);
+        when(chunkMapper.findByRecord(RECORD_ID)).thenReturn(java.util.List.of());
 
         com.study21.common.core.exception.ConflictException cause =
                 org.junit.jupiter.api.Assertions.assertThrows(
                         com.study21.common.core.exception.ConflictException.class,
                         () -> service.end(student, RECORD_ID));
 
-        assertThat(cause.getMessage()).contains("分塊").contains("保存されていません");
+        assertThat(cause.getMessage()).contains("分塊").contains("そろっていません");
         verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
     }
 
@@ -202,6 +209,7 @@ class ClassroomServiceImplTest {
     @Test
     @DisplayName("終了: 直らない終端の音源があっても通し、知らせを出す（授業を終えられなくしない）")
     void endProceedsWithNoticeWhenFinalizeIsTerminal() {
+        stubContinuousChunks();
         stubFinalize(new ClassroomSttStreamService.FinalizeStatus(RECORD_ID,
                 ClassroomSttStreamService.FINALIZE_FAILED, "収尾が済んでいません（やり直せません）",
                 false, true, false,
@@ -215,7 +223,8 @@ class ClassroomServiceImplTest {
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(4);
         when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
                 .thenReturn(1);
-        when(chunkMapper.countByRecord(RECORD_ID)).thenReturn(2);
+        // 分塊は 1 から連続している（分塊の確認で断らないように）
+        stubContinuousChunks();
         doAnswer(invocation -> {
             ((ClassroomNoteEntity) invocation.getArgument(0)).setNoteId(77L);
             return 1;
@@ -301,7 +310,7 @@ class ClassroomServiceImplTest {
         when(settings.chunkSeconds(snapshot)).thenReturn(20);
         when(settings.maxRecordingMinutes(snapshot)).thenReturn(120);
         when(settings.browserStt(snapshot)).thenReturn(true);
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
 
         ClassroomModels.ChunkUploadResult result = service.uploadChunk(student, RECORD_ID, 1, chunkFile());
@@ -423,6 +432,7 @@ class ClassroomServiceImplTest {
     @Test
     @DisplayName("AI 解析が無効なら、終了しても最終まとめの行を作らず理由を返す")
     void endCreatesNoFinalNoteWhenAiNotesDisabled() {
+        stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
         when(settings.noteEnabled(snapshot)).thenReturn(false);
@@ -454,7 +464,7 @@ class ClassroomServiceImplTest {
                 new ClassroomAiSettings.SttConnection("google", "latest_long", "https://example.test/stt", "key"));
         when(settings.sttLanguageCode(snapshot, "ja")).thenReturn("ja-JP");
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
         when(sttClient.transcribe(any())).thenReturn(ClassroomSttClient.SttResponse.success(200,
                 java.util.List.of(new ClassroomSttClient.Segment("比例のグラフを学びます。", null, "ja-JP", null, null))));
@@ -475,7 +485,7 @@ class ClassroomServiceImplTest {
         assertThat(captor.getValue().audio()).containsExactly((byte) 9, (byte) 8, (byte) 7, (byte) 6);
         assertThat(captor.getValue().mime()).isEqualTo("audio/L16");
         // 保存する音声は今までどおり再生用（webm）。STT の形式で上書きしない
-        verify(storage).writeChunk("classroom/1/202609", "chunk-10-000001.webm", new byte[]{1, 2, 3});
+        verify(storage).writeChunkLocation(locationOf("chunk-10-000001-test.webm"), new byte[]{1, 2, 3});
 
         ArgumentCaptor<ClassroomSegmentEntity> segment =
                 ArgumentCaptor.forClass(ClassroomSegmentEntity.class);
@@ -499,7 +509,7 @@ class ClassroomServiceImplTest {
                 new ClassroomAiSettings.SttConnection("google", "latest_long", "https://example.test/stt", "key"));
         when(settings.sttLanguageCode(snapshot, "ja")).thenReturn("ja-JP");
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
         when(sttClient.transcribe(any())).thenReturn(ClassroomSttClient.SttResponse.success(200,
                 java.util.List.of(new ClassroomSttClient.Segment("テスト", null, "ja-JP", null, null))));
@@ -540,7 +550,7 @@ class ClassroomServiceImplTest {
                 new ClassroomAiSettings.SttConnection("alibaba", "paraformer-realtime-v2",
                         "wss://example.test/asr", "key"));
         when(settings.sttLanguageCode(snapshot, "ja")).thenReturn("ja-JP");
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
         when(sttClient.transcribe(any())).thenReturn(ClassroomSttClient.SttResponse.failure(0, "HTTP_4XX",
                 "この音声形式（audio/webm;codecs=opus）は Paraformer-Realtime-V2 では認識できません。"));
@@ -550,7 +560,7 @@ class ClassroomServiceImplTest {
         // 分塊は受け入れる（連番は進む）＝音声は保存されている
         assertThat(result.seq()).isEqualTo(8);
         assertThat(result.appendedSegments()).isEmpty();
-        verify(storage).writeChunk(eq("classroom/1/202609"), eq("chunk-10-000008.webm"), any());
+        verify(storage).writeChunkLocation(eq(locationOf("chunk-10-000008-test.webm")), any());
         verify(segmentMapper, never()).insert(any());
     }
 
@@ -572,13 +582,13 @@ class ClassroomServiceImplTest {
         when(settings.enabled(snapshot)).thenReturn(true);
         when(settings.chunkSeconds(snapshot)).thenReturn(20);
         when(settings.maxRecordingMinutes(snapshot)).thenReturn(120);
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
 
         ClassroomModels.ChunkUploadResult result = service.uploadChunk(student, RECORD_ID, 1, chunkFile(), null);
 
         // 音声は保存する（残さないと授業の記録が丸ごと消える）
-        verify(storage).writeChunk("classroom/1/202609", "chunk-10-000001.webm", new byte[]{1, 2, 3});
+        verify(storage).writeChunkLocation(locationOf("chunk-10-000001-test.webm"), new byte[]{1, 2, 3});
         // 書き起こしはしない（録音は終わっていて、最終まとめも作られている）
         verify(sttClient, never()).transcribe(any());
         verify(segmentMapper, never()).insert(any());
@@ -599,7 +609,7 @@ class ClassroomServiceImplTest {
         assertThatThrownBy(() -> service.uploadChunk(student, RECORD_ID, 1, chunkFile(), null))
                 .isInstanceOf(com.study21.common.core.exception.ConflictException.class)
                 .hasMessageContaining("録音中ではありません");
-        verify(storage, never()).writeChunk(any(), any(), any());
+        verify(storage, org.mockito.Mockito.never()).writeChunkLocation(any(), any());
     }
 
     // ------------------------------------------------ 書き起こしの時刻（実際の経過秒）
@@ -616,7 +626,7 @@ class ClassroomServiceImplTest {
                 new ClassroomAiSettings.SttConnection("alibaba", "paraformer-realtime-v2", "wss://example.test", "key"));
         // 空の結果のときは使われないので lenient（テストの意図は「埋め草を入れない」こと）
         lenient().when(settings.sttLanguageCode(snapshot, "ja")).thenReturn("ja-JP");
-        when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording("classroom/1/202609", "a.webm", "audio/webm"));
         lenient().doAnswer(invocation -> {
             ((ClassroomSegmentEntity) invocation.getArgument(0)).setSegmentId(700L);
@@ -852,7 +862,7 @@ class ClassroomServiceImplTest {
                 ArgumentCaptor.forClass(ClassroomRecordingChunkEntity.class);
         verify(chunkMapper).insertIfAbsent(captor.capture());
         assertThat(captor.getValue().getSeq()).isEqualTo(3);
-        verify(storage).writeChunk(eq("classroom/1/202609"), eq("chunk-10-000003.webm"), any());
+        verify(storage).writeChunkLocation(eq(locationOf("chunk-10-000003-test.webm")), any());
         assertThat(result.seq()).isEqualTo(3);
         // 分塊の経路は**転写セグメントの連番を一度も見ない**（文の数で音を捨てない）
         verify(segmentMapper, never()).maxSeq(anyLong());
@@ -868,7 +878,7 @@ class ClassroomServiceImplTest {
 
         // 行もファイルも 1 つだけ（2 回目は保存済みの結果を返す）
         verify(chunkMapper, org.mockito.Mockito.times(1)).insertIfAbsent(any());
-        verify(storage, org.mockito.Mockito.times(1)).writeChunk(any(), any(), any());
+        verify(storage, org.mockito.Mockito.times(1)).writeChunkLocation(any(), any());
     }
 
     @Test
@@ -884,7 +894,7 @@ class ClassroomServiceImplTest {
         verify(chunkMapper, org.mockito.Mockito.times(2)).insertIfAbsent(captor.capture());
         assertThat(captor.getAllValues()).extracting(ClassroomRecordingChunkEntity::getSeq)
                 .containsExactly(3, 2);
-        verify(storage).writeChunk(eq("classroom/1/202609"), eq("chunk-10-000002.webm"), any());
+        verify(storage).writeChunkLocation(eq(locationOf("chunk-10-000002-test.webm")), any());
     }
 
     /**
@@ -904,7 +914,7 @@ class ClassroomServiceImplTest {
         assertThat(retry.seq()).isEqualTo(first.seq());
         assertThat(retry.nextChunkSeq()).isEqualTo(2);
         verify(chunkMapper, org.mockito.Mockito.times(1)).insertIfAbsent(any());
-        verify(storage, org.mockito.Mockito.times(1)).writeChunk(any(), any(), any());
+        verify(storage, org.mockito.Mockito.times(1)).writeChunkLocation(any(), any());
     }
 
     @Test
@@ -921,9 +931,12 @@ class ClassroomServiceImplTest {
                 .isInstanceOf(ConflictException.class)
                 .hasMessageContaining("違う内容");
 
-        // 上書きしない（保存済みの分塊はそのまま）
-        verify(storage, org.mockito.Mockito.times(1)).writeChunk(any(), any(), any());
+        /*
+         * **実体を書かない**: 同じ連番の別の中身は、書き込み先が分塊ごとに固有なので
+         * そもそも上書きできない。勝った側は DB の引用（行）がそのまま指し続ける。
+         */
         verify(chunkMapper, org.mockito.Mockito.times(1)).insertIfAbsent(any());
+        assertThat(chunkRows.get(1).getByteSize()).isEqualTo(3L);
     }
 
     /**
@@ -978,7 +991,7 @@ class ClassroomServiceImplTest {
 
         assertThat(result.seq()).isEqualTo(2);
         verify(chunkMapper, never()).insertIfAbsent(any());
-        verify(storage, never()).writeChunk(any(), any(), any());
+        verify(storage, org.mockito.Mockito.never()).writeChunkLocation(any(), any());
     }
 
     @Test
@@ -1035,7 +1048,156 @@ class ClassroomServiceImplTest {
                 .hasMessageContaining("120 分");
 
         verify(chunkMapper, never()).insertIfAbsent(any());
-        verify(storage, never()).writeChunk(any(), any(), any());
+        verify(storage, org.mockito.Mockito.never()).writeChunkLocation(any(), any());
+    }
+
+    /* ---------------- ③ 終了前の確認（分塊の連続性・収尾） ---------------- */
+
+    /**
+     * 終了のテストの前提: **分塊が 1 から連続している**（分塊の確認で断らないようにする）。
+     *
+     * <p>分塊の中身はこのテストの主眼ではない（{@code ClassroomChunkConsistencyTest} と
+     * {@code ClassroomRecordingSessionPlannerTest} が実体つきで見張る）。</p>
+     */
+    private void stubContinuousChunks() {
+        storedChunks(1, 2);
+    }
+
+    /** 分塊の行を「1 から n まで連続している」形にする（**数えるのは行だけ**）。 */
+    private void storedChunks(int... seqs) {
+        List<ClassroomRecordingChunkEntity> rows = new java.util.ArrayList<>();
+        for (int seq : seqs) {
+            ClassroomRecordingChunkEntity row = storedChunkRow(seq, new byte[]{(byte) seq});
+            row.setContainerHead(seq == 1);
+            chunkRows.put(seq, row);
+            rows.add(row);
+        }
+        when(chunkMapper.findByRecord(RECORD_ID)).thenReturn(rows);
+    }
+
+    /**
+     * 終了してよいかの確認は「少なくとも 1 つある」では足りない。
+     *
+     * <p>画面は停止のあと、**最後の分塊まで送り切ってから**終了を送る。サーバーは分塊が
+     * **1 から連続しているか**を確かめ、欠けていれば**欠けている連番**を返して断る
+     * （画面はその分塊だけ送り直す）。</p>
+     */
+    @Test
+    @DisplayName("③ 途中の分塊が欠けていたら終了を断り、欠けている連番を返す")
+    void endRefusesWhenChunksHaveGap() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        // 1 と 3 はあるが 2 が無い
+        storedChunks(1, 3);
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("2");
+
+        // 記録は終わらせない（受け付けられる状態のまま＝送り直せる）
+        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        assertThat(chunkRows).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("③ 最後の分塊がまだ届いていない（画面が宣言した範囲に足りない）ときも断る")
+    void endRefusesWhenLastChunkIsMissing() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        // 1・2 はあるが、画面は 3 まで送ったつもり（3 が届いていない）
+        storedChunks(1, 2);
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID, false,
+                new ClassroomModels.ChunkManifest(3, 3, null)))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("3");
+    }
+
+    @Test
+    @DisplayName("③ 分塊が 1 から連続していれば終了できて、「終了できます」を返す")
+    void endAllowsWhenChunksAreContinuous() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+                .thenReturn(1);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        storedChunks(1, 2);
+
+        ClassroomModels.EndResult result = service.end(student, RECORD_ID);
+
+        assertThat(result.status()).isEqualTo(ClassroomModels.STATUS_STOPPED);
+        assertThat(result.complete()).isTrue();
+        assertThat(result.missingSeqs()).isEmpty();
+        assertThat(result.forced()).isFalse();
+    }
+
+    /**
+     * 明示の「不完全なまま終了」。利用者が影響を確認して押したときだけ通す
+     * （既定は**断る**＝黙って音を失わない）。
+     */
+    @Test
+    @DisplayName("③ 明示の不完全終了だけは通す（欠落の一覧を notice に載せる）")
+    void endAllowsExplicitIncompleteEnd() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+                .thenReturn(1);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        storedChunks(1, 3);
+
+        ClassroomModels.EndResult result = service.end(student, RECORD_ID, true, null);
+
+        assertThat(result.status()).isEqualTo(ClassroomModels.STATUS_STOPPED);
+        assertThat(result.complete()).isFalse();
+        assertThat(result.missingSeqs()).containsExactly(2);
+        assertThat(result.forced()).isTrue();
+        assertThat(result.notice()).contains("2");
+    }
+
+    /**
+     * 確認したあとに**未調整のアップロード**が入っていないことを、書き換えの直前にもう一度見る
+     * （見た目は「連続している」でも、確認と書き換えのあいだに別の要求が分塊を足せる）。
+     */
+    @Test
+    @DisplayName("③ 確認のあとに分塊が増えていたら、終了せずにもう一度やり直させる")
+    void endRefusesWhenChunksChangedAfterCheck() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        ClassroomRecordingChunkEntity first = storedChunkRow(1, new byte[]{1});
+        ClassroomRecordingChunkEntity second = storedChunkRow(2, new byte[]{2});
+        // 1 回目の照会は「1 だけ」、書き換え直前の 2 回目は「1 と 2」を返す（別の要求が足した）
+        when(chunkMapper.findByRecord(RECORD_ID)).thenReturn(
+                new java.util.ArrayList<>(java.util.List.of(first)),
+                new java.util.ArrayList<>(java.util.List.of(first, second)));
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("もう一度");
+
+        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+    }
+
+    /**
+     * 分塊の置き場と書き込み先の代役。
+     *
+     * <p>書き込み先は**分塊ごとに固有**（実装と同じ形の名前）にする。同じ連番でも名前が
+     * 変わるので、テストでも「上書きしない」ことを名前で見分けられる。</p>
+     */
+    private void stubChunkStorage() {
+        lenient().when(storage.newChunkLocation(any(), anyLong(), anyInt(), any()))
+                .thenAnswer(invocation -> new ClassroomRecordingStorage.ChunkLocation(
+                        invocation.getArgument(0),
+                        "chunk-" + invocation.getArgument(1) + "-"
+                                + String.format("%06d", (Integer) invocation.getArgument(2)) + "-test.webm"));
+        lenient().when(storage.resolve(any(), any()))
+                .thenAnswer(invocation -> java.nio.file.Paths.get("/tmp/classroom-test",
+                        String.valueOf(invocation.getArgument(0)), String.valueOf(invocation.getArgument(1))));
+        lenient().when(storage.prepareRecordingDirectory(any())).thenReturn(true);
+    }
+
+    /** 分塊の書き込み先（テストの下見用。名前は {@code stubChunkUpload} の決め方と同じ形）。 */
+    private static ClassroomRecordingStorage.ChunkLocation locationOf(String fileName) {
+        return new ClassroomRecordingStorage.ChunkLocation("classroom/1/202609", fileName);
     }
 
     /* ---------------- 分塊の表の代役（一意制約と ON CONFLICT の振る舞いを写す） ---------------- */
@@ -1078,7 +1240,7 @@ class ClassroomServiceImplTest {
         lenient().when(settings.maxRecordingMinutes(snapshot)).thenReturn(120);
         // ブラウザ認識にしておく（STT を呼ばず、分塊の保存だけを見る）
         lenient().when(settings.browserStt(snapshot)).thenReturn(true);
-        lenient().when(storage.newRecording(eq(ACCOUNT_ID), any()))
+        lenient().when(storage.newRecording(eq(ACCOUNT_ID), anyLong(), any()))
                 .thenReturn(new ClassroomRecordingStorage.StoredRecording(
                         "classroom/1/202609", "a.webm", "audio/webm"));
     }

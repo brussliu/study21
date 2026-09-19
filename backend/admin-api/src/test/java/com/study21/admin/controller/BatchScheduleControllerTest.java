@@ -55,10 +55,10 @@ class BatchScheduleControllerTest {
     private ScheduleConfigReport report(boolean pending, String error) {
         ScheduleConfigReport.TaskStatus batR03 = new ScheduleConfigReport.TaskStatus(
                 "batR03", "LOADED", "有効", true, "毎日 23:30", null, null, "23:30",
-                List.of("23:30"), LocalDateTime.of(2026, 9, 19, 23, 30), "2026-09-19 23:30");
+                List.of("23:30"), LocalDateTime.of(2026, 9, 19, 23, 30), "2026-09-19 23:30", null);
         ScheduleConfigReport.TaskStatus batL02 = new ScheduleConfigReport.TaskStatus(
                 "batL02", "INVALID", "設定不正", false, "設定不正", null, null, null,
-                List.of(), null, "設定不正");
+                List.of(), null, "設定不正", null);
         return new ScheduleConfigReport("Asia/Tokyo", 4L, Instant.parse("2026-09-19T14:00:00Z"),
                 pending, Instant.parse("2026-09-19T14:30:00Z"), error, null, 0L, List.of(batR03, batL02));
     }

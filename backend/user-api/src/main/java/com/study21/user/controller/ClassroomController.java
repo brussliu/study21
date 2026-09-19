@@ -261,8 +261,12 @@ public class ClassroomController {
     @PostMapping("/{recordId}/end")
     public ApiResponse<ClassroomModels.EndResult> end(
             @AuthenticationPrincipal UserPrincipal user,
-            @PathVariable long recordId) {
-        return ApiResponse.ok(classroomService.end(user, recordId), "録音を終了しました。");
+            @PathVariable long recordId,
+            @RequestBody(required = false) ClassroomModels.EndRequest request) {
+        boolean force = request != null && request.force();
+        ClassroomModels.ChunkManifest manifest = request == null ? null : request.manifest();
+        return ApiResponse.ok(classroomService.end(user, recordId, force, manifest),
+                force ? "録音を終了しました（音声の一部は失われています）。" : "録音を終了しました。");
     }
 
     /**

@@ -284,7 +284,8 @@ public final class FigureParts {
             @Schema(description = "表示する文字（原図のラベル。例: A, B, x, ∠ABC）",
                     requiredMode = Schema.RequiredMode.REQUIRED)
             @JsonProperty("表示文字") String text,
-            @Schema(description = "表示位置（原図での位置）")
+            @Schema(description = "表示位置（原図での位置。**記録用**でコマンドの引数にはできない。"
+                    + "コマンドでは Text(\"A\", A) か Text(\"A\", (x, y)) のように置く）")
             @JsonProperty("位置") String position,
             @Schema(description = "備考（元と変えた場合の理由）")
             @JsonProperty("備考") String note) {

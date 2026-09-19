@@ -25,6 +25,9 @@ import java.util.List;
  * @param dailyTime       DAILY のときの実行時刻
  * @param intervalMinutes INTERVAL のときの実行間隔（分）
  * @param offsetMinutes   INTERVAL のときのずらし（分。0〜間隔-1）
+ * @param effectiveFrom   この設定が**効き始めた時刻**（Asia/Tokyo）。この時刻以前の計画実行点は
+ *                        実行しない（利用者が設定を変えた瞬間に、過去の点を今さら実行しないため）。
+ *                        {@code null} は制限なし（起動時に DB から読んだ「まだ変更していない」状態）
  */
 public record TaskSchedule(
         String taskCode,
@@ -32,7 +35,8 @@ public record TaskSchedule(
         boolean enabled,
         LocalTime dailyTime,
         Integer intervalMinutes,
-        Integer offsetMinutes) {
+        Integer offsetMinutes,
+        LocalDateTime effectiveFrom) {
 
     public TaskSchedule {
         if (taskCode == null || taskCode.isBlank()) {
@@ -58,12 +62,60 @@ public record TaskSchedule(
 
     /** 定時（DAILY）を作る。 */
     public static TaskSchedule daily(String taskCode, boolean enabled, LocalTime time) {
-        return new TaskSchedule(taskCode, ScheduleKind.DAILY, enabled, time, null, null);
+        return new TaskSchedule(taskCode, ScheduleKind.DAILY, enabled, time, null, null, null);
     }
 
     /** 循環（INTERVAL）を作る。 */
     public static TaskSchedule interval(String taskCode, boolean enabled, int everyMinutes, int offsetMinutes) {
-        return new TaskSchedule(taskCode, ScheduleKind.INTERVAL, enabled, null, everyMinutes, offsetMinutes);
+        return new TaskSchedule(taskCode, ScheduleKind.INTERVAL, enabled, null, everyMinutes, offsetMinutes, null);
+    }
+
+    /** 設定の適用時刻を付けた複製（この時刻以前の計画実行点は実行しない）。 */
+    public TaskSchedule withEffectiveFrom(LocalDateTime effectiveFrom) {
+        return new TaskSchedule(taskCode, kind, enabled, dailyTime, intervalMinutes, offsetMinutes, effectiveFrom);
+    }
+
+    /**
+     * この計画実行点を実行してよいか（**設定の適用時刻より後**か）。
+     *
+     * <p>利用者が 22:00 に「停止時刻 23:30 → 21:00」と変えたとき、21:00 の点（今日）を
+     * 今さら実行しないための判定。適用時刻が無い（起動時の設定）ときは制限しない
+     * （サービス再起動の補執行は今までどおり）。</p>
+     */
+    public boolean canRunAt(LocalDateTime point) {
+        return point != null && (effectiveFrom == null || point.isAfter(effectiveFrom));
+    }
+
+    /**
+     * {@code now} 以前で**最後に到来した実行可能な計画実行点**（無ければ空）。
+     *
+     * <p>設定の適用時刻以前の点しか無いときは空を返す（＝何もしない）。
+     * 何度取りこぼしても最新の 1 点だけが返ることは変えない。</p>
+     */
+    public java.util.Optional<LocalDateTime> previousRunnablePointAtOrBefore(LocalDateTime now) {
+        LocalDateTime latest = previousPointAtOrBefore(now);
+        return canRunAt(latest) ? java.util.Optional.of(latest) : java.util.Optional.empty();
+    }
+
+    /**
+     * {@code after} より後で**次に実行する計画実行点**（画面の「次回実行時刻」）。
+     *
+     * <p>スケジューラが実行する点と同じ規則（適用時刻より後）で返す。画面と実際の動作を一致させる。</p>
+     */
+    public LocalDateTime nextRunnablePointAfter(LocalDateTime after) {
+        LocalDateTime next = nextPointAfter(after);
+        while (!canRunAt(next)) {
+            next = nextPointAfter(next);
+        }
+        return next;
+    }
+
+    /** 実行タイミングの中身（時刻・間隔・ずらし）が同じか（設定変更の検出に使う）。 */
+    public boolean sameTiming(TaskSchedule other) {
+        return other != null && kind == other.kind && enabled == other.enabled
+                && java.util.Objects.equals(dailyTime, other.dailyTime)
+                && java.util.Objects.equals(intervalMinutes, other.intervalMinutes)
+                && java.util.Objects.equals(offsetMinutes, other.offsetMinutes);
     }
 
     /**

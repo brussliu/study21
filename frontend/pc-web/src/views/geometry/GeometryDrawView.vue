@@ -1975,6 +1975,12 @@ function runCommands(): void {
       return
     }
     toast.success(lines.length === 0 ? '作図を消去しました。' : `コマンドを ${lines.length} 件実行しました。`)
+    // 利用者が自分で実行して作図ができたので、AI の流し込みに失敗した印は消す
+    // （利用者が内容を確かめた作図なので、ここから【保存】してよい）
+    if (aiCommandFailure.value !== null) {
+      aiCommandFailure.value = null
+      aiNotice.value = 'AI のコマンドを手で直して実行しました。内容を確認して【保存】してください。'
+    }
     // 実行できたので、コマンド欄はいまの作図に合わせる
     commandsEdited.value = false
     syncCommandsFromCanvas()
@@ -3013,7 +3019,9 @@ function onWindowResize(): void {
         v-if="aiCommandFailure !== null" class="alert alert--danger" data-gm-draw-ai-failure
       >
         {{ aiCommandFailure }} 作図は元の状態に戻してあります。この結果はまだ AI 生図として
-        保存できません。もう一度生成するか、コマンド欄から手で直してください。
+        保存できません。もう一度生成するか、左の
+        <strong>「GeoGebra コマンド」欄を直して【▶ 実行】</strong>してください
+        （実行できれば【保存】できます）。
       </p>
       <p v-if="aiNotice !== ''" class="gm-hint" data-gm-draw-ai-message>{{ aiNotice }}</p>
 

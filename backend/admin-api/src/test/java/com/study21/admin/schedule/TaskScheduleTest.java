@@ -104,4 +104,59 @@ class TaskScheduleTest {
         List<LocalTime> points = TaskSchedule.interval("batL03", true, 30, 0).pointsOfDay(LocalDate.now());
         assertThat(points).containsExactly(LocalTime.of(0, 0), LocalTime.of(0, 30));
     }
+
+    // ------------------------------------------------------------------ 設定の適用時刻
+
+    @Test
+    @DisplayName("設定の適用時刻より前の計画実行点は実行しない（22:00 に 23:30→21:00 でも止めない）")
+    void pointsBeforeTheConfigEffectiveFromAreNotRunnable() {
+        TaskSchedule schedule = TaskSchedule.daily("batR03", true, LocalTime.of(21, 0))
+                .withEffectiveFrom(LocalDateTime.of(2026, 9, 19, 22, 0));
+
+        // 今日の 21:00 は適用時刻（22:00）より前 → 実行しない
+        assertThat(schedule.canRunAt(LocalDateTime.of(2026, 9, 19, 21, 0))).isFalse();
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 22, 30)))
+                .isEmpty();
+        // 次に実行するのは明日の 21:00
+        assertThat(schedule.nextRunnablePointAfter(LocalDateTime.of(2026, 9, 19, 22, 30)))
+                .isEqualTo(LocalDateTime.of(2026, 9, 20, 21, 0));
+        // 明日の 21:00 は実行できる
+        assertThat(schedule.canRunAt(LocalDateTime.of(2026, 9, 20, 21, 0))).isTrue();
+    }
+
+    @Test
+    @DisplayName("適用時刻が無い（起動時の設定）ときは制限しない＝再起動の補執行は今までどおり")
+    void withoutEffectiveFromAnyPastPointIsRunnable() {
+        TaskSchedule schedule = TaskSchedule.daily("batR04", true, LocalTime.of(6, 30));
+        assertThat(schedule.canRunAt(LocalDateTime.of(2026, 9, 19, 6, 30))).isTrue();
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 9, 0)))
+                .contains(LocalDateTime.of(2026, 9, 19, 6, 30));
+    }
+
+    @Test
+    @DisplayName("循環でも適用時刻より前の点は実行しない（間隔を変えた直後に走らせない）")
+    void intervalPointsBeforeTheConfigEffectiveFromAreNotRunnable() {
+        TaskSchedule schedule = TaskSchedule.interval("batL02", true, 5, 1)
+                .withEffectiveFrom(LocalDateTime.of(2026, 9, 19, 23, 28));
+        // 23:30 時点の最後の点は 23:26（適用時刻より前）→ 実行しない
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 23, 30)))
+                .isEmpty();
+        // 23:31 になれば 23:31 が実行対象になる（次に到来した点）
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 23, 31)))
+                .contains(LocalDateTime.of(2026, 9, 19, 23, 31));
+    }
+
+    @Test
+    @DisplayName("設定変更の検出: 時刻・間隔・ずらし・有効が同じなら「変わっていない」")
+    void sameTimingDetectsChanges() {
+        TaskSchedule base = TaskSchedule.interval("batL02", true, 5, 1);
+        assertThat(base.sameTiming(TaskSchedule.interval("batL02", true, 5, 1))).isTrue();
+        assertThat(base.sameTiming(TaskSchedule.interval("batL02", true, 10, 1))).isFalse();
+        assertThat(base.sameTiming(TaskSchedule.interval("batL02", true, 5, 2))).isFalse();
+        assertThat(base.sameTiming(TaskSchedule.interval("batL02", true, 5, 1).withEffectiveFrom(
+                LocalDateTime.of(2026, 9, 19, 22, 0)))).isTrue();   // 適用時刻だけの違いは「同じ設定」
+        assertThat(TaskSchedule.daily("batR03", true, LocalTime.of(23, 30))
+                .sameTiming(TaskSchedule.daily("batR03", true, LocalTime.of(21, 0)))).isFalse();
+        assertThat(base.sameTiming(null)).isFalse();
+    }
 }

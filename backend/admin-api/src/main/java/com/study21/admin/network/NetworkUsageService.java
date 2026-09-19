@@ -88,14 +88,17 @@ public class NetworkUsageService {
     /**
      * 手動操作を上書きしないための判定。
      *
-     * <p>計画実行点より後に端末が更新されていれば、その更新は利用者の操作（または別の実行）なので
-     * ここでは切り替えない。計画実行点が分からないときは判定しない（従来どおり切り替える）。</p>
+     * <p>計画実行点より後に端末が更新されていれば、その更新は利用者の操作なのでここでは切り替えない。
+     * **このバッチ自身の更新（{@code batR03} / {@code batR04}）は数えない**
+     * （数えると、前回の実行で動いた更新日時を手動操作と誤認して切替を見送ってしまう）。</p>
+     *
+     * <p>計画実行点が分からないときは判定しない（従来どおり切り替える）。</p>
      */
     private Optional<String> manualChangeReason(LocalDateTime plannedAt) {
         if (plannedAt == null) {
             return Optional.empty();
         }
-        LocalDateTime latest = terminalMapper.findLatestUpdatedAt();
+        LocalDateTime latest = terminalMapper.findLatestManualUpdatedAt();
         if (latest != null && latest.isAfter(plannedAt)) {
             return Optional.of("端末が計画時刻（" + plannedAt.format(TIME_FORMAT) + "）より後に更新されているため、"
                     + "手動操作を上書きしないよう切り替えませんでした（最終更新 "

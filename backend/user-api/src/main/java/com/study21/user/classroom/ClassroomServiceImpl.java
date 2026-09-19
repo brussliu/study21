@@ -270,19 +270,28 @@ public class ClassroomServiceImpl implements ClassroomService {
                     + "ここで録音を終了してください。");
         }
 
-        // 音声は**再生用にも必ず保存**する（STT の結果が空でも履歴の元音声を残す）
+        /*
+         * 音声は**再生用にも必ず保存**する（STT の結果が空でも履歴の元音声を残す）。
+         *
+         * <p><b>順序</b>: ①置き場を用意する → ②DB へ**引用だけ**を入れる（`ON CONFLICT
+         * DO NOTHING` に勝った 1 本が引用を持つ） → ③勝った側だけが実体を書く。
+         * 逆（書いてから引用を取る）にすると、同じ連番が同時に 2 本来たときに負けた側の
+         * 実体が勝った側を上書きし得る（DB の行と実体の中身が食い違う）。</p>
+         */
         ClassroomRecordingStorage.StoredRecording stored;
         if (record.getAudioPath() == null || record.getAudioName() == null) {
-            stored = storage.newRecording(user.accountId(), file == null ? null : file.getContentType());
-            recordMapper.updateAudio(recordId, stored.relativeDir(), stored.fileName(), stored.mime(),
-                    bytes.length, user.accountId());
+            // 記録 ID から置き場を決める（同時に届いた分塊が別々の置き場へ散らばらないように）
+            stored = storage.newRecording(user.accountId(), recordId,
+                    file == null ? null : file.getContentType());
         } else {
             stored = new ClassroomRecordingStorage.StoredRecording(record.getAudioPath(), record.getAudioName(),
                     record.getAudioMime());
         }
-        // 分塊は**連番で決まる名前**で 1 ファイルずつ保存する（同じ連番の再送は同じ名前＝増えない）
-        String chunkName = ClassroomRecordingStorage.chunkFileName(recordId, seq, stored.mime());
-        storage.writeChunk(stored.relativeDir(), chunkName, bytes);
+        // 初回の分塊がほぼ同時に届いても、置き場の初期化で落ちない（記録ごとに直列化する）
+        storage.prepareRecordingDirectory(stored.relativeDir());
+        // 書き込み先は**分塊ごとに固有**（同じ連番でも別の場所＝上書きが起こり得ない）
+        ClassroomRecordingStorage.ChunkLocation location =
+                storage.newChunkLocation(stored.relativeDir(), recordId, seq, stored.mime());
 
         ClassroomRecordingChunkEntity chunk = new ClassroomRecordingChunkEntity();
         chunk.setRecordId(recordId);
@@ -291,17 +300,22 @@ public class ClassroomServiceImpl implements ClassroomService {
         chunk.setEndOffsetSeconds(end);
         chunk.setByteSize((long) bytes.length);
         chunk.setChecksum(checksum);
-        chunk.setStorageDir(stored.relativeDir());
-        chunk.setFileName(chunkName);
+        chunk.setStorageDir(location.relativeDir());
+        chunk.setFileName(location.fileName());
         chunk.setMime(stored.mime());
-        // 新しいコンテナ（ヘッダ）から始まるか＝組立てでヘッダを落とす対象か
+        // 新しいコンテナ（ヘッダ）から始まるか＝組立てでセッションの切れ目になるか
         chunk.setContainerHead(RecordingContainerCutter.isContainerHead(bytes, bytes.length));
         chunk.setProcessingStatus(ClassroomModels.CHUNK_STORED);
         chunk.setSegmentCount(0);
-        if (chunkMapper.insertIfAbsent(chunk) == 0) {
+
+        boolean claimed = chunkMapper.insertIfAbsent(chunk) == 1;
+        if (!claimed) {
             /*
-             * 同時再送で別の要求が先に同じ連番を入れた。
-             * 中身が同じなら**同じ分塊**なので、保存済みの結果を返して終わる（二重に作らない）。
+             * 同時再送で別の要求が先に同じ連番を引用した。
+             *
+             * <p>中身が同じなら**同じ分塊**なので、保存済みの結果を返して終わる（実体を二重に
+             * 作らない）。違うなら衝突にし、**勝った側の実体には触れない**（こちらは実体を書いて
+             * いないので、消すものも無い）。</p>
              */
             ClassroomRecordingChunkEntity winner = chunkMapper.findBySeq(recordId, seq);
             if (winner == null) {
@@ -315,6 +329,26 @@ public class ClassroomServiceImpl implements ClassroomService {
             log.info("classroom chunk already stored by another request (concurrent retry)."
                     + " recordId={} seq={} bytes={}", recordId, seq, bytes.length);
             return chunkResult(record, seq, segmentsOfChunk(recordId, seq), null, null);
+        }
+
+        /*
+         * 引用を取れた 1 本だけが実体を書く。
+         *
+         * <p>ここで失敗しても引用（DB の行）は残す: 行が「この分塊は欠けている」ことを示し、
+         * 終了時の検証で欠落として見つかる（黙って無かったことにならない）。実体が無い行は
+         * 結合でも欠落として扱う（{@link ClassroomRecordingSessionPlanner}）。</p>
+         */
+        try {
+            storage.writeChunkLocation(location, bytes);
+        } catch (RuntimeException cause) {
+            log.error("分塊の実体を書けませんでした（引用は残します）。"
+                    + "recordId={} seq={} name={}", recordId, seq, location.fileName(), cause);
+            throw cause;
+        }
+        // 録音の置き場が決まっていなければ、ここで記録へ結び付ける（最初に引用を取れた分塊が入れる）
+        if (record.getAudioPath() == null || record.getAudioName() == null) {
+            recordMapper.updateAudio(recordId, stored.relativeDir(), stored.fileName(), stored.mime(),
+                    bytes.length, user.accountId());
         }
 
         // 終了のあとに届いた分塊: **音声だけ保存**して書き起こしはしない
@@ -640,16 +674,50 @@ public class ClassroomServiceImpl implements ClassroomService {
      */
     @Override
     @Transactional
-    public ClassroomModels.EndResult end(UserPrincipal user, long recordId) {
+    public ClassroomModels.EndResult end(UserPrincipal user, long recordId, boolean force,
+                                         ClassroomModels.ChunkManifest manifest) {
         ClassroomRecordEntity record = requireOwner(user, recordId);
         ClassroomAiSettings.Snapshot snapshot = settings.load();
         if (!ClassroomModels.STATUS_RECORDING.equals(record.getStatus())) {
             throw new ConflictException("この録音は録音中ではありません（" + statusLabel(record.getStatus()) + "）。");
         }
         int maxSeq = maxSeqOf(recordId);
-        // **状態は先に検証する**（updateEnded のあとだと、断ったときに記録だけが終わってしまう）
+        /*
+         * **状態は先に検証する**（updateEnded のあとだと、断ったときに記録だけが終わってしまう）。
+         *
+         * ① 音声の分塊が 1 から連続して**全部そろっているか**（欠けていれば欠けている連番を返す。
+         *    ただし利用者が明示した「不完全なまま終了」だけは通し、影響を notice に載せる）。
+         * ② 音源ごとの書き起こしの収尾が済んでいるか。
+         */
+        ClassroomModels.ChunkChecklist checklist = checkChunks(record, manifest);
+        if (!checklist.complete() && !force) {
+            // 欠けたまま終えると**音は後から作り直せない**。欠けている連番を返して送り直させる
+            throw new ChunkChecklistException(checklist,
+                    "録音の音声（分塊）がそろっていません。欠けている連番: " + checklist.missingSeqs()
+                            + "。【再試行】で送り直すか、"
+                            + "音声の一部を失うことを確認したうえで【不完全なまま終了】を押してください。");
+        }
         String finalizeNotice = requireFinalizeComplete(record, maxSeq);
+        if (!checklist.complete() && force) {
+            // 明示の不完全終了: **何を失うか**を残す（黙って完了にしない）
+            finalizeNotice = join(finalizeNotice, "音声の一部が保存できていません（欠けている連番: "
+                    + checklist.missingSeqs() + "）。録音した音はその区間だけ失われています。");
+        }
         int durationSeconds = durationSecondsOf(record, snapshot);
+        /*
+         * **書き換えの直前にもう一度見る**。
+         *
+         * <p>確認と書き換えのあいだに別の要求（未調整の分塊アップロード）が分塊を足せるので、
+         * 見たときと同じ一覧であることを確かめてから完了にする。変わっていれば**終了せず**、
+         * もう一度やり直させる（中途半端な完了状態を作らない）。</p>
+         */
+        ClassroomModels.ChunkChecklist latest = checkChunks(record, manifest);
+        if (latest.storedChunks() != checklist.storedChunks()
+                || !latest.missingSeqs().equals(checklist.missingSeqs())) {
+            throw new ChunkChecklistException(latest,
+                    "音声の保存が終わったあとに、別の分塊が届きました。"
+                            + "最新の状態を確かめて、もう一度終了してください。");
+        }
         if (recordMapper.updateEnded(recordId, durationSeconds, settings.retentionDays(snapshot),
                 user.accountId(), versionOf(record)) == 0) {
             throw new ConflictException("他の操作で先に更新されました。再読み込みしてください。");
@@ -692,7 +760,8 @@ public class ClassroomServiceImpl implements ClassroomService {
         assembleQuietly(record);
         return new ClassroomModels.EndResult(recordId, ClassroomModels.STATUS_STOPPED,
                 statusLabel(ClassroomModels.STATUS_STOPPED), finalNoteId,
-                finalNoteId == null ? null : ClassroomModels.noteRunPath(finalNoteId), notice);
+                finalNoteId == null ? null : ClassroomModels.noteRunPath(finalNoteId), notice,
+                latest.complete(), latest.missingSeqs(), force && !latest.complete());
     }
 
     /**
@@ -733,21 +802,70 @@ public class ClassroomServiceImpl implements ClassroomService {
                 notice = status.notice();
             }
         }
+        return notice;
+    }
+
+    /**
+     * 音声の分塊が**1 から連続してそろっているか**を確かめる（{@link #end} の①）。
+     *
+     * <p>「1 つ以上あるか」では足りない: 途中が欠けていても、最後の分塊が届いていなくても
+     * 区別できず、**音は後から作り直せない**のに完了にしてしまう。ここでは</p>
+     * <ol>
+     *   <li>分塊の行が 1 から連続しているか（欠けている連番を集める）</li>
+     *   <li>画面が宣言した最後の連番まで届いているか（最後の分塊の取りこぼしを見つける）</li>
+     * </ol>
+     * <p>を確かめる。**取り込み音声（mp3）・貼り付けだけ**の記録は分塊を持たない作りなので、
+     * 分塊を理由に断らない（今までできていた操作をできなくしない）。</p>
+     */
+    private ClassroomModels.ChunkChecklist checkChunks(ClassroomRecordEntity record,
+                                                       ClassroomModels.ChunkManifest manifest) {
+        long recordId = record.getRecordId();
+        List<ClassroomRecordingChunkEntity> chunks = chunkMapper.findByRecord(recordId);
+        int stored = chunks == null ? 0 : chunks.size();
+        List<Integer> missing = new ArrayList<>();
+        int maxStored = 0;
+        for (ClassroomRecordingChunkEntity chunk : chunks == null ? List.<ClassroomRecordingChunkEntity>of() : chunks) {
+            if (chunk.getSeq() != null) {
+                maxStored = Math.max(maxStored, chunk.getSeq());
+            }
+        }
         /*
-         * 音声の分塊（実体）: 書き起こしがあるのに 1 件も無いなら、音声が保存されていない
-         * （音は後から作り直せない）。ただし**録音した音声にだけ**言えることなので、
-         * 取り込み（mp3 1 本・貼り付けだけ）は除く（分塊を持たない作りなので、断ると終われない）。
+         * 「そろっているべき範囲」は**画面が宣言した最後の連番**を第一にする（最後の分塊の
+         * 取りこぼしは、行の最大連番を見ても分からない）。宣言が無い（旧クライアント）ときは
+         * 保存済みの行の数で見る（数と範囲が食い違えば、途中が欠けている）。
          */
-        boolean audioReceived = status != null && status.audioReceived();
+        int expected = manifest != null && manifest.lastSeq() > 0 ? manifest.lastSeq() : maxStored;
+        if (expected == 0 && stored > 0) {
+            expected = stored;
+        }
+        java.util.Set<Integer> storedSeqs = new java.util.HashSet<>();
+        for (ClassroomRecordingChunkEntity chunk : chunks == null ? List.<ClassroomRecordingChunkEntity>of() : chunks) {
+            if (chunk.getSeq() != null) {
+                storedSeqs.add(chunk.getSeq());
+            }
+        }
+        for (int seq = 1; seq <= expected; seq += 1) {
+            if (!storedSeqs.contains(seq)) {
+                missing.add(seq);
+            }
+        }
         boolean imported = record.getAudioName() != null
                 && record.getAudioName().toLowerCase(Locale.ROOT).endsWith(".mp3");
-        boolean audioExpected = (maxSeq > 0 || audioReceived) && !imported
-                && (record.getAudioPath() != null || audioReceived);
-        if (audioExpected && chunkMapper.countByRecord(recordId) == 0) {
-            throw new ConflictException("録音の音声（分塊）が 1 つも保存されていません。"
-                    + "通信の状態を確かめて、録音画面からもう一度送ってから終了してください。");
+        if (imported) {
+            // 取り込み音声は分塊を持たない（1 本のファイルをそのまま配信する）
+            return ClassroomModels.ChunkChecklist.ready(stored);
         }
-        return notice;
+        if (expected == 0) {
+            // 分塊が 1 つも無い＝録音の音声が保存されていない（音は後から作り直せない）
+            return new ClassroomModels.ChunkChecklist(false, List.of(), 0, 0,
+                    "録音の音声（分塊）が 1 つも保存されていません。"
+                            + "通信の状態を確かめて、録音画面からもう一度送ってから終了してください。");
+        }
+        if (!missing.isEmpty()) {
+            return new ClassroomModels.ChunkChecklist(false, missing, stored, expected,
+                    "分塊が " + missing.size() + " 件足りません（連番 " + missing + "）。");
+        }
+        return ClassroomModels.ChunkChecklist.ready(stored);
     }
 
     /** 知らせを足す（空は無視して連結する）。 */
@@ -770,14 +888,16 @@ public class ClassroomServiceImpl implements ClassroomService {
     @Override
     @Transactional(readOnly = true)
     public ClassroomModels.ChunkListResult chunks(UserPrincipal user, long recordId, int afterSeq) {
-        requireVisible(user, recordId);
+        ClassroomRecordEntity record = requireVisible(user, recordId);
         List<ClassroomModels.ChunkView> items = chunkMapper.findByRecordAfter(recordId, afterSeq).stream()
                 .map(ClassroomServiceImpl::toChunkView).toList();
         int maxSeq = maxChunkSeqOf(recordId);
         BigDecimal recorded = chunkMapper.maxEndOffsetSeconds(recordId);
+        // 終了してよいかの下見も返す（画面を開き直してもサーバーから同じ状態が取れる）
+        ClassroomModels.ChunkChecklist checklist = checkChunks(record, null);
         return new ClassroomModels.ChunkListResult(items, chunkMapper.countByRecord(recordId),
                 maxSeq, maxSeq + 1, chunkMapper.totalBytes(recordId),
-                recorded == null ? null : recorded.doubleValue());
+                recorded == null ? null : recorded.doubleValue(), checklist);
     }
 
     private static ClassroomModels.ChunkView toChunkView(ClassroomRecordingChunkEntity chunk) {
@@ -790,18 +910,46 @@ public class ClassroomServiceImpl implements ClassroomService {
                 iso(chunk.getCreatedAt()));
     }
 
-    /** 分塊があれば再生用の 1 本を組立て直す（理由はログに残す。例外は投げない）。 */
+    /**
+     * 分塊があれば再生用の 1 本を組立て直す（理由はログに残す。例外は投げない）。
+     *
+     * <p>**DB の行だけ**を正体にする（置き場のファイルを数えない＝トランザクションが失敗して
+     * 残った孤立ファイルを音として混ぜない）。欠落があれば結合せず、状態を残す。</p>
+     */
     private void assembleQuietly(ClassroomRecordEntity record) {
         if (assembler == null) {
             return;
         }
         try {
-            assembler.assembleIfNeeded(record);
+            assembler.assembleIfNeeded(record, chunkMapper.findByRecord(record.getRecordId()));
         } catch (RuntimeException cause) {
             log.warn("授業録音の組立てに失敗しました（分塊は残っています）。recordId={}",
                     record.getRecordId(), cause);
         }
     }
+
+    @Override
+    public int collectOrphanChunks(long recordId) {
+        ClassroomRecordEntity record = recordMapper.findById(recordId);
+        if (record == null || record.getAudioPath() == null) {
+            return 0;
+        }
+        java.util.Set<String> referenced = new java.util.HashSet<>();
+        for (ClassroomRecordingChunkEntity chunk : chunkMapper.findByRecord(recordId)) {
+            if (chunk.getFileName() != null) {
+                referenced.add(chunk.getFileName());
+            }
+        }
+        // 記録の再生用の 1 本も「引用されている」扱い（消してはいけない）
+        if (record.getAudioName() != null) {
+            referenced.add(record.getAudioName());
+        }
+        return storage.collectOrphanChunks(record.getAudioPath(), recordId, referenced,
+                ORPHAN_MIN_AGE_MILLIS);
+    }
+
+    /** 孤立ファイルを消してよいと見なすまでの時間（書いた直後の実体を消さないため）。 */
+    static final long ORPHAN_MIN_AGE_MILLIS = 60L * 60L * 1000L;
 
     // ------------------------------------------------------------------ 配信
 

@@ -115,7 +115,24 @@ public interface ClassroomService {
     ClassroomModels.RecordListResult list(UserPrincipal user, String status, int page, int size);
 
     /** 終了（STOPPED → 最終まとめ PENDING を作る）。 */
-    ClassroomModels.EndResult end(UserPrincipal user, long recordId);
+    default ClassroomModels.EndResult end(UserPrincipal user, long recordId) {
+        return end(user, recordId, false, null);
+    }
+
+    /** 明示の「不完全なまま終了」と、画面が送った分塊の一覧つきの終了。 */
+    ClassroomModels.EndResult end(UserPrincipal user, long recordId, boolean force,
+                                 ClassroomModels.ChunkManifest manifest);
+
+    /**
+     * **引用されていない分塊**を片付ける（保持期限切れの掃除と同じ入口から呼ぶ）。
+     *
+     * <p>「ファイルは書けたがトランザクションが失敗した」分塊は、行から引用されないまま
+     * 置き場に残る。**一定時間より古いものだけ**を消す（書いた直後の実体は、まだ確定して
+     * いない同時実行中の要求が引用するかもしれない）。</p>
+     *
+     * @return 消した件数
+     */
+    int collectOrphanChunks(long recordId);
 
     /** 元音声の配信（Range/206）。 */
     AudioFile audio(UserPrincipal user, long recordId);

@@ -355,6 +355,46 @@ export interface ClassroomRecordingChunkList {
   totalBytes: number
   /** 保存済みの分塊が示す録音の位置（秒）。0 件なら null */
   recordedSeconds: number | null
+  /**
+   * 終了してよいかの下見（**サーバーが判断したもの**）。
+   *
+   * <p>画面を開き直しても同じ判断が取れるようにサーバーから返す（画面のメモリだけに頼らない）。</p>
+   */
+  finalizeCheck?: ClassroomFinalizeCheck
+}
+
+/**
+ * 終了前の確認の結果（分塊が 1 から連続しているか）。
+ *
+ * <p>「少なくとも 1 つある」では足りない: 途中が欠けていても、最後の分塊が届いていなくても
+ * 区別できない。欠けている連番を受け取って**その分塊だけ送り直す**。</p>
+ */
+export interface ClassroomFinalizeCheck {
+  /** 分塊が 1 から連続していて全部そろっているか（＝終了できる）。 */
+  complete: boolean
+  /** 足りない連番。 */
+  missingSeqs: number[]
+  /** 保存できている分塊の数。 */
+  storedChunks: number
+  /** 画面が宣言した最後の連番。 */
+  expectedChunks: number
+  /** 画面に出す理由（日本語。終了できるときは null）。 */
+  reason: string | null
+}
+
+/**
+ * 停止のあとに画面が送る「送った分塊の一覧」。
+ *
+ * <p>サーバーはこれで**最後の分塊の取りこぼし**を見つける（行の最大連番だけでは、
+ * まだ届いていない最後の分塊が分からない）。</p>
+ */
+export interface ClassroomChunkManifest {
+  /** 画面が送った最後の分塊の連番。 */
+  lastSeq: number
+  /** 画面が送った分塊の数。 */
+  totalCount: number
+  /** 最後の分塊が終わる録音回放の時間軸の位置（16kHz のサンプル数）。 */
+  endSample?: number
 }
 
 /**
@@ -378,6 +418,12 @@ export interface ClassroomEndResult {
    * （成功と言わない・最終まとめを起動しない）。</p>
    */
   error?: string | null
+  /** 音声が**全部そろっているか**（「音声は保存されています」と言ってよいのは true のときだけ）。 */
+  complete?: boolean
+  /** 足りない分塊の連番（あれば。画面はこの連番を送り直す）。 */
+  missingSeqs?: number[]
+  /** 明示の「不完全なまま終了」で終えたか。 */
+  forced?: boolean
 }
 
 export interface ClassroomDeleteResult {
@@ -657,9 +703,25 @@ export function searchClassroomRecords(params: {
   return http.get<ClassroomRecordPage>(BASE, { params: { ...params, status: params.status || undefined } })
 }
 
-/** 録音を終了する（最終まとめ = PENDING のノートを作る）。 */
-export function endClassroomRecord(recordId: number): Promise<ApiResponse<ClassroomEndResult>> {
-  return http.post<ClassroomEndResult>(`${BASE}/${recordId}/end`)
+/**
+ * 録音を終了する（最終まとめ = PENDING のノートを作る）。
+ *
+ * <p>停止のあとに分塊を送り切ったら、**送った分塊の一覧**を添えて呼ぶ。サーバーは
+ * 分塊が 1 から連続しているかと収尾の状態を確かめ、欠けていれば **409 で欠けている連番**を
+ * 返す（{@link ApiError.message} に日本語で入る）。画面はその分塊だけ送り直す。</p>
+ *
+ * <p>`force` は利用者が影響を確認して押した「不完全なまま終了」。既定は false
+ * （＝黙って音を失わない）。</p>
+ */
+export function endClassroomRecord(
+  recordId: number,
+  options: { force?: boolean; manifest?: ClassroomChunkManifest } = {}
+): Promise<ApiResponse<ClassroomEndResult>> {
+  const body: { force: boolean; manifest: ClassroomChunkManifest | null } = {
+    force: options.force === true,
+    manifest: options.manifest ?? null
+  }
+  return http.post<ClassroomEndResult>(`${BASE}/${recordId}/end`, { body })
 }
 
 /** 授業記録を削除する（所有者のみ。音声の実体も消える）。 */

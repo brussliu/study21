@@ -142,6 +142,12 @@ export interface BatchScheduleTask {
   nextRunAt: string | null
   /** 次の計画実行時刻の表示（例「2026-09-20 06:30」。無いときは理由）。 */
   nextRunLabel: string
+  /**
+   * 実行設定の**適用時刻**（例「2026-09-19 22:00」）。利用者が時刻・間隔・ずらしを変えた時刻で、
+   * **この時刻より前の計画実行点は実行しない**（設定を変えた直後に過去の点を実行しないため）。
+   * 起動時の読み込みなど、まだ変更していないときは null。
+   */
+  configEffectiveFrom: string | null
   /** この画面が最後に計画実行点を確保した時刻（未実行は null）。 */
   lastPlannedAt: string | null
 }

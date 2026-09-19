@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
@@ -73,6 +74,8 @@ class ScheduleConfigServiceTest {
         static final class Box {
             Map<String, String> settings = new LinkedHashMap<>();
             Map<String, Boolean> enabled = new LinkedHashMap<>();
+            /** 設定の適用時刻（DB に保存されている値の代役）。 */
+            Map<String, LocalDateTime> effectiveFrom = new LinkedHashMap<>();
         }
 
         final Box box = new Box();
@@ -82,6 +85,14 @@ class ScheduleConfigServiceTest {
         /** 読み込みごとに次の候補を返す（並行保存のテストで「最後に読んだ値」を決定的にする）。 */
         volatile int[] intervalChoices;
         volatile String lastIntervalRead;
+
+        /** saveConfigEffectiveFrom で保存された値（DB へ書いた代役）。 */
+        final Map<String, LocalDateTime> savedEffectiveFrom = new LinkedHashMap<>();
+
+        @Override
+        public void saveConfigEffectiveFrom(String taskCode, LocalDateTime effectiveFrom) {
+            savedEffectiveFrom.put(taskCode, effectiveFrom);
+        }
 
         @Override
         public ScheduleSourceData load(List<String> settingKeys, List<String> taskCodes) {
@@ -103,7 +114,7 @@ class ScheduleConfigServiceTest {
                 settings.put("STUDY_MONITOR_L02_INTERVAL_MINUTES", value);
                 lastIntervalRead = value;
             }
-            return new ScheduleSourceData(settings, box.enabled);
+            return new ScheduleSourceData(settings, box.enabled, new LinkedHashMap<>(box.effectiveFrom));
         }
     }
 
@@ -317,6 +328,102 @@ class ScheduleConfigServiceTest {
             assertThat(service.snapshot().taskOf("batL02").orElseThrow().intervalMinutes())
                     .isEqualTo(Integer.parseInt(loader.lastIntervalRead));
             assertThat(service.snapshot().version()).isEqualTo(1 + published);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    // ------------------------------------------------------------------ 設定変更と適用時刻
+
+    @Test
+    @DisplayName("利用者が時刻を変えたら、その時刻より前の計画実行点は実行しない（22:00 に 23:30→21:00）")
+    void changingTheTimeOnlyAffectsFuturePoints() {
+        service.loadOnStartup();
+        // 起動時（＝まだ変更していない設定）は制限なし
+        assertThat(service.snapshot().taskOf("batR03").orElseThrow().effectiveFrom()).isNull();
+
+        // 22:00 に「停止 23:30 → 21:00」へ変更した
+        clock.advance(Duration.ofHours(22));
+        loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        assertThat(service.refresh("設定保存").published()).isTrue();
+
+        TaskSchedule schedule = service.snapshot().taskOf("batR03").orElseThrow();
+        assertThat(schedule.dailyTime()).isEqualTo(LocalTime.of(21, 0));
+        assertThat(schedule.effectiveFrom()).isNotNull();
+        // 今日の 21:00 は「設定を変えた時刻（22:00）」より前 → 実行しない（すぐ止まらない）
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 22, 0)))
+                .isEmpty();
+        // 次に実行するのは明日の 21:00（画面の「次回実行時刻」も同じ）
+        assertThat(schedule.nextRunnablePointAfter(LocalDateTime.of(2026, 9, 19, 22, 0)))
+                .isEqualTo(LocalDateTime.of(2026, 9, 20, 21, 0));
+        assertThat(service.report().taskStatus("batR03").nextRunLabel()).isEqualTo("2026-09-20 21:00");
+        // 適用時刻は DB に保存される（再起動でも引き継ぐ）
+        assertThat(loader.savedEffectiveFrom).containsKey("batR03");
+    }
+
+    @Test
+    @DisplayName("適用時刻は再起動でも引き継ぐ（メモリが空でも過去の点を実行しない）")
+    void effectiveFromSurvivesRestart() {
+        service.loadOnStartup();
+        clock.advance(Duration.ofHours(22));
+        loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        service.refresh("設定保存");
+        LocalDateTime saved = loader.savedEffectiveFrom.get("batR03");
+
+        // 再起動: 新しいサービス（メモリは空）が DB の適用時刻を読む
+        loader.box.effectiveFrom.put("batR03", saved);
+        ScheduleConfigService restarted = new ScheduleConfigService(catalog, loader, clock);
+        restarted.loadOnStartup();
+
+        TaskSchedule schedule = restarted.snapshot().taskOf("batR03").orElseThrow();
+        assertThat(schedule.effectiveFrom()).isEqualTo(saved);
+        assertThat(schedule.previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 19, 22, 30)))
+                .isEmpty();   // 今日の 21:00 は適用時刻より前 → 実行しない
+        // 変更していないタスク（batR04）は制限なし＝再起動の補執行は今までどおり
+        assertThat(restarted.snapshot().taskOf("batR04").orElseThrow().effectiveFrom()).isNull();
+        assertThat(restarted.snapshot().taskOf("batR04").orElseThrow()
+                .previousRunnablePointAtOrBefore(LocalDateTime.of(2026, 9, 20, 9, 0)))
+                .contains(LocalDateTime.of(2026, 9, 20, 6, 30));
+    }
+
+    @Test
+    @DisplayName("設定が変わっていなければ適用時刻は動かない（無関係な設定の保存で過去の補償を止めない）")
+    void unchangedScheduleKeepsEffectiveFrom() {
+        service.loadOnStartup();
+        clock.advance(Duration.ofHours(22));
+        loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        service.refresh("設定保存");
+        LocalDateTime first = service.snapshot().taskOf("batR03").orElseThrow().effectiveFrom();
+
+        // 実行設定は変えずに、別の設定（AI モデルなど）を保存した
+        clock.advance(Duration.ofMinutes(5));
+        loader.box.settings.put("AI_QWEN_MODEL", "qwen-max");
+        service.refresh("設定保存");
+
+        assertThat(service.snapshot().taskOf("batR03").orElseThrow().effectiveFrom()).isEqualTo(first);
+    }
+
+    // ------------------------------------------------------------------ 並行刷新
+
+    @Test
+    @DisplayName("並行刷新: 先に要求した更新が後続の更新を「発行済み」にして捨てない（最新の設定が失われない）")
+    void concurrentRefreshDoesNotLoseTheLatestRequest() throws Exception {
+        service.loadOnStartup();   // loads=1
+        loader.gate = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            // A がロックを取って読み込みで止まる（その間に B が要求する）
+            Future<ScheduleConfigService.RefreshResult> first = pool.submit(() -> service.refresh("保存A"));
+            Thread.sleep(100);
+            Future<ScheduleConfigService.RefreshResult> second = pool.submit(() -> service.refresh("保存B"));
+            Thread.sleep(100);
+            loader.gate.countDown();
+
+            assertThat(first.get(5, TimeUnit.SECONDS).published()).isTrue();
+            // B は捨てられず、実際に読み込んで発行される（ここが従来の不具合）
+            assertThat(second.get(5, TimeUnit.SECONDS).published()).isTrue();
+            assertThat(loader.loads).hasValue(3);   // 起動時 1 + A 1 + B 1
+            assertThat(service.snapshot().version()).isEqualTo(3);
         } finally {
             pool.shutdownNow();
         }

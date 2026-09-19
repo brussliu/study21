@@ -43,6 +43,8 @@ public record ScheduleConfigReport(
      * @param examplePoints   1 日の実行時刻の例（画面表示用）
      * @param nextRunAt       次の計画実行時刻（設定が無い・不正なときは null）
      * @param nextRunLabel    次の計画実行時刻の表示（「2026-09-20 06:30」など。無いときは理由）
+     * @param configEffectiveFrom いまの設定が効き始めた時刻（未変更なら null）。
+     *                        この時刻以前の計画実行点は実行しない（画面で理由が分かるように出す）
      */
     public record TaskStatus(
             String taskCode,
@@ -55,7 +57,8 @@ public record ScheduleConfigReport(
             String dailyTime,
             List<String> examplePoints,
             LocalDateTime nextRunAt,
-            String nextRunLabel) {
+            String nextRunLabel,
+            String configEffectiveFrom) {
     }
 
     /** 画面に出す「保存済み・実行設定への反映待ち」の案内（そのまま出してよい日本語）。 */

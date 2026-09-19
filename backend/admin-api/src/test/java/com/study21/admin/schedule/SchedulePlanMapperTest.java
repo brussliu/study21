@@ -102,6 +102,26 @@ class SchedulePlanMapperTest {
     }
 
     @Test
+    void configEffectiveFromIsSavedWithoutTouchingThePlan() {
+        // 行が無い状態で設定を変えた（計画はまだ 1 度も確保していない）
+        assertThat(planMapper.markConfigEffectiveFrom(TEST_CODE, "2026-09-19T20:00:00")).isEqualTo(1);
+        Map<String, Object> created = planMapper.findPlan(TEST_CODE);
+        assertThat(String.valueOf(created.get("configEffectiveFrom"))).startsWith("2026-09-19 20:00");
+        assertThat(created.get("lastPlannedAt")).isNull();   // 計画（進み具合）には触らない
+
+        // 2 回目の変更は同じ行を更新する（増えない）
+        assertThat(planMapper.markConfigEffectiveFrom(TEST_CODE, "2026-09-19T21:00:00")).isEqualTo(1);
+        assertThat(String.valueOf(planMapper.findPlan(TEST_CODE).get("configEffectiveFrom")))
+                .startsWith("2026-09-19 21:00");
+
+        // 既に確保済みの点は消えない（適用時刻の保存で計画を巻き戻さない）
+        planMapper.claim(TEST_CODE, "2026-09-19T23:30:00");
+        planMapper.markConfigEffectiveFrom(TEST_CODE, "2026-09-19T22:00:00");
+        assertThat(String.valueOf(planMapper.findPlan(TEST_CODE).get("lastPlannedAt")))
+                .startsWith("2026-09-19 23:30");
+    }
+
+    @Test
     void unfinishedExecutionsAreClosedOnStartup() {
         // 再起動の復旧: 未完了（待機中・実行中）の実行を失敗として閉じる
         // （残すと、そのタスクの次の実行が「前回が実行中」と見なされて永久に走らない）

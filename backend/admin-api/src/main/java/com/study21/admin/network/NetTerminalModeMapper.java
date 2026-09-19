@@ -33,12 +33,16 @@ public interface NetTerminalModeMapper {
     int updateAllTerminalModes(@Param("mode") String mode, @Param("updatedByCode") String updatedByCode);
 
     /**
-     * 有効な端末が最後に更新された日時（無ければ null）。
+     * 有効な端末が**利用者によって**最後に更新された日時（無ければ null）。
      *
      * <p>計画実行点より後に端末が触られているときは、利用者の手動操作を上書きしないよう
      * 切り替えを見送る、という判断に使う。</p>
+     *
+     * <p><b>このバッチ自身の更新は数えない</b>（{@code 更新元コード} が {@code batR03} / {@code batR04} の行を除く）。
+     * 除かないと「前回の実行で更新された時刻」を手動操作と誤認し、次の切替を見送ってしまう
+     * （＝ネット状態が切り替わらないままになる）。</p>
      */
-    LocalDateTime findLatestUpdatedAt();
+    LocalDateTime findLatestManualUpdatedAt();
 
     /** 有効な端末の数（メッセージ用）。 */
     int countActiveTerminals();

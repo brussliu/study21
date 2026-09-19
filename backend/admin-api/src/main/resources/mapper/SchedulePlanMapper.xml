@@ -36,8 +36,24 @@
          WHERE "バッチコード" = #{batchCode}
     </update>
 
+    <!--
+      設定の適用時刻（利用者が最後に設定を変えた時刻）も一緒に返す。
+      再起動してもこの時刻より前の計画実行点は実行しない（設定変更の直後に過去の点を走らせない）。
+    -->
+    <update id="markConfigEffectiveFrom">
+        INSERT INTO public."BAT_スケジュール状態情報"
+            ("バッチコード", "設定適用日時", "バージョン", "登録日時", "更新日時")
+        VALUES
+            (#{batchCode}, #{effectiveFrom}::timestamp, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ("バッチコード") DO UPDATE
+           SET "設定適用日時" = EXCLUDED."設定適用日時",
+               "バージョン"   = public."BAT_スケジュール状態情報"."バージョン" + 1,
+               "更新日時"     = CURRENT_TIMESTAMP
+    </update>
+
     <select id="findPlans" resultType="java.util.LinkedHashMap">
-        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId"
+        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId",
+               "設定適用日時" AS "configEffectiveFrom"
           FROM public."BAT_スケジュール状態情報"
          WHERE "バッチコード" IN
             <foreach collection="taskCodes" item="taskCode" open="(" separator="," close=")">
@@ -46,7 +62,8 @@
     </select>
 
     <select id="findPlan" resultType="java.util.LinkedHashMap">
-        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId"
+        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId",
+               "設定適用日時" AS "configEffectiveFrom"
           FROM public."BAT_スケジュール状態情報"
          WHERE "バッチコード" = #{batchCode}
     </select>

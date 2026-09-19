@@ -68,7 +68,7 @@ class NetworkUsageServiceTest {
     @Test
     @DisplayName("計画時刻より後に端末が更新されていたら切り替えない（手動操作を上書きしない）")
     void doesNotOverwriteNewerManualChange() {
-        when(terminalMapper.findLatestUpdatedAt()).thenReturn(PLANNED.plusMinutes(15));
+        when(terminalMapper.findLatestManualUpdatedAt()).thenReturn(PLANNED.plusMinutes(15));
 
         NetworkUsageService.NetworkSwitchResult result = service.stop("batR03", PLANNED);
 
@@ -86,7 +86,7 @@ class NetworkUsageServiceTest {
     @Test
     @DisplayName("計画時刻より前の更新なら切り替える（前回の実行で更新されただけのとき）")
     void appliesWhenTheLastChangeIsOlderThanThePlan() {
-        when(terminalMapper.findLatestUpdatedAt()).thenReturn(PLANNED.minusMinutes(10));
+        when(terminalMapper.findLatestManualUpdatedAt()).thenReturn(PLANNED.minusMinutes(10));
 
         assertThat(service.start("batR04", PLANNED).applied()).isTrue();
         verify(terminalMapper).updateAllTerminalModes("T", "batR04");

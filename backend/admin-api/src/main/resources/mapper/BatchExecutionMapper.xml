@@ -101,6 +101,14 @@
          LIMIT 1
     </select>
 
+    <!-- 再起動の復旧: 未完了の実行を古い順に 1 件ずつ見る（待機中と実行中で扱いを変える）。 -->
+    <select id="findUnfinished" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "状態" IN ('QUEUED','RUNNING')
+         ORDER BY "実行ID" ASC
+    </select>
+
     <!--
       サービス再起動の復旧: 未完了の実行を失敗として閉じる
       （残したままだと、そのタスクの次の実行が「前回が実行中」と見なされて走らない）。

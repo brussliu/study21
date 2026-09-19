@@ -190,7 +190,18 @@ onMounted(load)
                 {{ task.enabled === null ? '—' : task.enabled ? '有効' : '無効' }}
               </td>
               <td>{{ task.describe }}</td>
-              <td>{{ task.nextRunLabel }}</td>
+              <td>
+                {{ task.nextRunLabel }}
+                <!-- 適用時刻より前の計画実行点は実行しない。設定を変えた直後に
+                     「なぜ今回は走らないのか」が分かるように出す（未変更のときは出さない） -->
+                <span
+                  v-if="task.configEffectiveFrom"
+                  class="batch-schedule__effective"
+                  data-testid="task-effective-from"
+                >
+                  設定の適用: {{ task.configEffectiveFrom }} 以降
+                </span>
+              </td>
               <td class="cell-muted">{{ task.examplePoints.join(' / ') }}</td>
             </tr>
           </tbody>

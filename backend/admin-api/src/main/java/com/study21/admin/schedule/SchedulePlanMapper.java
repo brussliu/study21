@@ -27,6 +27,15 @@ public interface SchedulePlanMapper {
     /** 確保した実行IDを書き戻す（監査用）。 */
     int attachExecution(@Param("batchCode") String batchCode, @Param("executionId") long executionId);
 
+    /**
+     * **設定の適用時刻**を保存する（この時刻以前の計画実行点は実行しない）。
+     *
+     * <p>利用者が実行時刻・間隔・ずらしを変えたときに呼ぶ。行が無ければ作る。
+     * {@code 最終予定日時}（計画の進み具合）には触らない。</p>
+     */
+    int markConfigEffectiveFrom(@Param("batchCode") String batchCode,
+                                @Param("effectiveFrom") String effectiveFrom);
+
     /** 対象タスクの計画状態（起動時に 1 回だけまとめて読む）。 */
     List<Map<String, Object>> findPlans(@Param("taskCodes") List<String> taskCodes);
 

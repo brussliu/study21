@@ -8,7 +8,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -29,6 +30,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *
  * <p>確保と実行記録は**同じトランザクション**で行う。途中で落ちれば両方巻き戻り、
  * その計画実行点は次の検査で再び確保を試みる（実行記録だけ残って実行されない状態を作らない）。</p>
+ *
+ * <p><b>メモリの早見はコミット後にだけ更新する。</b>トランザクションが巻き戻ったのに
+ * 「確保した」とメモリに残すと、その計画実行点は二度と確保されず**実行が抜ける**。
+ * そのためトランザクションは {@link TransactionTemplate} で明示的に切り、
+ * 戻り値を得てから（＝コミット後に）メモリを更新する。</p>
  */
 @Component
 public class ScheduledTriggerStore {
@@ -43,16 +49,19 @@ public class ScheduledTriggerStore {
     private final SchedulePlanMapper planMapper;
     private final BatchExecutionMapper executionMapper;
     private final ScheduleRuleCatalog catalog;
+    private final TransactionTemplate transactionTemplate;
 
     /** メモリの早見（DB の値が正。ここは「DB を叩く回数を減らす」ためだけに使う）。 */
     private final Map<String, LocalDateTime> lastClaimed = new ConcurrentHashMap<>();
 
     public ScheduledTriggerStore(SchedulePlanMapper planMapper,
                                  BatchExecutionMapper executionMapper,
-                                 ScheduleRuleCatalog catalog) {
+                                 ScheduleRuleCatalog catalog,
+                                 PlatformTransactionManager transactionManager) {
         this.planMapper = planMapper;
         this.executionMapper = executionMapper;
         this.catalog = catalog;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
     }
 
     /**
@@ -81,27 +90,58 @@ public class ScheduledTriggerStore {
      *
      * @return 確保できたときの実行ID。既に確保済み（他の実行・過去の実行）なら null
      */
-    @Transactional
     public Long claimAndRecord(String taskCode, LocalDateTime plannedAt, String batchType) {
-        String claimed = planMapper.claim(taskCode, plannedAt.format(PAYLOAD_FORMAT));
-        if (claimed == null) {
+        Long executionId = transactionTemplate.execute(status -> {
+            String claimed = planMapper.claim(taskCode, plannedAt.format(PAYLOAD_FORMAT));
+            if (claimed == null) {
+                return null;
+            }
+            BatchExecutionEntity record = new BatchExecutionEntity();
+            record.setBatchCode(taskCode);
+            record.setBatchType(batchType);
+            record.setTriggerType(batchType);
+            record.setStatus(BatchExecutionStatus.QUEUED.name());
+            record.setRequestedByCode(SCHEDULER_CODE);
+            record.setScheduleTime(plannedAt.format(PAYLOAD_FORMAT));
+            record.setMessage("スケジュール実行（予定 "
+                    + plannedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + "）");
+            executionMapper.insert(record);
+            planMapper.attachExecution(taskCode, record.getExecutionId());
+            return record.getExecutionId();
+        });
+        if (executionId == null) {
             return null;
         }
+        // ここへ来た時点でコミット済み。**コミット後にだけ**メモリの早見を更新する
         lastClaimed.put(taskCode, plannedAt);
-
-        BatchExecutionEntity record = new BatchExecutionEntity();
-        record.setBatchCode(taskCode);
-        record.setBatchType(batchType);
-        record.setTriggerType(batchType);
-        record.setStatus(BatchExecutionStatus.QUEUED.name());
-        record.setRequestedByCode(SCHEDULER_CODE);
-        record.setScheduleTime(plannedAt.format(PAYLOAD_FORMAT));
-        record.setMessage("スケジュール実行（予定 " + plannedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + "）");
-        executionMapper.insert(record);
-        planMapper.attachExecution(taskCode, record.getExecutionId());
         log.info("バッチの計画実行点を確保しました。taskCode={} plannedAt={} executionId={}",
-                taskCode, plannedAt, record.getExecutionId());
-        return record.getExecutionId();
+                taskCode, plannedAt, executionId);
+        return executionId;
+    }
+
+    /**
+     * 計画実行点を確保せずに**実行記録だけ**作る（再起動の復旧で、確保済みの点をやり直すとき）。
+     *
+     * <p>計画表の点は既に確保済みなので、ここでは新しい実行記録を作って渡す。</p>
+     */
+    public Long insertRetryRow(String taskCode, LocalDateTime plannedAt, String batchType, String requestedByCode) {
+        Long executionId = transactionTemplate.execute(status -> {
+            BatchExecutionEntity record = new BatchExecutionEntity();
+            record.setBatchCode(taskCode);
+            record.setBatchType(batchType);
+            record.setTriggerType(batchType);
+            record.setStatus(BatchExecutionStatus.QUEUED.name());
+            record.setRequestedByCode(requestedByCode);
+            record.setScheduleTime(plannedAt.format(PAYLOAD_FORMAT));
+            record.setMessage("サービス再起動のため、中断した実行をやり直します（予定 "
+                    + plannedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")) + "）");
+            executionMapper.insert(record);
+            planMapper.attachExecution(taskCode, record.getExecutionId());
+            return record.getExecutionId();
+        });
+        log.warn("中断した実行をやり直します（冪等な業務のみ）。taskCode={} plannedAt={} executionId={}",
+                taskCode, plannedAt, executionId);
+        return executionId;
     }
 
     /**
@@ -112,14 +152,15 @@ public class ScheduledTriggerStore {
      *
      * @return 進めたら true（既に同じか新しい点を確保済みなら false）
      */
-    @Transactional
     public boolean advanceWithoutRun(String taskCode, LocalDateTime plannedAt) {
         LocalDateTime known = lastClaimed.get(taskCode);
         if (known != null && !plannedAt.isAfter(known)) {
             return false;
         }
-        String claimed = planMapper.claim(taskCode, plannedAt.format(PAYLOAD_FORMAT));
-        if (claimed != null) {
+        Boolean claimed = transactionTemplate.execute(status ->
+                planMapper.claim(taskCode, plannedAt.format(PAYLOAD_FORMAT)) != null);
+        if (Boolean.TRUE.equals(claimed)) {
+            // コミット後にだけメモリを進める（巻き戻ったら何も残さない）
             lastClaimed.put(taskCode, plannedAt);
             return true;
         }
@@ -151,6 +192,11 @@ public class ScheduledTriggerStore {
     /** 実行中（QUEUED/RUNNING）の他の実行があるか。 */
     public boolean isOtherExecutionRunning(String taskCode, long executionId) {
         return executionMapper.findRunningByBatchCodeExcept(taskCode, executionId) != null;
+    }
+
+    /** そのタスクの実行が未完了（待機中・実行中）か。 */
+    public boolean isTaskRunning(String taskCode) {
+        return executionMapper.findRunningByBatchCode(taskCode) != null;
     }
 
     /** 実行記録（スキップ理由を書くために読む）。 */

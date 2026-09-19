@@ -2073,6 +2073,31 @@ describe('図形管理【作図画面】', () => {
       expect(toastMessages().join(' ')).toContain('保存できません')
     })
 
+    it('コマンド欄で直して【実行】できたら、そこから【保存】できる', async () => {
+      api = new FakeApi()
+      api.failCommands = ['Polygon(A, B, C)']
+      const { wrapper: view, fetchMock } = await setup({ aiRequestId: 31 })
+      // まずは AI の流し込みに失敗している（保存は止まる）
+      expect(view.find('[data-gm-draw-ai-failure]').exists()).toBe(true)
+
+      // 利用者がコマンド欄を直して【実行】する（失敗する行を消す）
+      await view.get('[data-gm-draw-command]').setValue('A = (0, 0)\nB = (5, 0)')
+      api.failCommands = []
+      await view.get('[data-gm-draw-command-run]').trigger('click')
+      await flushPromises()
+
+      // 印が消え、案内が変わる
+      expect(view.find('[data-gm-draw-ai-failure]').exists()).toBe(false)
+      expect(view.get('[data-gm-draw-ai-message]').text()).toContain('手で直して実行しました')
+
+      const before = recorded(fetchMock).length
+      await view.get('[data-gm-draw-save]').trigger('click')
+      await flushPromises()
+      const confirm = recorded(fetchMock).slice(before)
+        .find((call) => call.url.endsWith('/geometry/ai/requests/31/confirm'))
+      expect(confirm).toBeDefined()
+    })
+
     it('保存が終わったら「保存完了」にする（READY の間は保存済みと言わない）', async () => {
       api = new FakeApi()
       const { wrapper: view } = await setup({ aiRequestId: 31 })

@@ -49,6 +49,14 @@ public interface BatchExecutionMapper {
     int markUnfinishedAsFailed(@Param("message") String message);
 
     /**
+     * 未完了（待機中・実行中）の実行を**古い順**に返す（再起動の復旧で 1 件ずつ見る）。
+     *
+     * <p>待機中（まだ始まっていない）と実行中（結果が分からない）で復旧の仕方を変えるため、
+     * まとめて失敗にするのではなく 1 件ずつ扱えるようにしてある。</p>
+     */
+    List<BatchExecutionEntity> findUnfinished();
+
+    /**
      * 要求内容（JSONB）の aiRequestId で実行履歴を引く（AI 生図の工程ごとの状況）。
      * 古い順（batC51 → 52 → 53 の順）に返す。
      */

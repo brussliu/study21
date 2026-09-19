@@ -1,5 +1,7 @@
 package com.study21.admin.geometryai;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -29,6 +31,8 @@ import java.util.regex.Pattern;
  */
 @Component
 public class GeometryCommandValidator {
+
+    private static final Logger log = LoggerFactory.getLogger(GeometryCommandValidator.class);
 
     /** 1 行の長さの上限。 */
     public static final int LINE_MAX = 500;
@@ -97,6 +101,93 @@ public class GeometryCommandValidator {
     private static final Pattern EXPRESSION_CHARS = Pattern.compile("^[A-Za-z0-9_+\\-*/^().,\\s°=<>&|!\\[\\]{}]*$");
 
     /** 数式・定義の検査で見つかった問題（エラーコードと日本語の理由）。 */
+    /** 引数の区切り（`Text` の 3 番目を外すのに使う）。 */
+    private static final Pattern TEXT_COMMAND = Pattern.compile("\\bText\\s*\\(");
+
+    /**
+     * `Text("文章", A, "left")` の**位置の言葉**（3 番目）を外す。
+     *
+     * <p>この版の GeoGebra の `Text` は `Text(文章, 点)` / `Text(文章, 点, true|false)` だけで、
+     * **`"left"` のような位置の言葉は引数に存在しない**（実測: 必ず false を返す）。AI が
+     * 「点 A の左」を素直に引数へ写してしまうことがあり、そのままだと**作図が 1 行も入らない**
+     * （画面は保存を止める）。意味を変えずに外せるので、ここで直して通す。</p>
+     *
+     * <p>外すのは「最後の引数が文字列」のときだけ。ほかの形（引数の順が違う・式の中など）は
+     * 触らない（勝手に意味を変えない）。</p>
+     */
+    static String dropTextPositionArgument(String line) {
+        Matcher command = TEXT_COMMAND.matcher(line);
+        if (!command.find()) {
+            return line;
+        }
+        int open = line.indexOf('(', command.start());
+        int close = matchingParen(line, open);
+        if (close < 0 || close != line.stripTrailing().length() - 1) {
+            // `Text(` の外に続きがある行（式の一部など）は触らない
+            return line;
+        }
+        List<String> args = splitArguments(line.substring(open + 1, close));
+        if (args.size() != 3) {
+            return line;
+        }
+        String last = args.get(2).trim();
+        if (last.length() < 2 || !last.startsWith("\"") || !last.endsWith("\"")) {
+            return line;
+        }
+        return line.substring(0, open + 1) + args.get(0).strip() + ", " + args.get(1).strip() + ")"
+                + line.substring(close + 1);
+    }
+
+    /** 開き括弧に対応する閉じ括弧（引用符の中は数えない）。無ければ -1。 */
+    private static int matchingParen(String line, int open) {
+        int depth = 0;
+        boolean quoted = false;
+        for (int index = open; index < line.length(); index += 1) {
+            char c = line.charAt(index);
+            if (c == '"') {
+                quoted = !quoted;
+                continue;
+            }
+            if (quoted) {
+                continue;
+            }
+            if (c == '(') {
+                depth += 1;
+            } else if (c == ')') {
+                depth -= 1;
+                if (depth == 0) {
+                    return index;
+                }
+            }
+        }
+        return -1;
+    }
+
+    /** 括弧の中を**一番外側のカンマ**で分ける（引用符の中と入れ子は分けない）。 */
+    private static List<String> splitArguments(String inside) {
+        List<String> parts = new ArrayList<>();
+        int depth = 0;
+        boolean quoted = false;
+        StringBuilder current = new StringBuilder();
+        for (char c : inside.toCharArray()) {
+            if (c == '"') {
+                quoted = !quoted;
+            } else if (!quoted && (c == '(' || c == '{' || c == '[')) {
+                depth += 1;
+            } else if (!quoted && (c == ')' || c == '}' || c == ']')) {
+                depth -= 1;
+            }
+            if (c == ',' && !quoted && depth == 0) {
+                parts.add(current.toString());
+                current.setLength(0);
+                continue;
+            }
+            current.append(c);
+        }
+        parts.add(current.toString());
+        return parts;
+    }
+
     private record Problem(String code, String message) {
     }
 
@@ -205,6 +296,13 @@ public class GeometryCommandValidator {
                 if (problem != null) {
                     return Result.failure(problem.code(), lineNo, problem.message());
                 }
+            }
+            // 位置の言葉（"left" など）は Text の引数にできない（実機で必ず false になる）。
+            // **機械的に直せる**ので落とさず、3 番目を外して通す（直したことはログに残す）
+            String fixedLine = dropTextPositionArgument(line);
+            if (!fixedLine.equals(line)) {
+                log.warn("AI の Text コマンドから位置の指定を外しました。before={} after={}", line, fixedLine);
+                line = fixedLine;
             }
             lines.add(line);
         }

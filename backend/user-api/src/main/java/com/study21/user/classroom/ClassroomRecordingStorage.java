@@ -46,6 +46,15 @@ public class ClassroomRecordingStorage {
     /** 分塊ファイルの接頭辞（連番は 6 桁ゼロ詰め＝辞書順が連番順になる）。 */
     static final String CHUNK_PREFIX = "chunk-";
 
+    /** 置き場の初期化を直列化する鍵（記録ごとに 1 本）。 */
+    private static final Object[] DIRECTORY_LOCKS = new Object[64];
+
+    static {
+        for (int index = 0; index < DIRECTORY_LOCKS.length; index += 1) {
+            DIRECTORY_LOCKS[index] = new Object();
+        }
+    }
+
     private final Path root;
 
     public ClassroomRecordingStorage(
@@ -74,10 +83,29 @@ public class ClassroomRecordingStorage {
      * 分かれていないと**他の記録の分塊と混ざる**（同じ連番の名前が衝突する）。</p>
      */
     public StoredRecording newRecording(long accountId, String mime) {
+        return newRecording(accountId, UUID.randomUUID().toString().replace("-", ""), mime);
+    }
+
+    /**
+     * 録音 1 件の置き場を**記録 ID から決めて**作る（分塊を受け取るとき）。
+     *
+     * <p><b>なぜ記録 ID で決めるか</b>: 録音の開始直後（`録音ファイル保存先` がまだ空のとき）に
+     * 分塊が**同時に複数**届くと、毎回違う置き場を作ってしまい、分塊が別々のディレクトリへ
+     * 散らばる（DB が指す置き場と実体の場所が食い違い、欠落として扱われる）。記録 ID から
+     * 決めれば、同時に届いても**同じ置き場**になる（`Files.createDirectories` は冪等）。</p>
+     *
+     * @param recordId 授業記録 ID（まだ置き場が決まっていない記録のとき）
+     */
+    public StoredRecording newRecording(long accountId, long recordId, String mime) {
+        return newRecording(accountId, "rec" + recordId, mime);
+    }
+
+    /** 置き場の名前を明示して作る（{@link #newRecording(long, long, String)} と取り込みで使う）。 */
+    private StoredRecording newRecording(long accountId, String directoryName, String mime) {
         String normalizedMime = normalizeMime(mime);
         String extension = extensionOf(normalizedMime);
         String relativeDir = "classroom/" + accountId + "/" + LocalDate.now().format(MONTH)
-                + "/" + UUID.randomUUID().toString().replace("-", "");
+                + "/" + directoryName;
         return new StoredRecording(relativeDir, "recording." + extension, normalizedMime);
     }
 
@@ -119,15 +147,74 @@ public class ClassroomRecordingStorage {
     }
 
     /**
+     * 分塊 1 つの**書き込み先**（相対ディレクトリ + ファイル名）。
+     *
+     * <p><b>なぜ「ファイル名だけ」では足りないか</b>: `chunk-{記録ID}-{連番}.webm` のような
+     * 連番から決まる名前は、同じ連番が同時に 2 本来たときに**同じ場所**になる。先に書いた側の
+     * 中身が後の書き込みで消え、DB は勝った側の行を持っているのに実体は負けた側の中身、という
+     * 食い違いが起きる（＝音が入れ替わる）。そこで書き込み先は**分塊ごとに固有**にし、
+     * **どの DB の行からも引用されていない実体は音として使わない**（{@link #collectOrphanChunks}）。</p>
+     */
+    public record ChunkLocation(String relativeDir, String fileName) {
+    }
+
+    /**
      * 分塊のファイル名（**記録と連番で決まる**）。
      *
-     * <p>同じ連番の再送は同じ名前になるので、書き直しても増えない（これが冪等の土台）。
-     * 連番は 6 桁ゼロ詰めにして、ファイルの並びがそのまま連番順になるようにする。
-     * **記録 ID を名前に入れる**のは、改修前から続いている録音の置き場（月ごとの共有
-     * ディレクトリ）でも他の記録の分塊と名前が衝突しないようにするため。</p>
+     * <p><b>新しい書き込みには使わない</b>（{@link #newChunkLocation} を使う）。同じ連番で
+     * 同じ名前になるため、同時に 2 本来たときに上書きが起きる。<b>既存の置き場</b>
+     * （この名前で保存された分塊）を読む・数えるときの互換のために残す。</p>
      */
     public static String chunkFileName(long recordId, int seq, String mimeOrName) {
         return String.format(Locale.ROOT, "%s%06d.%s", chunkPrefix(recordId), seq, extensionOf(mimeOrName));
+    }
+
+    /**
+     * 分塊 1 つの**固有の書き込み先**を作る（まだ書かない）。
+     *
+     * <p>ファイル名は `chunk-{記録ID}-{連番}-{UUID}.{拡張子}`。連番を残すのは運用で見分けるためで、
+     * **一意にするのは UUID のほう**（同じ連番・同じ記録でも別の場所になる＝上書きが起こり得ない）。
+     * どの実体が「その分塊」になるかは**DB の行が決める**（`ON CONFLICT DO NOTHING` に勝った
+     * 1 本だけが引用される）。</p>
+     */
+    public ChunkLocation newChunkLocation(String relativeDir, long recordId, int seq, String mimeOrName) {
+        String fileName = String.format(Locale.ROOT, "%s%06d-%s.%s", chunkPrefix(recordId), seq,
+                UUID.randomUUID().toString().replace("-", ""), extensionOf(mimeOrName));
+        return new ChunkLocation(relativeDir, fileName);
+    }
+
+    /**
+     * 録音の置き場を用意する（**同時に呼ばれても落ちない**）。
+     *
+     * <p>初回のアップロードは複数の分塊がほぼ同時に届くので、`Files.createDirectories` が
+     * 同時に走る。`createDirectories` は既にあるディレクトリを受け入れるが、**同じ記録の
+     * 初期化を 1 回にまとめたい**（DB の更新と組み合わせるときの競合を減らす）ので、
+     * 記録ごとのロックで直列化する。</p>
+     *
+     * @return この呼び出しで実際に作ったとき true（既にあったときは false）
+     */
+    public boolean prepareRecordingDirectory(String relativeDir) {
+        Path base = resolveDirectory(relativeDir);
+        if (base == null) {
+            throw new ValidationException("保存先の指定が正しくありません。");
+        }
+        synchronized (directoryLockOf(relativeDir)) {
+            boolean created = !Files.isDirectory(base);
+            try {
+                Files.createDirectories(base);
+            } catch (IOException cause) {
+                log.error("授業録音の置き場を作れませんでした。dir={}", relativeDir, cause);
+                throw new ValidationException("録音の保存先を用意できませんでした。"
+                        + "時間をおいてもう一度お試しください。");
+            }
+            return created;
+        }
+    }
+
+    /** 置き場を作るための鍵（同じ置き場の初期化を直列化する）。 */
+    private Object directoryLockOf(String relativeDir) {
+        int index = Math.floorMod(relativeDir == null ? 0 : relativeDir.hashCode(), DIRECTORY_LOCKS.length);
+        return DIRECTORY_LOCKS[index];
     }
 
     /** その記録の分塊の接頭辞（`chunk-{記録ID}-`）。 */
@@ -135,19 +222,43 @@ public class ClassroomRecordingStorage {
         return CHUNK_PREFIX + recordId + "-";
     }
 
-    /** ファイル名がその記録の分塊か（連番を取り出す）。違えば null。 */
+    /**
+     * ファイル名がその記録の分塊か（連番を取り出す）。違えば null。
+     *
+     * <p>連番は接頭辞の直後の**数字の並び**（`chunk-{記録ID}-{連番}[-{UUID}].{拡張子}`）。
+     * 後ろに UUID が付いても連番が取れるように、**数字が続くところまで**を読む
+     * （読めないと、掃除や一覧から取りこぼして置き場に残り続ける）。</p>
+     */
     public static Integer chunkSeqOf(String fileName, long recordId) {
         String prefix = chunkPrefix(recordId);
         if (fileName == null || !fileName.startsWith(prefix)) {
             return null;
         }
-        int dot = fileName.indexOf('.', prefix.length());
-        String digits = fileName.substring(prefix.length(), dot < 0 ? fileName.length() : dot);
+        int position = prefix.length();
+        while (position < fileName.length() && Character.isDigit(fileName.charAt(position))) {
+            position += 1;
+        }
+        if (position == prefix.length()) {
+            return null;
+        }
         try {
-            return Integer.valueOf(digits);
+            return Integer.valueOf(fileName.substring(prefix.length(), position));
         } catch (NumberFormatException cause) {
             return null;
         }
+    }
+
+    /**
+     * 分塊を**書き込み先の指定どおり**に書く（一時名へ書いてから名前を付ける）。
+     *
+     * <p>書き込み先は {@link #newChunkLocation} が作った**固有の場所**なので、同じ連番が
+     * 同時に来ても**互いの実体を壊さない**。どの実体を使うかは DB の行が決める。</p>
+     */
+    public void writeChunkLocation(ChunkLocation location, byte[] bytes) {
+        if (location == null) {
+            throw new ValidationException("保存先の指定が正しくありません。");
+        }
+        writeChunk(location.relativeDir(), location.fileName(), bytes);
     }
 
     /**
@@ -207,6 +318,48 @@ public class ClassroomRecordingStorage {
         return chunks;
     }
 
+    /**
+     * **どの DB の行からも引用されていない分塊**を片付ける（孤立ファイルの掃除）。
+     *
+     * <p>「ファイルは書けたがトランザクションが失敗した」分塊は、行から引用されないまま
+     * 残る。放置すると置き場を圧迫し、**組立てに混ざる**と壊れた 1 本ができる。ただし
+     * 書いた直後の実体を消してはいけない（まだ DB が確定していない同時実行中の要求が
+     * 引用するかもしれない）。そこで**一定時間より古い孤立ファイルだけ**を消す。</p>
+     *
+     * <p>引用されている実体（記録の再生用の 1 本を含む）には触れない。判定は
+     * <b>呼び側が DB の行から作った「引用されているファイル名」</b>で行う
+     * （ディレクトリの一覧を正体にしない＝未確定のファイルを音として扱わない）。</p>
+     *
+     * @param referencedFileNames DB の行が引用しているファイル名（記録の再生用の 1 本も入れる）
+     * @param minAgeMillis これより新しい孤立ファイルは残す
+     * @return 消した件数
+     */
+    public int collectOrphanChunks(String relativeDir, long recordId,
+                                   java.util.Collection<String> referencedFileNames, long minAgeMillis) {
+        if (relativeDir == null || relativeDir.isBlank()) {
+            return 0;
+        }
+        Path base = resolveDirectory(relativeDir);
+        if (base == null || !Files.isDirectory(base)) {
+            return 0;
+        }
+        java.util.Set<String> referenced = referencedFileNames == null
+                ? java.util.Set.of() : new java.util.HashSet<>(referencedFileNames);
+        long deadline = System.currentTimeMillis() - Math.max(0, minAgeMillis);
+        int deleted = 0;
+        for (StoredChunk chunk : listChunks(relativeDir, recordId)) {
+            if (referenced.contains(chunk.fileName()) || chunk.modifiedAt() > deadline) {
+                continue;
+            }
+            if (delete(relativeDir, chunk.fileName())) {
+                deleted += 1;
+                log.info("引用されていない分塊を片付けました。recordId={} name={} seq={}",
+                        recordId, chunk.fileName(), chunk.seq());
+            }
+        }
+        return deleted;
+    }
+
     /** その記録の分塊のファイルを消す（保持期限切れの掃除。記録 ID が名前に入っているものだけ）。 */
     public int deleteChunks(String relativeDir, long recordId) {
         int deleted = 0;
@@ -221,15 +374,43 @@ public class ClassroomRecordingStorage {
         return deleted;
     }
 
-    /** 組立ての作業ファイルを作る（同じ置き場に作る＝同じボリュームなので名前の付け替えが原子的にできる）。 */
+    /**
+     * 組立ての作業ファイルを作る（同じ置き場に作る＝同じボリュームなので名前の付け替えが原子的にできる）。
+     *
+     * <p>**空のファイルを先に作る**。自分で書く作業（分塊を繋ぐ）に使う。</p>
+     */
     public Path createWorkFile(String relativeDir, String prefix) {
+        Path base = requireWorkDirectory(relativeDir);
+        try {
+            return Files.createTempFile(base, prefix + ".", ".part");
+        } catch (IOException cause) {
+            throw new ValidationException("録音を組立てられませんでした。時間をおいてもう一度お試しください。");
+        }
+    }
+
+    /**
+     * 組立ての**出力先**になる新しいパスを決める（**まだ存在しない**）。
+     *
+     * <p>外部コマンド（ffmpeg）に書かせる出力は、**存在しないパス**でなければならない
+     * （既にあるファイルを上書きさせない＝前の結合結果を壊さない）。</p>
+     */
+    public Path newWorkFilePath(String relativeDir, String prefix) {
+        Path base = requireWorkDirectory(relativeDir);
+        Path candidate = base.resolve(prefix + "-" + UUID.randomUUID().toString().replace("-", "") + ".part");
+        if (Files.exists(candidate)) {
+            throw new ValidationException("録音を組立てられませんでした。時間をおいてもう一度お試しください。");
+        }
+        return candidate;
+    }
+
+    private Path requireWorkDirectory(String relativeDir) {
         Path base = resolveDirectory(relativeDir);
         if (base == null) {
             throw new ValidationException("保存先の指定が正しくありません。");
         }
         try {
             Files.createDirectories(base);
-            return Files.createTempFile(base, prefix + ".", ".part");
+            return base;
         } catch (IOException cause) {
             throw new ValidationException("録音を組立てられませんでした。時間をおいてもう一度お試しください。");
         }

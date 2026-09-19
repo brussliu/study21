@@ -96,6 +96,7 @@ public class BatchScheduleController {
             row.put("examplePoints", task.examplePoints());
             row.put("nextRunAt", task.nextRunAt());
             row.put("nextRunLabel", task.nextRunLabel());
+            row.put("configEffectiveFrom", task.configEffectiveFrom());
             row.put("lastPlannedAt", triggerStore.lastClaimedAt(task.taskCode()));
             return row;
         }).toList());

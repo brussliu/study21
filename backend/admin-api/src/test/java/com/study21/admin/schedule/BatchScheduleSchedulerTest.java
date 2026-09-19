@@ -213,4 +213,106 @@ class BatchScheduleSchedulerTest {
         when(configService.snapshot()).thenThrow(new IllegalStateException("壊れた"));
         assertThatCode(scheduler::checkDueTasks).doesNotThrowAnyException();
     }
+
+    // ------------------------------------------------------------------ 設定変更・復帰の規則
+
+    @Test
+    @DisplayName("夜間に停止していて朝に復帰したら、最新の 1 点（朝の開始）だけを実行する（両方は実行しない）")
+    void nightRestartAppliesOnlyTheNewestNetworkEvent() {
+        ScheduleConfigSnapshot snap = snapshot(
+                TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)),
+                TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.claimAndRecord(eq("batR04"), any(), eq("R"))).thenReturn(910L);
+
+        // 2026-09-20 09:00 JST（前夜 23:30 の停止と当日 06:30 の開始の両方が未実行）
+        BatchScheduleScheduler.ScheduleCheckResult result =
+                scheduler.runOnce(Instant.parse("2026-09-20T00:00:00Z"));
+
+        // 新しい点（当日 06:30 の開始）だけを実行する
+        ArgumentCaptor<LocalDateTime> planned = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(triggerStore).claimAndRecord(eq("batR04"), planned.capture(), eq("R"));
+        assertThat(planned.getValue()).isEqualTo(LocalDateTime.of(2026, 9, 20, 6, 30));
+        verify(executor).submit("batR04", 910L);
+        assertThat(result.triggered()).containsExactly("batR04@2026-09-20T06:30");
+        // 古い点（前夜 23:30 の停止）は**実行せずに計画だけ進める**
+        verify(triggerStore).advanceWithoutRun("batR03", LocalDateTime.of(2026, 9, 19, 23, 30));
+        verify(triggerStore, never()).claimAndRecord(eq("batR03"), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("停止時刻を過ぎて復帰したら、その日の停止だけを実行する（逆向きの開始は実行しない）")
+    void restartAfterTheStopTimeAppliesTheStopOnly() {
+        ScheduleConfigSnapshot snap = snapshot(
+                TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)),
+                TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.claimAndRecord(eq("batR03"), any(), eq("R"))).thenReturn(911L);
+
+        // 2026-09-19 23:50 JST
+        BatchScheduleScheduler.ScheduleCheckResult result =
+                scheduler.runOnce(Instant.parse("2026-09-19T14:50:00Z"));
+
+        ArgumentCaptor<LocalDateTime> planned = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(triggerStore).claimAndRecord(eq("batR03"), planned.capture(), eq("R"));
+        assertThat(planned.getValue()).isEqualTo(LocalDateTime.of(2026, 9, 19, 23, 30));
+        verify(triggerStore).advanceWithoutRun("batR04", LocalDateTime.of(2026, 9, 19, 6, 30));
+        assertThat(result.triggered()).containsExactly("batR03@2026-09-19T23:30");
+    }
+
+    @Test
+    @DisplayName("設定を変えた直後は、適用時刻より前の点を実行しない（22:00 に 23:30→21:00 でも止めない）")
+    void doesNotRunPointsBeforeTheConfigEffectiveFrom() {
+        TaskSchedule r03 = TaskSchedule.daily("batR03", true, LocalTime.of(21, 0))
+                .withEffectiveFrom(LocalDateTime.of(2026, 9, 19, 22, 0));
+        ScheduleConfigSnapshot snap = snapshot(r03);
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+
+        // 2026-09-19 22:30 JST（今日の 21:00 は「設定を変えた 22:00」より前）
+        BatchScheduleScheduler.ScheduleCheckResult result =
+                scheduler.runOnce(Instant.parse("2026-09-19T13:30:00Z"));
+
+        assertThat(result.triggered()).isEmpty();
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+        verify(executor, never()).submit(anyString(), org.mockito.ArgumentMatchers.anyLong());
+        // 実行しない点は計画だけ進める（明日の 21:00 から通常どおり）
+        verify(triggerStore).advanceWithoutRun("batR03", LocalDateTime.of(2026, 9, 19, 21, 0));
+    }
+
+    @Test
+    @DisplayName("循環のタスクも適用時刻より前の点は実行しない（間隔を変えた直後に走らせない）")
+    void intervalTaskDoesNotRunAPointBeforeTheConfigEffectiveFrom() {
+        TaskSchedule l02 = TaskSchedule.interval("batL02", true, 5, 1)
+                .withEffectiveFrom(LocalDateTime.of(2026, 9, 19, 23, 28));
+        ScheduleConfigSnapshot snap = snapshot(l02);
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+
+        // 23:30 JST（この設定での最後の点は 23:26 = 適用時刻より前）
+        BatchScheduleScheduler.ScheduleCheckResult result =
+                scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        assertThat(result.triggered()).isEmpty();
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+    }
+
+    @Test
+    @DisplayName("もう一方のネット切替が実行中なら、今回の点は見送る（点は確保しない＝次の検査で再挑戦）")
+    void defersWhenTheSiblingNetworkTaskIsRunning() {
+        ScheduleConfigSnapshot snap = snapshot(
+                TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.isTaskRunning("batR03")).thenReturn(true);
+
+        BatchScheduleScheduler.ScheduleCheckResult result =
+                scheduler.runOnce(Instant.parse("2026-09-20T00:00:00Z"));
+
+        assertThat(result.deferred()).containsExactly("batR04");
+        assertThat(result.triggered()).isEmpty();
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+    }
 }

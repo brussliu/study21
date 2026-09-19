@@ -42,6 +42,7 @@ function task(overrides: Partial<BatchScheduleTask> = {}): BatchScheduleTask {
     examplePoints: ['00:01', '00:06', '00:11'],
     nextRunAt: '2026-09-19T12:36:00',
     nextRunLabel: '2026-09-19 12:36',
+    configEffectiveFrom: null,
     lastPlannedAt: null,
     ...overrides
   }
@@ -158,6 +159,36 @@ describe('実行スケジュール（読み取り専用）', () => {
 
     // 種別 R が「定時」とだけ出て時刻が分からない状態にしない
     expect(wrapper.text()).not.toContain('定時')
+  })
+
+  it('実行設定の適用時刻があるときは「この時刻以降」を出す（変更直後に過去の点を実行しない）', async () => {
+    const context = await setup({
+      schedule: payload({
+        tasks: [
+          task({
+            taskCode: 'batR03',
+            describe: '毎日 21:00',
+            intervalMinutes: null,
+            offsetMinutes: null,
+            dailyTime: '21:00',
+            examplePoints: ['21:00'],
+            nextRunLabel: '2026-09-20 21:00',
+            configEffectiveFrom: '2026-09-19 22:00'
+          }),
+          task()
+        ]
+      })
+    })
+    wrapper = context.wrapper
+
+    // 22:00 に 23:30 → 21:00 へ変更した場合、次回は翌日 21:00（今日の 21:00 は適用時刻より前）
+    const changed = wrapper.get('tbody tr[data-task-code="batR03"]')
+    expect(changed.text()).toContain('2026-09-20 21:00')
+    expect(changed.get('[data-testid="task-effective-from"]').text())
+      .toContain('設定の適用: 2026-09-19 22:00')
+    // 実行設定を変えていないタスクには出さない（無関係な設定の保存で過去の補償を止めない）
+    expect(wrapper.get('tbody tr[data-task-code="batL02"]')
+      .find('[data-testid="task-effective-from"]').exists()).toBe(false)
   })
 
   it('設定が未設定・設定不正のタスクは状態と理由を出す', async () => {

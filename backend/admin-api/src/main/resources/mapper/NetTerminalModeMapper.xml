@@ -17,10 +17,16 @@
            AND "端末モード" &lt;&gt; #{mode}
     </update>
 
-    <select id="findLatestUpdatedAt" resultType="java.time.LocalDateTime">
+    <!--
+      利用者による最後の更新（手動操作の判定に使う）。
+      このバッチ（batR03 / batR04）自身の更新は除く。除かないと、前回のバッチ実行で動いた
+      更新日時を「手動操作」と誤認し、次の切替をいつまでも見送ってしまう。
+    -->
+    <select id="findLatestManualUpdatedAt" resultType="java.time.LocalDateTime">
         SELECT MAX("更新日時")
           FROM public."NET_端末コントロール情報"
          WHERE "状態" = '1'
+           AND COALESCE("更新元コード", '') NOT IN ('batR03', 'batR04')
     </select>
 
     <select id="countActiveTerminals" resultType="int">
