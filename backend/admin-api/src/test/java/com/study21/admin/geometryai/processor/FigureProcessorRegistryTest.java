@@ -376,7 +376,7 @@ class FigureProcessorRegistryTest {
         AiFigureConfig config = processorSettings.resolve(processorA);
 
         String snapshot = processorSettings.snapshot(processorA, config, null,
-                FigureOutputType.AUTO, FigureOutputType.GRAPH, "qwen-vl-max");
+                FigureOutputType.AUTO, FigureOutputType.GRAPH, "qwen-vl-max", "qwen-vl-max", false);
 
         assertThat(snapshot)
                 .contains("\"mode\":\"A\"")
@@ -396,36 +396,13 @@ class FigureProcessorRegistryTest {
     }
 
     @Test
-    @DisplayName("要求行に固定した版があれば、いまの設定を変えてもその版を使う")
-    void usesPinnedConfigWhenPresent() {
-        AiFigureConfig pinned = processorSettings.resolve(processorA);
-
-        // 待ち行列に並んでいる間に設定を変える（別のプロンプト・別の上限）
-        Map<String, String> changed = new LinkedHashMap<>();
-        changed.put(AiFigureSettingKeys.ENABLED, "true");
-        changed.put(AiFigureSettingKeys.PROVIDER, "qwen:9");
-        changed.put(AiFigureSettingKeys.OUTPUT_FORMAT, "JSON");
-        changed.put(AiFigureSettingKeys.SYSTEM_PROMPT, "あとから書き換えたプロンプト。");
-        changed.put(AiFigureSettingKeys.MAX_COMMANDS, "5");
-        changed.put(AiFigureSettingKeys.ALLOWED_COMMANDS, "Point");
-        when(settingsService.requireSettings(anyString(), any())).thenReturn(changed);
-
-        AiFigureConfig restored = processorSettings.resolve(processorA, pinned.toSnapshotJson(null));
-
-        assertThat(restored.systemPromptCommon()).isEqualTo("共通のシステムプロンプト。");
-        assertThat(restored.provider()).isEqualTo("qwen:4");
-        assertThat(restored.maxCommands()).isEqualTo(80);
-        assertThat(restored.allowedCommands()).isEqualTo("Point,Segment,Polygon");
-        assertThat(restored.taskCode()).isEqualTo("batC51-A");
-    }
-
-    @Test
-    @DisplayName("固定した版が無い（歴史的な）行は、いまの設定から解決する")
-    void resolvesLiveWhenNothingIsPinned() {
-        assertThat(processorSettings.resolve(processorA, null).systemPromptCommon())
+    @DisplayName("いまの設定から解決する（固定した版を使うかの判断は AiFigureTaskConfigResolver の担当）")
+    void resolvesLiveSettings() {
+        assertThat(processorSettings.resolve(processorA).systemPromptCommon())
                 .isEqualTo("共通のシステムプロンプト。");
-        assertThat(processorSettings.resolve(processorA, "壊れた JSON").provider()).isEqualTo("qwen:4");
-        assertThat(processorSettings.resolve(processorA, "{}").maxCommands()).isEqualTo(80);
+        assertThat(processorSettings.resolve(processorA).provider()).isEqualTo("qwen:4");
+        assertThat(processorSettings.resolve(processorA).maxCommands()).isEqualTo(80);
+        assertThat(processorSettings.resolve(processorA).revision()).isEqualTo(1);
     }
 
     @Test
@@ -433,7 +410,7 @@ class FigureProcessorRegistryTest {
     void keepsPinnedBodyWhenWritingTrace() {
         AiFigureConfig pinned = processorSettings.resolve(processorA);
         String first = processorSettings.snapshot(processorA, pinned, null,
-                FigureOutputType.AUTO, FigureOutputType.GEOMETRY, "model-1");
+                FigureOutputType.AUTO, FigureOutputType.GEOMETRY, "model-1", "model-1", false);
 
         // あとから設定を変えて、別の版で trace を書く（本文は受付時のまま）
         Map<String, String> changed = new LinkedHashMap<>();
@@ -446,7 +423,7 @@ class FigureProcessorRegistryTest {
         when(settingsService.requireSettings(anyString(), any())).thenReturn(changed);
 
         String second = processorSettings.snapshot(processorA, processorSettings.resolve(processorA), first,
-                FigureOutputType.AUTO, FigureOutputType.GRAPH, "model-2");
+                FigureOutputType.AUTO, FigureOutputType.GRAPH, "model-2", "model-2", false);
 
         assertThat(second).contains("\"systemPromptCommon\":\"共通のシステムプロンプト。\"");
         assertThat(second).doesNotContain("書き換えたプロンプト。");

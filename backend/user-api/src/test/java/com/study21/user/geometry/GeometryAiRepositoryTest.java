@@ -59,6 +59,9 @@ class GeometryAiRepositoryTest {
     @Autowired
     private AccountService accountService;
 
+    @Autowired
+    private GeometryAiSettings geometryAiSettings;
+
     /** 検証用のアカウントをこのテストの中で作る（実在のアカウントを汚さない）。 */
     private UserPrincipal createStudent() {
         String email = "e2e-geo-ai-" + System.nanoTime() + "@example.com";
@@ -443,6 +446,41 @@ class GeometryAiRepositoryTest {
         assertThat(repinned.mode()).isEqualTo("C");
         assertThat(repinned.systemPromptCommon()).isNotBlank();
         assertThat(repinned.taskTemplate()).isNotBlank();
+    }
+
+    /**
+     * 受付時に**モデル名**まで固定する（スロットだけだと別のモデルへ移ってしまう）。
+     *
+     * <p>実行版（{@code revision}）も入り、送り直しのたびに +1 される。</p>
+     */
+    @Test
+    void createPinsTheModelNameAndRevision() {
+        UserPrincipal student = createStudent();
+        GeometryAiRequestEntity entity = insert(student, "QUEUED");
+        entity.setMode("A");
+        entity.setSettingsSnapshotJson(
+                geometryAiSettings.pinnedConfigJson("A", 1));
+        assertThat(requestMapper.updateResubmitted(entity)).isEqualTo(1);
+
+        GeometryAiRequestEntity created = requestMapper.findById(entity.getRequestId());
+        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(created.getSettingsSnapshotJson())
+                .orElseThrow();
+        // モデルのスロットと（設定があれば）モデル名の両方を固定する
+        assertThat(pinned.provider()).isNotBlank();
+        assertThat(pinned.revision()).isEqualTo(1);
+        if (pinned.hasPinnedModel()) {
+            assertThat(pinned.model()).doesNotContain("http");
+        }
+
+        // 送り直しは実行版を +1 する（技術的な再試行では増えない）
+        int next = geometryAiSettings.nextRevision(created.getSettingsSnapshotJson());
+        assertThat(next).isEqualTo(2);
+        created.setMode("A");
+        created.setSettingsSnapshotJson(geometryAiSettings.pinnedConfigJson("A", next));
+        assertThat(requestMapper.updateResubmitted(created)).isEqualTo(1);
+        assertThat(AiFigureConfig.fromSnapshotJson(
+                requestMapper.findById(created.getRequestId()).getSettingsSnapshotJson())
+                .orElseThrow().revision()).isEqualTo(2);
     }
 
     /** 【もう一度生成】でも、そのときの有効な設定で固定し直す。 */

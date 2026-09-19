@@ -81,7 +81,8 @@ class GeometryAiServiceImplTest {
         when(settings.dailyLimit(any())).thenReturn(20);
         when(settings.missingKeys(any())).thenReturn(List.of());
         // 受付時に固定する「有効な設定」（要求行の設定スナップショット）
-        when(settings.pinnedConfigJson(any())).thenReturn(PINNED_CONFIG);
+        when(settings.pinnedConfigJson(any(), anyInt())).thenReturn(PINNED_CONFIG);
+        when(settings.nextRevision(any())).thenReturn(1);
     }
 
     private UserPrincipal student() {

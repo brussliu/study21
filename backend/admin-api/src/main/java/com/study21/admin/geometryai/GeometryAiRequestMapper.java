@@ -78,6 +78,16 @@ public interface GeometryAiRequestMapper {
                           @Param("executionId") Long executionId,
                           @Param("version") int version);
 
+    /**
+     * 設定スナップショットを固定する（**AI を呼ぶ前**に書く）。
+     *
+     * <p>スナップショットが無い歴史的な要求と、モデル名を固定できていなかった要求に使う。
+     * 状態・版数は変えず、`設定スナップショット` だけを書く（工程の進行とは独立）。</p>
+     */
+    int updatePinnedConfig(@Param("requestId") long requestId,
+                           @Param("snapshotJson") String snapshotJson,
+                           @Param("version") int version);
+
     /** 検証中にする（AI の出力を確かめている段階。**まだ保存はしない**）。 */
     int markValidating(@Param("requestId") long requestId,
                        @Param("executionId") Long executionId,

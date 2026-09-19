@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.network.NetTerminalModeMapper">
+
+    <!--
+      有効な端末（状態='1'）のモードを一括で切り替える。
+      2.0 の TerminalControlRepository#updateAllTerminalStatus と同じ（状態='有効' の全端末）。
+      既に同じモードの端末は更新しない（更新日時を動かさない＝手動操作の判定に影響させない）。
+    -->
+    <update id="updateAllTerminalModes">
+        UPDATE public."NET_端末コントロール情報"
+           SET "端末モード"   = #{mode},
+               "バージョン"   = "バージョン" + 1,
+               "更新元コード" = #{updatedByCode},
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "状態" = '1'
+           AND "端末モード" &lt;&gt; #{mode}
+    </update>
+
+    <select id="findLatestUpdatedAt" resultType="java.time.LocalDateTime">
+        SELECT MAX("更新日時")
+          FROM public."NET_端末コントロール情報"
+         WHERE "状態" = '1'
+    </select>
+
+    <select id="countActiveTerminals" resultType="int">
+        SELECT COUNT(*)
+          FROM public."NET_端末コントロール情報"
+         WHERE "状態" = '1'
+    </select>
+
+    <select id="countActiveTerminalsWithMode" resultType="int">
+        SELECT COUNT(*)
+          FROM public."NET_端末コントロール情報"
+         WHERE "状態" = '1'
+           AND "端末モード" = #{mode}
+    </select>
+</mapper>

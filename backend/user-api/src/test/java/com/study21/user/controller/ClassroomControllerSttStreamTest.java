@@ -25,7 +25,9 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -94,6 +96,40 @@ class ClassroomControllerSttStreamTest {
 
         verify(streamService).push(eq(RECORD_ID), eq(ACCOUNT_ID), eq("shared"), eq(pcm), eq(0),
                 eq(ClassroomSttStreamService.UNKNOWN_SAMPLE));
+    }
+
+    /**
+     * **収尾の状態の照会**（利用者の指示 5）。応答を失った画面は、これで「どこまで済んだか・
+     * やり直してよいか」を確かめてから収尾をやり直す。
+     */
+    @Test
+    @DisplayName("収尾の状態を返す（音源ごとの段階・理由・やり直せるか）")
+    void exposesFinalizeStatus() throws Exception {
+        when(classroomService.requireSttFinishAccountId(any(UserPrincipal.class), anyLong()))
+                .thenReturn(ACCOUNT_ID);
+        when(streamService.finalizeStatus(RECORD_ID)).thenReturn(new ClassroomSttStreamService.FinalizeStatus(
+                RECORD_ID, ClassroomSttStreamService.FINALIZE_FAILED, "収尾が済んでいません（やり直せます）",
+                false, true, true, "書き起こしの収尾が済んでいない音源があります。",
+                List.of(new ClassroomSttStreamService.SourceFinalizeStatus("mic", "マイク",
+                        ClassroomSttStreamService.FINALIZE_FAILED, "収尾が済んでいません", false, true,
+                        "書き起こしの一部を保存できませんでした。",
+                        ClassroomSttStreamService.RECOVERY_RESAVE_PENDING, 1, 2, 20, true, true,
+                        "memory:10s", true, 1, "2026-09-19T12:00:00Z"))));
+
+        mockMvc.perform(get("/api/user/classroom/12/stt/stream/status"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value(ClassroomSttStreamService.FINALIZE_FAILED))
+                .andExpect(jsonPath("$.data.completed").value(false))
+                .andExpect(jsonPath("$.data.retryable").value(true))
+                .andExpect(jsonPath("$.data.sources[0].status")
+                        .value(ClassroomSttStreamService.FINALIZE_FAILED))
+                .andExpect(jsonPath("$.data.sources[0].pendingCount").value(2))
+                .andExpect(jsonPath("$.data.sources[0].recovery")
+                        .value(ClassroomSttStreamService.RECOVERY_RESAVE_PENDING));
+
+        // 入口の確認（所有者と録音の状態）は 収尾と同じ道を通る
+        verify(classroomService).requireSttFinishAccountId(any(UserPrincipal.class), eq(RECORD_ID));
+        verify(streamService).finalizeStatus(RECORD_ID);
     }
 
     /** `@AuthenticationPrincipal UserPrincipal` に固定の利用者を返すだけの解決器。 */

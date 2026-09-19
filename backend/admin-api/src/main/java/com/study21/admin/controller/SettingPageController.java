@@ -4,6 +4,8 @@ import com.study21.admin.ai.AiConnectionTester;
 import com.study21.admin.ai.SttConnectionTester;
 import com.study21.admin.geometryai.dto.AiResponseDtos;
 import com.study21.admin.geometryai.dto.AiResponseSchemaService;
+import com.study21.admin.schedule.ScheduleConfigService;
+import com.study21.admin.schedule.ScheduleSettingValidator;
 import com.study21.admin.setting.SettingsService;
 import com.study21.common.core.api.ApiResponse;
 import com.study21.common.core.exception.ValidationException;
@@ -35,13 +37,21 @@ public class SettingPageController {
     private final AiResponseSchemaService schemaService;
     private final AiConnectionTester connectionTester;
     private final SttConnectionTester sttConnectionTester;
+    /** 保存の**コミット後**にバッチの実行スケジュールのメモリを更新する。 */
+    private final ScheduleConfigService scheduleConfigService;
+    /** 実行スケジュールの欄をまたぐ検証（保存の前）。 */
+    private final ScheduleSettingValidator scheduleSettingValidator;
 
     public SettingPageController(SettingsService settingsService, AiResponseSchemaService schemaService,
-                                 AiConnectionTester connectionTester, SttConnectionTester sttConnectionTester) {
+                                 AiConnectionTester connectionTester, SttConnectionTester sttConnectionTester,
+                                 ScheduleConfigService scheduleConfigService,
+                                 ScheduleSettingValidator scheduleSettingValidator) {
         this.settingsService = settingsService;
         this.schemaService = schemaService;
         this.connectionTester = connectionTester;
         this.sttConnectionTester = sttConnectionTester;
+        this.scheduleConfigService = scheduleConfigService;
+        this.scheduleSettingValidator = scheduleSettingValidator;
     }
 
     /**
@@ -107,15 +117,32 @@ public class SettingPageController {
     /**
      * 設定を保存：画面の全フィールド値を検証してから 1 トランクザクションで一括 upsert する。
      * 検証エラー（未定義キー・型不正・範囲外）は 400 + エラーメッセージで応答し、保存しない。
+     *
+     * <p>保存（コミット）が済んだあとに、バッチの実行スケジュールのメモリを更新する。
+     * 更新に失敗しても**保存は巻き戻さない**（DB は正）。その場合は「保存済み・実行設定への
+     * 反映待ち」として画面に伝え、前の有効な設定のまま動かしつつ自動で再試行する。</p>
      */
     @PostMapping("/saveSettings")
     public ApiResponse<Map<String, Object>> saveSettings(@RequestBody Map<String, Object> request) {
         String operator = stringOf(request.get("userId"));
         Map<String, String> settings = flatten(request.get("settings"));
+        // 欄をまたぐ検証（ずらしは 0〜実行間隔-1 / 開始と終了は同時刻にしない）。
+        // ここで弾けば DB には保存されない
+        scheduleSettingValidator.validate(settings);
         Map<String, String> saved = settingsService.saveGlobalSettingFields(operator, settings);
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("settings", saved);
-        return ApiResponse.ok(data, "設定を保存しました。");
+
+        // コミット後に反映する（トランザクションの中でキャッシュを触ると、ロールバックしたのに
+        // 実行設定だけ変わっている、という食い違いが起きる）
+        ScheduleConfigService.RefreshResult refresh = scheduleConfigService.refresh("設定保存");
+        data.put("scheduleVersion", refresh.version());
+        data.put("schedulePending", !refresh.published());
+        data.put("scheduleMessage", refresh.published() ? null : refresh.error());
+        if (refresh.published()) {
+            return ApiResponse.ok(data, "設定を保存しました。");
+        }
+        return ApiResponse.ok(data, "保存済み・実行設定への反映待ち（" + refresh.error() + "）。自動で再試行します。");
     }
 
     private Map<String, String> flatten(Object value) {

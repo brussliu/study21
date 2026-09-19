@@ -35,6 +35,20 @@ public interface BatchService {
     Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson);
 
     /**
+     * スケジューラ用: **記録済み（待機中）の実行**を実行する（実行記録はスケジューラが作る）。
+     *
+     * <p>設定検証 → 二重起動チェック → 実行 → 終了の記録、の流れは {@link #rerun} と同じ。
+     * 前回の実行がまだ終わっていないときは**実行せずにスキップ**として記録する。</p>
+     */
+    Map<String, Object> runQueued(long executionId);
+
+    /**
+     * スケジューラ用: 実行できなかった（待ち行列があふれた等）記録を失敗として閉じる。
+     * 待機中のまま残すと、次の計画実行点が確保できなくなる。
+     */
+    void markQueuedAsFailed(long executionId, String message);
+
+    /**
      * AI 生図の要求（`要求内容` の aiRequestId）に紐づく実行履歴を古い順に返す。
      * 工程ごとの実行 ID・状態・処理時間・エラーを画面に出すために使う。
      */

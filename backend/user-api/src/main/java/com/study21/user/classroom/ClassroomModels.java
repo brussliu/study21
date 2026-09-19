@@ -263,11 +263,60 @@ public final class ClassroomModels {
 
     // ------------------------------------------------------------------ 分塊
 
+    /**
+     * 分塊の処理状態（CR_授業録音分塊情報.処理状態）。
+     *
+     * <p>音声はどの状態でも保存されている（書き起こしだけを諦めた回がある）。
+     * 録音の最大時間の判定や「次に送る連番」は**この表の連番**で見る
+     * （転写セグメントの連番は文の数なので、分塊の数とは一致しない）。</p>
+     */
+    public static final String CHUNK_STORED = "STORED";
+    public static final String CHUNK_TRANSCRIBED = "TRANSCRIBED";
+    public static final String CHUNK_SKIPPED = "SKIPPED";
+
+    /** 分塊 1 つの状態（画面が「次に送る連番」と録音の位置を知るために読む）。 */
+    public record ChunkView(
+            int seq,
+            long byteSize,
+            Double startOffsetSeconds,
+            Double endOffsetSeconds,
+            String mime,
+            /** この分塊が新しいコンテナ（ヘッダ）から始まるか。 */
+            boolean containerHead,
+            String processingStatus,
+            int segmentCount,
+            String createdAt) {
+    }
+
+    /**
+     * その記録に保存済みの分塊（連番順）。
+     *
+     * <p>`nextSeq` は**次に送る分塊の連番**（画面はこれをそのまま使う。
+     * 転写の連番から作らない）。`recordedSeconds` は保存済みの分塊が示す録音の位置で、
+     * 画面を開き直したときの続きの時間に使う。</p>
+     */
+    public record ChunkListResult(
+            List<ChunkView> items,
+            int chunkCount,
+            int maxSeq,
+            int nextSeq,
+            long totalBytes,
+            Double recordedSeconds) {
+    }
+
     /** 分塊アップロードの結果。トリガーが成立したら pendingNoteId と runPath を返す（画面が admin-api を呼ぶ）。 */
     public record ChunkUploadResult(
             long recordId,
             int seq,
+            /** 次に取りに行く**書き起こし**の連番（セグメント表） */
             int nextSeq,
+            /**
+             * 次に送る**分塊**の連番（分塊表。max(分塊連番) + 1）。
+             *
+             * <p>画面はこれをそのまま次の分塊の連番にする（転写の連番から作らない。文の数と
+             * 分塊の数は違う）。</p>
+             */
+            int nextChunkSeq,
             List<SegmentView> appendedSegments,
             Long pendingNoteId,
             boolean triggered,

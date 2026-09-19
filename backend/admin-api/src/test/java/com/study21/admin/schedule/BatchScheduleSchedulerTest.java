@@ -1,0 +1,216 @@
+package com.study21.admin.schedule;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.util.List;
+import java.util.Map;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 統一スケジューラ（{@link BatchScheduleScheduler}）の振る舞い。
+ *
+ * <p>利用者の指示のうち、ここで固定するもの:</p>
+ * <ol>
+ *   <li>計画実行点が来たら「確保（claim）→ 実行記録 → バックグラウンド実行」の順に進む</li>
+ *   <li>「いま以前で最後の 1 点」だけを確保する（取りこぼしを一括で補跑しない）</li>
+ *   <li>無効なタスクは**計画だけ進める**（有効に戻しても古い点を実行しない）</li>
+ *   <li>設定が無い・不正なタスクは実行しない（隠れた既定値を使わない）</li>
+ *   <li>既に確保済みの点では何もしない（再起動・多重起動・ポーリングのゆらぎで二重実行しない）</li>
+ *   <li>検査のスレッドは業務を待たない（実行器に渡すだけ）</li>
+ * </ol>
+ */
+class BatchScheduleSchedulerTest {
+
+    private static final ZoneId ZONE = ScheduleConfigService.ZONE;
+
+    private ScheduleConfigService configService;
+    private ScheduledTriggerStore triggerStore;
+    private BatchScheduleExecutor executor;
+    private BatchScheduleScheduler scheduler;
+
+    @BeforeEach
+    void setUp() {
+        configService = mock(ScheduleConfigService.class);
+        triggerStore = mock(ScheduledTriggerStore.class);
+        executor = mock(BatchScheduleExecutor.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE);   // 2026-09-19 23:30 JST
+        scheduler = new BatchScheduleScheduler(configService, triggerStore, executor,
+                new ScheduleRuleCatalog(), 20, clock);
+    }
+
+    /** タスクぶんのスナップショット（指定しなかったタスクは「未設定」になる）。 */
+    private ScheduleConfigSnapshot snapshot(TaskSchedule... schedules) {
+        Map<String, TaskSchedule> tasks = new java.util.LinkedHashMap<>();
+        Map<String, TaskConfigStatus> statuses = new java.util.LinkedHashMap<>();
+        for (String code : new ScheduleRuleCatalog().taskCodes()) {
+            statuses.put(code, TaskConfigStatus.MISSING);
+        }
+        for (TaskSchedule schedule : schedules) {
+            tasks.put(schedule.taskCode(), schedule);
+            statuses.put(schedule.taskCode(), TaskConfigStatus.LOADED);
+        }
+        return new ScheduleConfigSnapshot(3, Instant.parse("2026-09-19T14:00:00Z"), ZONE, tasks, statuses, null);
+    }
+
+    @Test
+    @DisplayName("定時のタスクが時刻に達したら確保して実行を投入する（検査は業務を待たない）")
+    void triggersDailyTaskWhenDue() {
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.alreadyClaimed(eq("batR03"), any())).thenReturn(false);
+        when(triggerStore.claimAndRecord(eq("batR03"), any(), eq("R"))).thenReturn(900L);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        assertThat(result.triggered()).containsExactly("batR03@2026-09-19T23:30");
+        ArgumentCaptor<LocalDateTime> plannedAt = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(triggerStore).claimAndRecord(eq("batR03"), plannedAt.capture(), eq("R"));
+        assertThat(plannedAt.getValue()).isEqualTo(LocalDateTime.of(2026, 9, 19, 23, 30));
+        verify(executor).submit("batR03", 900L);
+    }
+
+    @Test
+    @DisplayName("循環のタスクは「ずらし + n×間隔」の最新の 1 点だけを確保する（一括の補跑をしない）")
+    void triggersOnlyTheLatestIntervalPoint() {
+        // 23:30（= 毎時 01/06/…/56 分の 31 分より後）→ 23:26 が最後の点
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.interval("batL02", true, 5, 1));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.claimAndRecord(eq("batL02"), any(), eq("L"))).thenReturn(901L);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        ArgumentCaptor<LocalDateTime> plannedAt = ArgumentCaptor.forClass(LocalDateTime.class);
+        verify(triggerStore).claimAndRecord(eq("batL02"), plannedAt.capture(), eq("L"));
+        assertThat(plannedAt.getValue()).isEqualTo(LocalDateTime.of(2026, 9, 19, 23, 26));
+        assertThat(result.triggered()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("無効なタスクは計画だけ進める（有効に戻しても古い計画実行点を実行しない）")
+    void disabledTaskOnlyAdvancesThePlan() {
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.daily("batR03", false, LocalTime.of(23, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        verify(triggerStore).advanceWithoutRun("batR03", LocalDateTime.of(2026, 9, 19, 23, 30));
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+        verify(executor, never()).submit(anyString(), org.mockito.ArgumentMatchers.anyLong());
+        assertThat(result.triggered()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("設定が無い・不正なタスクは実行しない（隠れた既定値を使わない）。托底はタスクごとに 1 回")
+    void doesNotRunTasksWithoutConfig() {
+        ScheduleConfigSnapshot empty = snapshot();
+        when(configService.snapshot()).thenReturn(empty);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(empty);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+        verify(triggerStore, never()).advanceWithoutRun(anyString(), any());
+        assertThat(result.skipped()).containsExactlyInAnyOrder("batR03", "batR04", "batL02", "batL03");
+    }
+
+    @Test
+    @DisplayName("既に確保済みの計画実行点では何もしない（再起動・多重起動・ゆらぎで二重実行しない）")
+    void doesNothingWhenAlreadyClaimed() {
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.alreadyClaimed(eq("batR04"), any())).thenReturn(true);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        assertThat(result.triggered()).isEmpty();
+        verify(triggerStore, never()).claimAndRecord(anyString(), any(), anyString());
+        verify(executor, never()).submit(anyString(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("別の実行が先に確保したとき（claim が null）は実行しない")
+    void doesNotRunWhenAnotherExecutionClaimedFirst() {
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.claimAndRecord(eq("batR03"), any(), eq("R"))).thenReturn(null);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        assertThat(result.triggered()).isEmpty();
+        verify(executor, never()).submit(anyString(), org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    @Test
+    @DisplayName("検査のたびに設定を読み直さない（メモリにあるタスクは托底を呼ばない）")
+    void doesNotTouchTheLoaderWhenConfigIsInMemory() {
+        ScheduleConfigSnapshot snap = snapshot(
+                TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)),
+                TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)),
+                TaskSchedule.interval("batL02", true, 5, 1),
+                TaskSchedule.interval("batL03", true, 5, 0));
+        when(configService.snapshot()).thenReturn(snap);
+        when(triggerStore.alreadyClaimed(anyString(), any())).thenReturn(true);
+
+        scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        verify(configService, never()).ensureTaskConfig(anyString());
+        verify(configService, never()).refresh(anyString());
+    }
+
+    @Test
+    @DisplayName("検査の前に、反映できていない設定の自動再試行を促す")
+    void retriesPendingRefreshBeforeChecking() {
+        ScheduleConfigSnapshot empty = snapshot();
+        when(configService.snapshot()).thenReturn(empty);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(empty);
+
+        scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        verify(configService).retryPendingIfDue();
+    }
+
+    @Test
+    @DisplayName("検査の結果に、使った設定の版と実行待ちの本数が入る")
+    void reportsCheckedAtAndVersion() {
+        ScheduleConfigSnapshot snap = snapshot(TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        when(configService.snapshot()).thenReturn(snap);
+        when(configService.ensureTaskConfig(anyString())).thenReturn(snap);
+        when(triggerStore.claimAndRecord(eq("batR04"), any(), eq("R"))).thenReturn(902L);
+        when(executor.queuedCount()).thenReturn(1);
+
+        BatchScheduleScheduler.ScheduleCheckResult result = scheduler.runOnce(Instant.parse("2026-09-19T14:30:00Z"));
+
+        assertThat(result.checkedAt()).isEqualTo(LocalDateTime.of(2026, 9, 19, 23, 30));
+        assertThat(result.configVersion()).isEqualTo(3);
+        assertThat(result.queuedWorkers()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("検査が例外でも外に投げない（スケジューラを止めない）")
+    void checkDueTasksSwallowsExceptions() {
+        when(configService.snapshot()).thenThrow(new IllegalStateException("壊れた"));
+        assertThatCode(scheduler::checkDueTasks).doesNotThrowAnyException();
+    }
+}

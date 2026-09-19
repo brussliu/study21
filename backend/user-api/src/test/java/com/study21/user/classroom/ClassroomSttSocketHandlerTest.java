@@ -240,6 +240,40 @@ class ClassroomSttSocketHandlerTest {
         verify(session).close(any(CloseStatus.class));
     }
 
+    /**
+     * `finished` の契約（`type` / `added` / `error`）はそのままに、**収尾の状態も載せる**（利用者の指示 5）。
+     *
+     * <p>画面は「やり直すと何が起きるか」（同じ要求を待つ・保存だけやり直す・認識し直す）と
+     * 「もう再試行を出さなくてよいか」を知れる。欄は増えるだけなので古い画面も動く。</p>
+     */
+    @Test
+    @DisplayName("finished に収尾の状態を載せる（type / added / error の契約は変えない）")
+    void finishedCarriesFinalizeState() throws Exception {
+        ClassroomSttStreamService service = mock(ClassroomSttStreamService.class);
+        when(service.finish(anyLong(), anyLong(), anyString()))
+                .thenReturn(new ClassroomSttStreamService.StreamPush("", List.of(),
+                        "認識の尾部を取り切れませんでした。", 5,
+                        ClassroomSttStreamService.FINALIZE_FAILED, false,
+                        ClassroomSttStreamService.RECOVERY_AWAIT_RESULTS, 1, 2, null));
+        ClassroomSttSocketHandler handler = new ClassroomSttSocketHandler(service, allowed());
+        Sent sent = new Sent();
+        WebSocketSession session = session("s3b", "/api/user/classroom/12/stt/socket?source=mic", principal(), sent);
+
+        handler.afterConnectionEstablished(session);
+        handler.handleMessage(session, new TextMessage("{\"type\":\"finish\"}"));
+
+        String finished = sent.messages.get(1);
+        // 今までの契約
+        assertThat(finished).contains("\"type\":\"finished\"");
+        assertThat(finished).contains("\"added\":[]");
+        assertThat(finished).contains("\"error\":\"認識の尾部を取り切れませんでした。\"");
+        // 足した欄（収尾の状態）
+        assertThat(finished).contains("\"finalizeStatus\":\"FAILED\"");
+        assertThat(finished).contains("\"finalizeCompleted\":false");
+        assertThat(finished).contains("\"recovery\":\"AWAIT_RESULTS\"");
+        assertThat(finished).contains("\"pendingCount\":2");
+    }
+
     @Test
     @DisplayName("未ログインの接続は受け付けない（利用者が入っていないセッション）")
     void rejectsAnonymousSession() throws Exception {

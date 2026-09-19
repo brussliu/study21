@@ -169,6 +169,17 @@
            AND "バージョン" = #{version}
     </update>
 
+    <!-- 設定の固定（AI を呼ぶ前に書く。★ 状態コードは変えない＝工程の進行と独立） -->
+    <update id="updatePinnedConfig">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "設定スナップショット" = CAST(#{snapshotJson} AS jsonb),
+               "更新元コード" = 'BATCH',
+               "バージョン"   = "バージョン" + 1,
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+    </update>
+
     <!-- 読み取り中（前処理の実行を始めたことを残す。処理時間が長い画像でも段階が見える） -->
     <update id="markPreprocessing">
         UPDATE public."GEO_AI生図リクエスト情報"

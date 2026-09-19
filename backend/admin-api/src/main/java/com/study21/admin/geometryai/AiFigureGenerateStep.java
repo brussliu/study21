@@ -69,7 +69,8 @@ public class AiFigureGenerateStep {
     private final GeometryAiRequestMapper requestMapper;
     private final GeometryAiRequestRecorder recorder;
     private final GeometryAiImageStorage storage;
-    private final GeometryAiConnectionResolver connectionResolver;
+    /** 要求に固定した設定を使う**唯一の入口**（無ければいまの設定で作って固定する）。 */
+    private final AiFigureTaskConfigResolver taskConfigResolver;
     private final FigureProcessorRegistry processorRegistry;
     private final FigureProcessorSettings processorSettings;
     private final FigurePromptBuilder promptBuilder;
@@ -80,7 +81,7 @@ public class AiFigureGenerateStep {
     public AiFigureGenerateStep(GeometryAiRequestMapper requestMapper,
                                 GeometryAiRequestRecorder recorder,
                                 GeometryAiImageStorage storage,
-                                GeometryAiConnectionResolver connectionResolver,
+                                AiFigureTaskConfigResolver taskConfigResolver,
                                 FigureProcessorRegistry processorRegistry,
                                 FigureProcessorSettings processorSettings,
                                 FigurePromptBuilder promptBuilder,
@@ -89,7 +90,7 @@ public class AiFigureGenerateStep {
         this.requestMapper = requestMapper;
         this.recorder = recorder;
         this.storage = storage;
-        this.connectionResolver = connectionResolver;
+        this.taskConfigResolver = taskConfigResolver;
         this.processorRegistry = processorRegistry;
         this.processorSettings = processorSettings;
         this.promptBuilder = promptBuilder;
@@ -142,8 +143,13 @@ public class AiFigureGenerateStep {
         String systemPrompt;
         String userPrompt;
         GeometryAiConnectionResolver.AiConnection connection;
+        AiFigureTaskConfigResolver.AiFigureTaskConfig taskConfig;
         try {
-            config = processorSettings.resolve(processor, entity.getSettingsSnapshotJson());
+            // **要求に固定した設定**を使う（無ければいまの設定で作り、あとで固定する）。
+            // 実行の入口が先に「いまの設定」を見ることはしない（提出後に設定を消しても止まらない）
+            taskConfig = taskConfigResolver.resolve(processor, entity);
+            config = taskConfig.config();
+            connection = taskConfig.connection();
             // 出力形式（JSON Schema）は DTO から生成する。テンプレートが {outputSchema} を使っていれば
             // その変数へ入れ、使っていなければ system プロンプトの末尾へ足す（二重にしない）
             String schemaSection = responseFormatPrompt.schemaSectionOf(processor.taskCode());
@@ -157,7 +163,9 @@ public class AiFigureGenerateStep {
                             FigureSupplements.rows(entity.getSupplementsJson()), keepLabelsOf(entity),
                             entity.getUserKind(), entity.getUserSubKind(), entity.getFigureType(),
                             config.maxCommands(), config.allowedCommands(), config.outputFormat()));
-            connection = connectionResolver.resolve(processor.taskCode(), config.provider());
+        } catch (AiFigureConfigException cause) {
+            fail(entity, "CONFIG_SNAPSHOT", cause.getMessage());
+            return result;
         } catch (SettingsValidationException cause) {
             fail(entity, "CONFIG", "AI の設定が不足しています。" + cause.getMessage());
             return result;
@@ -185,6 +193,16 @@ public class AiFigureGenerateStep {
         // 呼び出しの前に「生成中」を確定する（この後 JVM が落ちても分かるように）。
         entity.setAiExecutionId(execution.getExecutionId());
         recorder.markGenerating(entity);
+
+        // スナップショットが無い（歴史的な要求）・モデル名を固定できていなかったときは、
+        // **AI を呼ぶ前に固定する**（途中で落ちても、次に拾ったときは同じ条件で再開できる）
+        if (taskConfig.needsPin()) {
+            String pinned = AiFigureConfig.repin(entity.getSettingsSnapshotJson(), config);
+            recorder.pinConfig(entity, pinned);
+            entity.setSettingsSnapshotJson(pinned);
+            log.info("AI 生図の設定を固定しました。requestId={} mode={} provider={} model={} revision={}",
+                    entity.getRequestId(), config.mode(), config.provider(), config.model(), config.revision());
+        }
 
         // プロンプトは画像を要約に置き換えて保存する（base64 を DB に入れない）
         String promptSummary = userPrompt + "\n" + GeometryAiPromptBuilder.imageSummary(entity.getCroppedName(),
@@ -271,7 +289,8 @@ public class AiFigureGenerateStep {
         entity.setProposalJson(AiResponseDtoParser.toJson(output));
         entity.setQuestionsJson(AiResponseDtoParser.toJson(questionsOf(output)));
         entity.setSettingsSnapshotJson(processorSettings.snapshot(processor, config,
-                entity.getSettingsSnapshotJson(), requested, resolvedType, connection.model()));
+                entity.getSettingsSnapshotJson(), requested, resolvedType, connection.model(),
+                connection.configuredModel(), connection.modelFromPinned()));
         entity.setAiCallId(callId);
         entity.setValidationError(null);
         recorder.updateGenerated(entity);

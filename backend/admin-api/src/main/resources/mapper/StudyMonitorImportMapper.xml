@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.studymonitor.StudyMonitorImportMapper">
+
+    <!--
+      学習状況モニターの取込（batL02）の SQL。
+      2.0 の BatL02Task が手で組み立てていた JDBC をそのまま移植し、
+      2.1 の列名（日本語）・コード値（IMPORTED / CREATED）・監査（登録元/更新元=BAT_L02）に合わせる。
+      アカウントID（登録者/更新者）はバッチなので NULL のまま（列を指定しない）。
+    -->
+
+    <!--
+      カメラの upsert。カメラコード（uq_mon_camera_code）で一意。
+      DO UPDATE は batL02 が所有する列（カメラ名称・設置場所・切出間隔・更新元・更新日時）だけに絞る。
+      アカウントID・旧ユーザーID は既存行の値をそのまま残す（2.0 の持ち主の情報を壊さない）。
+      状態・バージョンは列の既定値（'1' / 1）に任せる。
+      カメラ名称は 2.0 と同じ固定文言（2.1 の設定キーにはカメラ名称が無い）。
+    -->
+    <insert id="upsertCamera">
+        INSERT INTO public."MON_学習モニターカメラ情報" (
+            "カメラコード", "カメラ名称", "設置場所", "スナップショット間隔秒",
+            "登録元コード", "更新元コード")
+        VALUES (#{cameraCode}, #{cameraName}, #{location}, #{snapshotIntervalSeconds},
+            'BAT_L02', 'BAT_L02')
+        ON CONFLICT ("カメラコード") DO UPDATE
+            SET "カメラ名称"         = EXCLUDED."カメラ名称",
+                "設置場所"           = EXCLUDED."設置場所",
+                "スナップショット間隔秒" = EXCLUDED."スナップショット間隔秒",
+                "更新元コード"       = EXCLUDED."更新元コード",
+                "更新日時"           = CURRENT_TIMESTAMP
+    </insert>
+
+    <select id="findCameraId" resultType="java.lang.Long">
+        SELECT "カメラID"
+          FROM public."MON_学習モニターカメラ情報"
+         WHERE "カメラコード" = #{cameraCode}
+    </select>
+
+    <!-- 既取込の判定（uq_mon_video_camera_file と同じ組） -->
+    <select id="existsVideo" resultType="boolean">
+        SELECT EXISTS (
+            SELECT 1
+              FROM public."MON_学習モニター動画情報"
+             WHERE "カメラID" = #{cameraId}
+               AND "動画ファイル名" = #{fileName}
+        )
+    </select>
+
+    <!-- 動画の登録。動画ID は採番して entity に返す（2.0 の RETURNING "学習モニター動画ID" 相当） -->
+    <insert id="insertVideo" useGeneratedKeys="true" keyProperty="videoId" keyColumn="動画ID">
+        INSERT INTO public."MON_学習モニター動画情報" (
+            "カメラID", "撮影日", "撮影開始日時", "撮影終了日時", "動画ファイル名", "保存パス",
+            "動画時間秒", "ファイルサイズ", "取込状態コード", "取込日時", "状態",
+            "登録元コード", "更新元コード")
+        VALUES (#{cameraId}, #{capturedDate}, #{startedAt}, #{endedAt}, #{fileName}, #{relativePath},
+            #{durationSeconds}, #{fileSize}, 'IMPORTED', CURRENT_TIMESTAMP, '1',
+            'BAT_L02', 'BAT_L02')
+    </insert>
+
+    <!--
+      スナップショットの一括登録。同じ動画の同じ位置は 1 枚だけ
+      （uq_mon_snapshot_video_offset。2.0 と同じ DO NOTHING）。
+    -->
+    <insert id="insertSnapshots">
+        INSERT INTO public."MON_学習モニタースナップショット情報" (
+            "動画ID", "撮影日時", "動画内オフセットミリ秒", "画像ファイル名", "保存パス",
+            "幅", "高さ", "切出状態コード", "状態", "登録元コード", "更新元コード")
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.videoId}, #{item.capturedAt}, #{item.offsetMillis}, #{item.fileName}, #{item.relativePath},
+             #{item.width}, #{item.height}, 'CREATED', '1', 'BAT_L02', 'BAT_L02')
+        </foreach>
+        ON CONFLICT ("動画ID", "動画内オフセットミリ秒") DO NOTHING
+    </insert>
+
+</mapper>

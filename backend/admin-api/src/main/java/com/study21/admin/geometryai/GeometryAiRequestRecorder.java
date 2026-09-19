@@ -35,6 +35,18 @@ public class GeometryAiRequestRecorder {
                 versionOf(entity)), entity);
     }
 
+    /**
+     * 設定スナップショットを固定する（**AI を呼ぶ前**）。
+     *
+     * <p>スナップショットが無い歴史的な要求と、モデル名を固定できていなかった要求に使う。
+     * 状態コードは変えない（工程の進行とは別の記録）。</p>
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void pinConfig(GeometryAiRequestEntity entity, String snapshotJson) {
+        requireUpdated(requestMapper.updatePinnedConfig(entity.getRequestId(), snapshotJson,
+                versionOf(entity)), entity);
+    }
+
     /** 読み取り中にする（前処理に入ったことを残す）。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markPreprocessing(GeometryAiRequestEntity entity) {

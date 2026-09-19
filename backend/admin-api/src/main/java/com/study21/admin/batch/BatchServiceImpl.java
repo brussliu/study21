@@ -63,6 +63,8 @@ public class BatchServiceImpl implements BatchService {
     /** AI 呼び出し履歴（2.0 から移行した BAT_AI呼出履歴情報）。参照のみ。 */
     private final AiCallLogMapper aiCallLogMapper;
     private final Map<String, BatchTaskHandler> handlers;
+    /** 実行前の設定検証の差し替え（AI 生図だけが使う。無ければ「いまの設定」を検証する）。 */
+    private final List<BatchSettingsPreflight> settingsPreflights;
     private final ConcurrentHashMap<String, Boolean> runningGuard = new ConcurrentHashMap<>();
 
     public BatchServiceImpl(BatchTaskRegistry registry,
@@ -70,7 +72,8 @@ public class BatchServiceImpl implements BatchService {
                             BatchExecutionMapper executionMapper,
                             BatchControlMapper controlMapper,
                             AiCallLogMapper aiCallLogMapper,
-                            List<BatchTaskHandler> taskHandlers) {
+                            List<BatchTaskHandler> taskHandlers,
+                            List<BatchSettingsPreflight> settingsPreflights) {
         this.registry = registry;
         this.settingsService = settingsService;
         this.executionMapper = executionMapper;
@@ -80,6 +83,7 @@ public class BatchServiceImpl implements BatchService {
                 ? Map.of()
                 : taskHandlers.stream().collect(Collectors.toMap(BatchTaskHandler::taskCode, Function.identity(),
                         (a, b) -> a));
+        this.settingsPreflights = settingsPreflights == null ? List.of() : settingsPreflights;
     }
 
     @Override
@@ -120,6 +124,108 @@ public class BatchServiceImpl implements BatchService {
     public Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson) {
         return execute(batchCode, "C", normalize(operator), "AI 生図のパイプラインから実行しました",
                 requestPayloadJson);
+    }
+
+    /**
+     * スケジューラ用: **記録済み（待機中）の実行**を実行する。
+     *
+     * <p>{@link #execute} と違い、実行記録はスケジューラが既に作っている（計画実行点の確保と
+     * 実行記録を 1 トランザクションにするため）。ここは短い DB 更新と業務の実行だけを行い、
+     * 長いトランザクションを張らない（ffmpeg・AI・端末切替は数分かかることがある）。</p>
+     *
+     * <p>前回の実行がまだ終わっていないときは**実行せずにスキップ**として記録する
+     * （同じタスクを重ねて走らせない・積み上げない）。</p>
+     */
+    @Override
+    public Map<String, Object> runQueued(long executionId) {
+        BatchExecutionEntity record = executionMapper.findById(executionId);
+        if (record == null) {
+            return result(false, executionId, BatchExecutionStatus.FAILED,
+                    "実行記録が見つかりません: " + executionId, null);
+        }
+        String batchCode = record.getBatchCode();
+        BatchTaskDefinition task = registry.findByCode(batchCode);
+        if (task == null) {
+            return failQueued(executionId, batchCode, "バッチタスクが見つかりません: " + batchCode, null);
+        }
+        BatchTaskHandler handler = handlers.get(batchCode);
+        if (handler == null) {
+            return failQueued(executionId, batchCode,
+                    "このバッチは 2.1 では未実装です（業務処理のハンドラがありません）: " + batchCode, null);
+        }
+
+        // 前回がまだ終わっていない（他の実行が未完了）なら、記録を残してスキップする
+        BatchExecutionEntity other = executionMapper.findRunningByBatchCodeExcept(batchCode, executionId);
+        if (other != null) {
+            String message = "前回の実行（実行ID=" + other.getExecutionId() + "）が終わっていないためスキップしました。";
+            markSkipped(executionId, batchCode, message);
+            return result(false, executionId, BatchExecutionStatus.SKIPPED, message, null);
+        }
+        if (runningGuard.putIfAbsent(batchCode, Boolean.TRUE) != null) {
+            String message = "前回の実行が終わっていないためスキップしました。";
+            markSkipped(executionId, batchCode, message);
+            return result(false, executionId, BatchExecutionStatus.SKIPPED, message, null);
+        }
+
+        try {
+            // 設定検証（AI 生図のような「要求に固定した設定」を使うバッチはその担当に任せる）
+            BatchSettingsPreflight preflight = preflightOf(batchCode);
+            if (preflight == null) {
+                settingsService.requireSettings(batchCode, task.requiredSettings());
+            } else {
+                preflight.verify(batchCode, task.requiredSettings(), record.getRequestPayload());
+            }
+
+            executionMapper.markRunning(executionId);
+            long startedAt = System.currentTimeMillis();
+            try {
+                String summary = handler.execute(record);
+                long durationMs = System.currentTimeMillis() - startedAt;
+                String message = summary == null || summary.isBlank() ? "正常に終了しました。" : summary;
+                executionMapper.markFinished(executionId, BatchExecutionStatus.SUCCESS.name(), message, null, durationMs);
+                controlMapper.touchLastRunAt(batchCode);
+                log.info("Scheduled batch finished. batchCode={} executionId={} durationMs={} message={}",
+                        batchCode, executionId, durationMs, message);
+                return result(true, executionId, BatchExecutionStatus.SUCCESS, message, null);
+            } catch (Exception cause) {
+                long durationMs = System.currentTimeMillis() - startedAt;
+                String detail = stackTraceOf(cause);
+                String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+                executionMapper.markFinished(executionId, BatchExecutionStatus.FAILED.name(),
+                        "異常終了しました。", detail, durationMs);
+                controlMapper.touchLastRunAt(batchCode);
+                log.error("Scheduled batch failed. batchCode={} executionId={} durationMs={}",
+                        batchCode, executionId, durationMs, cause);
+                return result(false, executionId, BatchExecutionStatus.FAILED, message, detail);
+            }
+        } catch (SettingsValidationException cause) {
+            return failQueued(executionId, batchCode, "設定が不足しています。" + cause.getMessage(), null);
+        } catch (Exception cause) {
+            return failQueued(executionId, batchCode,
+                    cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage(),
+                    stackTraceOf(cause));
+        } finally {
+            runningGuard.remove(batchCode);
+        }
+    }
+
+    /** スケジューラ用: 実行できなかった記録を失敗として閉じる（待機中のまま残さない）。 */
+    @Override
+    public void markQueuedAsFailed(long executionId, String message) {
+        executionMapper.markFinished(executionId, BatchExecutionStatus.FAILED.name(), message, message, 0L);
+        log.error("Scheduled batch could not run. executionId={} message={}", executionId, message);
+    }
+
+    private Map<String, Object> failQueued(long executionId, String batchCode, String message, String errorDetail) {
+        executionMapper.markFinished(executionId, BatchExecutionStatus.FAILED.name(), message, errorDetail, 0L);
+        log.error("Scheduled batch failed before running. batchCode={} executionId={} message={}",
+                batchCode, executionId, message);
+        return result(false, executionId, BatchExecutionStatus.FAILED, message, errorDetail);
+    }
+
+    private void markSkipped(long executionId, String batchCode, String message) {
+        executionMapper.markFinished(executionId, BatchExecutionStatus.SKIPPED.name(), message, null, 0L);
+        log.warn("Scheduled batch skipped. batchCode={} executionId={} message={}", batchCode, executionId, message);
     }
 
     @Override
@@ -171,6 +277,16 @@ public class BatchServiceImpl implements BatchService {
         return codes;
     }
 
+    /** このバッチの実行前検証（差し替えが無ければ null＝いまの設定を検証する）。 */
+    private BatchSettingsPreflight preflightOf(String batchCode) {
+        for (BatchSettingsPreflight preflight : settingsPreflights) {
+            if (preflight.supports(batchCode)) {
+                return preflight;
+            }
+        }
+        return null;
+    }
+
     @Override
     @Transactional
     public Map<String, Object> runOnStartup(String batchCode) {
@@ -192,7 +308,15 @@ public class BatchServiceImpl implements BatchService {
         }
 
         // 1) 設定検証（不足・不正があればここで拒否。実行記録も残さない）
-        settingsService.requireSettings(batchCode, task.requiredSettings());
+        //    ふつうのバッチは「いまの設定」を検証する。AI 生図だけは**その要求に固定した設定**を
+        //    検証する（提出後に設定を消しても、並んでいるタスクが止まらないように）。
+        //    担当が無ければ今までどおり＝いまの設定（既存のバッチの挙動は変えない）
+        BatchSettingsPreflight preflight = preflightOf(batchCode);
+        if (preflight == null) {
+            settingsService.requireSettings(batchCode, task.requiredSettings());
+        } else {
+            preflight.verify(batchCode, task.requiredSettings(), requestPayloadJson);
+        }
 
         // 2) 二重起動ガード（有効／無効は実行の可否に影響しない）
         if (runningGuard.putIfAbsent(batchCode, Boolean.TRUE) != null) {
@@ -446,6 +570,9 @@ public class BatchServiceImpl implements BatchService {
         }
         row.put("settingsComplete", complete);
         row.put("missingSettings", missing);
+        // 設定をどこから採るか。AI 生図は**要求に固定した設定**（スナップショット）を使うので、
+        // ここで「いまの設定」が不足していても、並んでいるタスクは実行できる
+        row.put("settingsSource", preflightOf(task.taskCode()) == null ? "CURRENT" : "TASK_SNAPSHOT");
 
         // 最新実行状態（バッチごとの最新 1 件をまとめて引く）
         BatchExecutionEntity latest = latestByBatch.stream()

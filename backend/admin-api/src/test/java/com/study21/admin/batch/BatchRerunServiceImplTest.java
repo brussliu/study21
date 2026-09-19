@@ -75,7 +75,7 @@ class BatchRerunServiceImplTest {
         controlMapper = mock(BatchControlMapper.class);
         handler = new RecordingHandler();
         service = new BatchServiceImpl(registry, mock(SettingsService.class),
-                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(handler));
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(handler), List.of());
 
         // insert で実行ID が採番される（MyBatis の useGeneratedKeys 相当）
         doAnswer(invocation -> {
@@ -168,7 +168,7 @@ class BatchRerunServiceImplTest {
         // （業務処理＝ハンドラがあっても同じ。利用者の指示）
         RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
-                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler));
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler), List.of());
         when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
 
         assertThatThrownBy(() -> callService.rerun("batC52", "admin"))
@@ -185,7 +185,7 @@ class BatchRerunServiceImplTest {
         // 呼出（rerunStep）は今までどおり動く
         RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
-                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler));
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler), List.of());
         when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
         when(executionMapper.findRunningByBatchCode("batC52")).thenReturn(null);
 
@@ -202,7 +202,7 @@ class BatchRerunServiceImplTest {
         //   canRerun       = そのボタンを押せるか（ハンドラ未実装は押せない）
         RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl listService = new BatchServiceImpl(registry, mock(SettingsService.class),
-                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(handler, callHandler));
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(handler, callHandler), List.of());
         when(registry.findAll()).thenReturn(List.of(
                 definition("batS01", BatchTaskType.S, true),
                 definition("batC52", BatchTaskType.C, false),
@@ -221,6 +221,25 @@ class BatchRerunServiceImplTest {
         assertThat(rowOf(listService, "batR02"))
                 .containsEntry("canManualRerun", true)
                 .containsEntry("canRerun", false);
+    }
+
+    @Test
+    void listTasksUsesTheDefinitionDefaultWhenThereIsNoControlRow() {
+        // 種別 C（呼出）はコントロール情報に行を作らない（切り替えられないため）。
+        // 行が無いときは**定義の既定値**を使うので、使っている C は一覧で有効に見える
+        BatchServiceImpl realRegistryService = new BatchServiceImpl(new BatchTaskRegistry(),
+                mock(SettingsService.class), executionMapper, controlMapper, mock(AiCallLogMapper.class),
+                List.of(), List.of());
+        when(controlMapper.findAll()).thenReturn(List.of());
+        when(executionMapper.findLatestPerBatch()).thenReturn(List.of());
+
+        assertThat(rowOf(realRegistryService, "batC52")).as("AI画図助手")
+                .containsEntry("active", true)
+                .containsEntry("canToggleActive", false);
+        assertThat(rowOf(realRegistryService, "batC61")).containsEntry("active", true);
+        assertThat(rowOf(realRegistryService, "batC62")).containsEntry("active", true);
+        // まだ使っていない C（未実装）は無効のまま
+        assertThat(rowOf(realRegistryService, "batC01")).containsEntry("active", false);
     }
 
     @Test
@@ -324,5 +343,70 @@ class BatchRerunServiceImplTest {
         assertThat(result).containsEntry("page", 1);
         assertThat(result).containsEntry("size", 100);
         verify(executionMapper, times(1)).searchHistory(null, null, null, 100, 0);
+    }
+
+    // ------------------------------------------------------------------ スケジューラからの実行
+
+    @Test
+    void scheduledExecutionRunsTheRecordedExecution() {
+        // スケジューラは実行記録（待機中）を作ってから実行する。ここはその実行の入口。
+        BatchExecutionEntity queued = new BatchExecutionEntity();
+        queued.setExecutionId(950L);
+        queued.setBatchCode("batS01");
+        queued.setStatus("QUEUED");
+        when(executionMapper.findById(950L)).thenReturn(queued);
+        when(registry.findByCode("batS01")).thenReturn(definition("batS01", BatchTaskType.S, true));
+        when(executionMapper.findRunningByBatchCodeExcept("batS01", 950L)).thenReturn(null);
+
+        Map<String, Object> result = service.runQueued(950L);
+
+        assertThat(handler.calls).isEqualTo(1);
+        assertThat(result).containsEntry("success", true).containsEntry("status", "SUCCESS");
+        verify(executionMapper).markRunning(950L);
+        verify(executionMapper).markFinished(eq(950L), eq("SUCCESS"), anyString(), eq(null), anyLong());
+        verify(controlMapper).touchLastRunAt("batS01");
+    }
+
+    @Test
+    void scheduledExecutionIsSkippedWhenThePreviousRunIsStillRunning() {
+        // 同じタスクの前回が未完了なら、重ねて走らせずスキップとして記録する（積み上げない）
+        BatchExecutionEntity queued = new BatchExecutionEntity();
+        queued.setExecutionId(951L);
+        queued.setBatchCode("batS01");
+        when(executionMapper.findById(951L)).thenReturn(queued);
+        when(registry.findByCode("batS01")).thenReturn(definition("batS01", BatchTaskType.S, true));
+        BatchExecutionEntity running = new BatchExecutionEntity();
+        running.setExecutionId(900L);
+        when(executionMapper.findRunningByBatchCodeExcept("batS01", 951L)).thenReturn(running);
+
+        Map<String, Object> result = service.runQueued(951L);
+
+        assertThat(handler.calls).isZero();
+        assertThat(result).containsEntry("success", false).containsEntry("status", "SKIPPED");
+        assertThat(String.valueOf(result.get("message"))).contains("実行ID=900").contains("スキップ");
+        verify(executionMapper).markFinished(eq(951L), eq("SKIPPED"), anyString(), eq(null), eq(0L));
+        verify(controlMapper, never()).touchLastRunAt(anyString());
+    }
+
+    @Test
+    void scheduledExecutionFailsWhenTheHandlerIsMissing() {
+        BatchExecutionEntity queued = new BatchExecutionEntity();
+        queued.setExecutionId(952L);
+        queued.setBatchCode("batR02");
+        when(executionMapper.findById(952L)).thenReturn(queued);
+        when(registry.findByCode("batR02")).thenReturn(definition("batR02", BatchTaskType.R, false));
+
+        Map<String, Object> result = service.runQueued(952L);
+
+        assertThat(result).containsEntry("success", false).containsEntry("status", "FAILED");
+        verify(executionMapper).markFinished(eq(952L), eq("FAILED"), anyString(), eq(null), eq(0L));
+    }
+
+    @Test
+    void queuedExecutionCanBeClosedWhenItCouldNotRun() {
+        service.markQueuedAsFailed(953L, "実行待ちの行列があふれたため実行しませんでした。");
+
+        verify(executionMapper).markFinished(eq(953L), eq("FAILED"),
+                anyString(), anyString(), eq(0L));
     }
 }

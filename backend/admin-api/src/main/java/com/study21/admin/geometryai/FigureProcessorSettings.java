@@ -20,7 +20,6 @@ import java.time.OffsetDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * AI 生図の**有効な設定**を解決する（**共通の設定を既定とし、モード別の設定で上書きする**）。
@@ -86,30 +85,14 @@ public class FigureProcessorSettings {
         return AiFigureSettingKeys.modeKeys(processor.mode().name());
     }
 
-    /** **いまの設定**から解決する（要求行にスナップショットが無いときの経路）。 */
-    public AiFigureConfig resolve(FigureProcessor processor) {
-        return resolve(processor, null);
-    }
-
     /**
-     * 要求行に固定した版があればそれを使い、無ければいまの設定から解決する。
+     * **いまの設定**から解決する。
      *
-     * @param snapshotJson 要求行の「設定スナップショット」（null / 壊れていれば今の設定を使う）
+     * <p>要求行に固定した版を使うかどうかの判断は {@link AiFigureTaskConfigResolver}（1 か所）が行う。
+     * ここは「いまの設定を読んで組み立てる」だけにして、**設定の入口を 2 つにしない**
+     * （実行の入口が先に現在の設定を見て、あとからスナップショットを読む、という順番を作らない）。</p>
      */
-    public AiFigureConfig resolve(FigureProcessor processor, String snapshotJson) {
-        Optional<AiFigureConfig> pinned = AiFigureConfig.fromSnapshotJson(snapshotJson);
-        if (pinned.isPresent()) {
-            AiFigureConfig config = pinned.get();
-            String mode = processor.mode().name();
-            if (config.mode() != null && !mode.equals(config.mode())) {
-                // 要求行のモードと固定した版のモードが食い違う（手で書き換えた等）。
-                // 要求行（＝実行するモード）を正とし、今の設定で解決し直す
-                log.warn("AI 生図の設定スナップショットのモードが要求と違います。requestMode={} snapshotMode={}",
-                        mode, config.mode());
-            } else {
-                return config.withTaskCode(processor.taskCode());
-            }
-        }
+    public AiFigureConfig resolve(FigureProcessor processor) {
         return liveResolve(processor);
     }
 
@@ -134,7 +117,8 @@ public class FigureProcessorSettings {
      * 「どの条件で作ったか」が分からなくなるため）。</p>
      */
     public String snapshot(FigureProcessor processor, AiFigureConfig config, String existingSnapshotJson,
-                           FigureOutputType requested, FigureOutputType resolvedType, String modelName) {
+                           FigureOutputType requested, FigureOutputType resolvedType, String modelName,
+                           String configuredModel, boolean modelFromPinned) {
         ObjectNode trace = objectMapper.createObjectNode();
         trace.put("requestedOutputType",
                 requested == null ? FigureOutputType.defaultType().name() : requested.name());
@@ -149,6 +133,10 @@ public class FigureProcessorSettings {
         trace.put("outputFormat", config.outputFormat());
         trace.put("provider", config.provider());
         trace.put("model", modelName);
+        trace.put("configuredModel", configuredModel);
+        trace.put("modelFromPinned", modelFromPinned);
+        trace.put("configRevision", config.revision());
+        trace.put("pinnedAt", config.capturedAt());
         trace.put("generatedAt", OffsetDateTime.now().toString());
 
         // 既に固定した config があればそのまま残す（無ければ今解決したものを固定する）

@@ -47,10 +47,16 @@ import java.nio.file.Path;
  *   <li>`GET /presets` … 前置詞プリセット一覧（GLOBAL + 自分のスコープ）</li>
  *   <li>`POST /classroom` … 作成（RECORDING）/ `POST /classroom/{id}/start` … 開始</li>
  *   <li>`POST /classroom/{id}/chunks` … 分塊アップロード（multipart、連番つき）。
- *       `file` は再生用の音声、`stt`（任意）は書き起こし用の 16kHz PCM（`audio/L16`）</li>
+ *       `file` は再生用の音声、`stt`（任意）は書き起こし用の 16kHz PCM（`audio/L16`）。
+ *       同じ連番の再送は中身が同じなら保存済みの結果を返す（冪等）。中身が違えば 409</li>
+ *   <li>`GET /classroom/{id}/chunks?afterSeq=` … 保存済みの分塊（**次に送る分塊の連番**と録音の位置）</li>
+ *   <li>`POST /classroom/{id}/stt/stream/finish` … ストリーミング書き起こしの収尾
+ *       （段階: 受け付け停止 → 最終結果の取り出し → 保存 → 解放。**何度呼んでも同じ結果**）</li>
+ *   <li>`GET /classroom/{id}/stt/stream/status` … **収尾の状態**（音源ごとの段階・理由・件数・
+ *       やり直しの仕方。応答を失った画面がやり直しの前に確かめる）</li>
  *   <li>`GET /classroom/{id}/segments?afterSeq=` … 追記セグメント（ポーリング）</li>
  *   <li>`GET /classroom` / `GET /classroom/{id}` … 一覧・詳細</li>
- *   <li>`POST /classroom/{id}/end` … 終了（最終まとめ PENDING）</li>
+ *   <li>`POST /classroom/{id}/end` … 終了（**収尾と分塊をサーバー側で検証**してから最終まとめ PENDING）</li>
  *   <li>`GET /classroom/{id}/audio` … 元音声の配信（Range/206）</li>
  *   <li>`DELETE /classroom/{id}` … 削除（所有者のみ）</li>
  * </ul>
@@ -107,7 +113,13 @@ public class ClassroomController {
      * ストリーミング書き起こしの終わり（最後の確定文を取り出してセッションを閉じる）。
      *
      * <p>停止直後の猶予内は収尾を受け付ける（尾部の確定文が遅れて届くため）。返す
-     * `error` に「収尾を取り切れなかった」等の理由が入ることがある＝黙って成功にしない。</p>
+     * `error` に「収尾を取り切れなかった」等の理由が入ることがある＝黙って成功にしない。
+     * **やり直しても直らない終端**（音声なし・発話なし・試行の上限）は `error` ではなく
+     * `notice` に載る（画面が永久に再試行しないため）。</p>
+     *
+     * <p><b>何度呼んでも同じ結果に落ち着く</b>（すでに収尾が済んでいれば、保存済みの文を返す）。
+     * 応答を失った画面は {@code GET /{recordId}/stt/stream/status} で状態を確かめてから、
+     * 安全にやり直せる。</p>
      */
     @PostMapping("/{recordId}/stt/stream/finish")
     public ApiResponse<ClassroomSttStreamService.StreamPush> finishStreamStt(
@@ -116,6 +128,22 @@ public class ClassroomController {
             @RequestParam(value = "source", required = false, defaultValue = "mic") String source) {
         long accountId = classroomService.requireSttFinishAccountId(user, recordId);
         return ApiResponse.ok(streamService.finish(recordId, accountId, source));
+    }
+
+    /**
+     * **収尾（finish）の状態**（音源ごと。応答を失った画面が問い合わせて、やり直してよいかを見る）。
+     *
+     * <p>返すのは音源ごとの段階（音声を受け付けている／収尾の途中／保存済み／音声なし／発話なし／
+     * 済んでいない＋理由）、保存できた文の数、保存待ちで残している文の数、やり直しの仕方
+     * （同じ要求を待つ・保存だけやり直す・控えた音声から認識し直す）、まだやり直せるか。
+     * 画面はこれで「やり直しが安全か」「もう再試行を出さなくてよいか」を判断できる。</p>
+     */
+    @GetMapping("/{recordId}/stt/stream/status")
+    public ApiResponse<ClassroomSttStreamService.FinalizeStatus> sttStreamStatus(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId) {
+        classroomService.requireSttFinishAccountId(user, recordId);
+        return ApiResponse.ok(streamService.finalizeStatus(recordId));
     }
 
     @GetMapping("/options")
@@ -197,6 +225,21 @@ public class ClassroomController {
             @PathVariable long recordId,
             @RequestParam(value = "afterSeq", defaultValue = "0") int afterSeq) {
         return ApiResponse.ok(classroomService.segments(user, recordId, afterSeq));
+    }
+
+    /**
+     * 保存済みの**分塊**（音声）の一覧。
+     *
+     * <p>画面は「次に送る分塊の連番」（`nextSeq`）と、保存済みが示す録音の位置
+     * （`recordedSeconds`。開き直したときの続きの時間）をここから取る。
+     * **転写セグメントの連番から作らない**（文の数と分塊の数は違う）。</p>
+     */
+    @GetMapping("/{recordId}/chunks")
+    public ApiResponse<ClassroomModels.ChunkListResult> chunks(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId,
+            @RequestParam(value = "afterSeq", defaultValue = "0") int afterSeq) {
+        return ApiResponse.ok(classroomService.chunks(user, recordId, afterSeq));
     }
 
     @GetMapping("/{recordId}")

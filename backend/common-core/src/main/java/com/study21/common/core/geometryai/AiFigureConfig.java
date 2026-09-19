@@ -5,7 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.study21.common.core.exception.ValidationException;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -28,14 +30,27 @@ import java.util.Optional;
  *       （**共通の User Prompt は必須ではない**）</li>
  *   <li>モデルパラメータ … モード別 → 共通の順に採用し、どちらも無ければ既定値</li>
  * </ul>
+ *
+ * <p><strong>固定する範囲</strong>: プロンプトの本文とモデルパラメータに加えて、
+ * **モデルのスロット（{@code provider}）とそのときのモデル名（{@code model}）**も固定する。
+ * スロットだけでは「同じ ID の下でモデル名を変えた」ときに、並んでいる要求が黙って別のモデルへ
+ * 移ってしまう（{@code AI_QWEN_MODEL_4} を書き換えるだけで起きる）。秘密（API Key・URL）は
+ * **入れない**（実行時に {@link AiModelSlot} から安全に読む）。</p>
  */
 public record AiFigureConfig(
         /** 作図モード（A〜D）。 */
         String mode,
         /** バッチコード（例 batC51-A）。履歴用。 */
         String taskCode,
-        /** 使用するモデルのスロット。 */
+        /** 使用するモデルのスロット（例 qwen:4）。 */
         String provider,
+        /**
+         * 受付時に固定した**モデル名**（例 qwen3-vl-plus）。
+         *
+         * <p>null・空は「受付時にモデルを固定できなかった」（`AI_MODEL` が未設定のまま提出された）。
+         * その場合は実行時に解決して固定し直す（互換の規則。{@link #parseSnapshot}).</p>
+         */
+        String model,
         double temperature,
         int maxCompletionTokens,
         int requestTimeoutSeconds,
@@ -52,7 +67,14 @@ public record AiFigureConfig(
         /** タスクテンプレートをどこから採ったか。 */
         TaskTemplateFrom taskTemplateFrom,
         /** この版を固定した時刻（ISO-8601。画面の確認用）。 */
-        String capturedAt) {
+        String capturedAt,
+        /**
+         * この要求の**実行版**（受付＝1。送り直し・もう一度生成のたびに +1）。
+         *
+         * <p>技術的な再試行（働き手の拾い直し・AI の再呼び出し）では増やさない。
+         * 「利用者が入力を変えて出し直した」ときだけ増えるので、どの版で作ったかが追える。</p>
+         */
+        int revision) {
 
     /** スナップショットの形式の版（形を変えたら上げる）。 */
     public static final int VERSION = 1;
@@ -94,9 +116,28 @@ public record AiFigureConfig(
 
     /** バッチコードだけを差し替える（admin-api が要求行のモードから決める）。 */
     public AiFigureConfig withTaskCode(String taskCode) {
-        return new AiFigureConfig(mode, taskCode, provider, temperature, maxCompletionTokens,
+        return new AiFigureConfig(mode, taskCode, provider, model, temperature, maxCompletionTokens,
                 requestTimeoutSeconds, retryLimit, maxCommands, allowedCommands, outputFormat,
-                systemPromptCommon, systemPromptMode, taskTemplate, taskTemplateFrom, capturedAt);
+                systemPromptCommon, systemPromptMode, taskTemplate, taskTemplateFrom, capturedAt, revision);
+    }
+
+    /** モデル名を固定する（受付時に `AI_MODEL` から読めたとき、実行時に読めたとき）。 */
+    public AiFigureConfig withModel(String model) {
+        return new AiFigureConfig(mode, taskCode, provider, text(model), temperature, maxCompletionTokens,
+                requestTimeoutSeconds, retryLimit, maxCommands, allowedCommands, outputFormat,
+                systemPromptCommon, systemPromptMode, taskTemplate, taskTemplateFrom, capturedAt, revision);
+    }
+
+    /** 実行版（受付＝1。利用者が入力を作り直したら +1）を差し替える。 */
+    public AiFigureConfig withRevision(int revision) {
+        return new AiFigureConfig(mode, taskCode, provider, model, temperature, maxCompletionTokens,
+                requestTimeoutSeconds, retryLimit, maxCommands, allowedCommands, outputFormat,
+                systemPromptCommon, systemPromptMode, taskTemplate, taskTemplateFrom, capturedAt, revision);
+    }
+
+    /** モデル名を固定できているか（できていなければ実行時に固定する）。 */
+    public boolean hasPinnedModel() {
+        return model != null && !model.isBlank();
     }
 
     /**
@@ -110,6 +151,17 @@ public record AiFigureConfig(
      */
     public static AiFigureConfig resolve(String mode, String taskCode, Map<String, String> values,
                                          String capturedAt) {
+        return resolve(mode, taskCode, values, capturedAt, null, 1);
+    }
+
+    /**
+     * 設定値から有効な設定を組み立てる（モデル名と実行版も入れる）。
+     *
+     * @param model    受付時に固定するモデル名（`AI_MODEL` から読めたとき。読めなければ null）
+     * @param revision 実行版（受付＝1。利用者が作り直したら +1）
+     */
+    public static AiFigureConfig resolve(String mode, String taskCode, Map<String, String> values,
+                                         String capturedAt, String model, int revision) {
         Map<String, String> raw = values == null ? Map.of() : values;
         String normalizedMode = AiFigureSettingKeys.normalizeMode(mode);
 
@@ -118,6 +170,14 @@ public record AiFigureConfig(
             throw new ValidationException("AI の共通システムプロンプトが設定されていません"
                     + "（" + AiFigureSettingKeys.SYSTEM_PROMPT + "）。"
                     + "システム設定の「図形管理」で入力してください。");
+        }
+        String provider = providerOf(raw, normalizedMode);
+        if (provider.isEmpty()) {
+            // 空のまま固定すると「provider が無い」壊れたスナップショットになる。
+            // 受付の時点で理由を返す（あとから CONFIG_SNAPSHOT で失敗させない）
+            throw new ValidationException("AI のモデルが設定されていません"
+                    + "（" + AiFigureSettingKeys.PROVIDER + "）。"
+                    + "システム設定の「図形管理」で選んでください。");
         }
         String modeSystem = normalizedMode.isEmpty() ? null
                 : text(raw.get(AiFigureSettingKeys.systemPromptKey(normalizedMode)));
@@ -131,7 +191,8 @@ public record AiFigureConfig(
         return new AiFigureConfig(
                 normalizedMode.isEmpty() ? null : normalizedMode,
                 taskCode,
-                providerOf(raw, normalizedMode),
+                provider,
+                text(model),
                 number(raw, normalizedMode, AiFigureSettingKeys.SUFFIX_TEMPERATURE,
                         AiFigureSettingKeys.TEMPERATURE, DEFAULT_TEMPERATURE),
                 (int) number(raw, normalizedMode, AiFigureSettingKeys.SUFFIX_MAX_COMPLETION_TOKENS,
@@ -148,7 +209,8 @@ public record AiFigureConfig(
                 modeSystem == null ? "" : modeSystem,
                 from == TaskTemplateFrom.NONE ? "" : (from == TaskTemplateFrom.MODE ? modeTask : commonTask),
                 from,
-                capturedAt);
+                capturedAt,
+                revision < 1 ? 1 : revision);
     }
 
     /** 使用モデル（モード別 → 共通）。 */
@@ -238,6 +300,7 @@ public record AiFigureConfig(
         node.put("mode", mode);
         node.put("taskCode", taskCode);
         node.put("provider", provider);
+        node.put("model", model);
         node.put("temperature", temperature);
         node.put("maxCompletionTokens", maxCompletionTokens);
         node.put("requestTimeoutSeconds", requestTimeoutSeconds);
@@ -250,44 +313,173 @@ public record AiFigureConfig(
         node.put("taskTemplate", taskTemplate);
         node.put("taskTemplateFrom", taskTemplateFrom == null ? null : taskTemplateFrom.name());
         node.put("capturedAt", capturedAt);
+        node.put("revision", revision);
         return node;
     }
 
-    /** 要求行の「設定スナップショット」（JSON 文字列）から読む。読めなければ空。 */
-    public static Optional<AiFigureConfig> fromSnapshotJson(String json) {
+    /**
+     * スナップショットの読み取り結果。
+     *
+     * <p><strong>「無い」と「壊れている」を分ける</strong>のがこの型の役目。無い（歴史的な要求）なら
+     * いまの設定から作り直してよいが、**あるのに読めない**ときは黙って別の設定で走らせてはならない
+     * （利用者が固定した条件と違う条件で AI を呼ぶことになる）。</p>
+     */
+    public record SnapshotState(Kind kind, AiFigureConfig config, String problem) {
+
+        public enum Kind {
+            /** まだ固定していない（列が空・未設定）。いまの設定から作って固定してよい。 */
+            ABSENT,
+            /** 使える。 */
+            VALID,
+            /** あるが使えない（壊れている・足りない・版が違う）。**作り直さずに失敗させる**。 */
+            BROKEN
+        }
+
+        public static SnapshotState absent() {
+            return new SnapshotState(Kind.ABSENT, null, null);
+        }
+
+        public static SnapshotState valid(AiFigureConfig config) {
+            return new SnapshotState(Kind.VALID, config, null);
+        }
+
+        public static SnapshotState broken(String problem) {
+            return new SnapshotState(Kind.BROKEN, null, problem);
+        }
+
+        public boolean isAbsent() {
+            return kind == Kind.ABSENT;
+        }
+
+        public boolean isBroken() {
+            return kind == Kind.BROKEN;
+        }
+
+        public boolean isValid() {
+            return kind == Kind.VALID;
+        }
+    }
+
+    /**
+     * 要求行の「設定スナップショット」を読む（**無い / 使える / 壊れている**を区別する）。
+     *
+     * <p>版の扱い（{@link #VERSION}）:</p>
+     * <ul>
+     *   <li>版 1 が現在の形。{@code config} の本文（プロンプト・パラメータ）が入っている。</li>
+     *   <li>版 1 でも {@code model}／{@code revision} が無いものは**前の版が書いたもの**として読む
+     *       （{@code model} は「受付時に固定できなかった」、{@code revision} は 1 とみなす）。
+     *       プロンプトの本文は入っているので使える。</li>
+     *   <li>追跡用のハッシュだけの古い形（{@code config} が無い）は**本文が復元できない**ので
+     *       {@link SnapshotState.Kind#BROKEN} にする（黙っていまの設定へは切り替えない）。</li>
+     * </ul>
+     *
+     * <p>プロンプトの本文（{@code systemPromptCommon}）と {@code mode}、
+     * {@code taskTemplate} 以外のパラメータが欠けているものも**壊れている**として扱う
+     * （欠けたまま既定値で走らせると、固定したはずの条件が変わる）。</p>
+     */
+    public static SnapshotState parseSnapshot(String json) {
         if (json == null || json.isBlank()) {
-            return Optional.empty();
+            return SnapshotState.absent();
         }
+        JsonNode root;
         try {
-            JsonNode root = MAPPER.readTree(json);
-            JsonNode config = root.path("config");
-            if (!config.isObject()) {
-                // 形が違う（古い版・手で書いた行）ときは読まない＝呼び出し側が今の設定で解決する
-                return Optional.empty();
-            }
-            String common = text(config.path("systemPromptCommon").asText(null));
-            if (common == null) {
-                return Optional.empty();
-            }
-            return Optional.of(new AiFigureConfig(
-                    text(config.path("mode").asText(null)),
-                    text(config.path("taskCode").asText(null)),
-                    textOr(config.path("provider").asText(null), ""),
-                    config.path("temperature").asDouble(DEFAULT_TEMPERATURE),
-                    config.path("maxCompletionTokens").asInt(DEFAULT_MAX_COMPLETION_TOKENS),
-                    config.path("requestTimeoutSeconds").asInt(DEFAULT_REQUEST_TIMEOUT_SECONDS),
-                    config.path("retryLimit").asInt(DEFAULT_RETRY_LIMIT),
-                    config.path("maxCommands").asInt(DEFAULT_MAX_COMMANDS),
-                    textOr(config.path("allowedCommands").asText(null), ""),
-                    textOr(config.path("outputFormat").asText(null), DEFAULT_OUTPUT_FORMAT),
-                    common,
-                    textOr(config.path("systemPromptMode").asText(null), ""),
-                    textOr(config.path("taskTemplate").asText(null), ""),
-                    taskTemplateFromOf(config.path("taskTemplateFrom").asText(null)),
-                    text(config.path("capturedAt").asText(null))));
+            root = MAPPER.readTree(json);
         } catch (Exception cause) {
-            return Optional.empty();
+            return SnapshotState.broken("設定スナップショットを読めません（JSON が壊れています）。");
         }
+        if (root == null || !root.isObject()) {
+            return SnapshotState.broken("設定スナップショットの形が違います（JSON オブジェクトではありません）。");
+        }
+        int rootVersion = root.path("version").asInt(0);
+        JsonNode config = root.path("config");
+        if (!config.isObject()) {
+            if (root.has("taskCode") || root.has("systemPromptHash") || root.has("taskTemplateHash")) {
+                return SnapshotState.broken("設定スナップショットが古い形式です（プロンプトの本文がありません。"
+                        + "版=" + rootVersion + "）。この要求は作り直してください。");
+            }
+            return SnapshotState.broken("設定スナップショットに本文（config）がありません（版=" + rootVersion + "）。");
+        }
+        int version = config.path("version").asInt(rootVersion);
+        if (version != VERSION) {
+            return SnapshotState.broken("設定スナップショットの版が対応していません（版=" + version
+                    + "、対応=" + VERSION + "）。この要求は作り直してください。");
+        }
+
+        List<String> missing = new ArrayList<>();
+        String mode = text(config.path("mode").asText(null));
+        require(missing, mode != null, "mode");
+        String common = text(config.path("systemPromptCommon").asText(null));
+        require(missing, common != null, "systemPromptCommon");
+        String provider = text(config.path("provider").asText(null));
+        require(missing, provider != null, "provider");
+        require(missing, config.hasNonNull("temperature"), "temperature");
+        require(missing, config.hasNonNull("maxCompletionTokens"), "maxCompletionTokens");
+        require(missing, config.hasNonNull("requestTimeoutSeconds"), "requestTimeoutSeconds");
+        require(missing, config.hasNonNull("retryLimit"), "retryLimit");
+        require(missing, config.hasNonNull("maxCommands"), "maxCommands");
+        require(missing, config.hasNonNull("allowedCommands"), "allowedCommands");
+        require(missing, config.hasNonNull("outputFormat"), "outputFormat");
+        if (!missing.isEmpty()) {
+            return SnapshotState.broken("設定スナップショットに足りない項目があります: "
+                    + String.join(", ", missing) + "。");
+        }
+
+        return SnapshotState.valid(new AiFigureConfig(
+                mode,
+                text(config.path("taskCode").asText(null)),
+                provider,
+                // model は「固定できなかった」を許す（前の版が書いたスナップショット・AI_MODEL 未設定）
+                text(config.path("model").asText(null)),
+                config.path("temperature").asDouble(DEFAULT_TEMPERATURE),
+                config.path("maxCompletionTokens").asInt(DEFAULT_MAX_COMPLETION_TOKENS),
+                config.path("requestTimeoutSeconds").asInt(DEFAULT_REQUEST_TIMEOUT_SECONDS),
+                config.path("retryLimit").asInt(DEFAULT_RETRY_LIMIT),
+                config.path("maxCommands").asInt(DEFAULT_MAX_COMMANDS),
+                config.path("allowedCommands").asText(""),
+                config.path("outputFormat").asText(DEFAULT_OUTPUT_FORMAT),
+                common,
+                textOr(config.path("systemPromptMode").asText(null), ""),
+                textOr(config.path("taskTemplate").asText(null), ""),
+                taskTemplateFromOf(config.path("taskTemplateFrom").asText(null)),
+                text(config.path("capturedAt").asText(null)),
+                Math.max(1, config.path("revision").asInt(1))));
+    }
+
+    private static void require(List<String> missing, boolean present, String name) {
+        if (!present) {
+            missing.add(name);
+        }
+    }
+
+    /** 使える形のときだけ読む（読めなければ空。壊れていることを呼び出し側が知る必要があるときは {@link #parseSnapshot}）。 */
+    public static Optional<AiFigureConfig> fromSnapshotJson(String json) {
+        SnapshotState state = parseSnapshot(json);
+        return state.isValid() ? Optional.of(state.config()) : Optional.empty();
+    }
+
+    /**
+     * 固定した設定でスナップショットを作り直す（**既にある trace は残す**）。
+     *
+     * <p>「スナップショットが無い歴史的な要求」と「モデル名を固定できていなかった要求」を、
+     * **AI を呼ぶ前に**固定するために使う。プロンプトの本文は入れ替わるが、
+     * 実行の記録（{@code trace}）は消さない。</p>
+     */
+    public static String repin(String existingSnapshotJson, AiFigureConfig config) {
+        ObjectNode root = MAPPER.createObjectNode();
+        root.put("version", VERSION);
+        root.set("config", config.toJsonNode());
+        try {
+            JsonNode parsed = existingSnapshotJson == null || existingSnapshotJson.isBlank()
+                    ? null : MAPPER.readTree(existingSnapshotJson);
+            JsonNode trace = parsed == null ? null : parsed.path("trace");
+            if (trace != null && trace.isObject()) {
+                root.set("trace", trace);
+            }
+        } catch (Exception cause) {
+            // 壊れた既存の値は捨てる（どうせ読めない。config は作り直す）
+            root.remove("trace");
+        }
+        return write(root);
     }
 
     /** 既にあるスナップショットへ追跡用の情報だけを足す（{@code config} はそのまま残す）。 */

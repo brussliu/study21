@@ -147,6 +147,26 @@ class AiFigurePipelineServiceTest {
     }
 
     @Test
+    @DisplayName("固定した設定が使えない（壊れたスナップショット）ときは CONFIG_SNAPSHOT で書き戻す")
+    void writesConfigSnapshotFailure() {
+        when(requestMapper.findById(REQUEST_ID))
+                .thenReturn(request("QUEUED"))
+                .thenReturn(request("PREPROCESSED"));
+        // 実行前の設定検証（要求に固定した設定）で拒否されたときの例外
+        when(batchService.rerunStep(anyString(), anyString(), any()))
+                .thenThrow(new AiFigureConfigException("この要求に固定した設定を使えません: 足りない項目があります。"));
+
+        Map<String, Object> result = pipeline.run(REQUEST_ID, "worker");
+
+        assertThat(result.get("stoppedAt")).isEqualTo("GENERATE");
+        ArgumentCaptor<GeometryAiRequestEntity> captor = ArgumentCaptor.forClass(GeometryAiRequestEntity.class);
+        verify(recorder).updateFailed(captor.capture());
+        assertThat(captor.getValue().getFailedStage()).isEqualTo("GENERATE");
+        assertThat(captor.getValue().getErrorCode()).isEqualTo("CONFIG_SNAPSHOT");
+        assertThat(captor.getValue().getErrorMessage()).contains("固定した設定を使えません");
+    }
+
+    @Test
     @DisplayName("既に理由の書いてある FAILED は上書きしない")
     void doesNotOverwriteExistingFailure() {
         when(requestMapper.findById(REQUEST_ID))

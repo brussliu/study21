@@ -37,7 +37,7 @@ class BatchAiCallHistoryTest {
         aiCallLogMapper = mock(AiCallLogMapper.class);
         executionMapper = mock(BatchExecutionMapper.class);
         service = new BatchServiceImpl(mock(BatchTaskRegistry.class), mock(SettingsService.class),
-                executionMapper, mock(BatchControlMapper.class), aiCallLogMapper, List.of());
+                executionMapper, mock(BatchControlMapper.class), aiCallLogMapper, List.of(), List.of());
     }
 
     private AiCallLogEntity entity(long callId) {

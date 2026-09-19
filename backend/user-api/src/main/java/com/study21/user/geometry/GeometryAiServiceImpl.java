@@ -179,7 +179,7 @@ public class GeometryAiServiceImpl implements GeometryAiService {
         entity.setSourceCode("APP");
         // 受付時に**そのときの有効な設定**を固定する（待ち行列に並んでいる間に設定を変えても、
         // この要求は受付時のプロンプト・モデル・上限で実行される）
-        entity.setSettingsSnapshotJson(settings.pinnedConfigJson(mode));
+        entity.setSettingsSnapshotJson(settings.pinnedConfigJson(mode, 1));
         requestMapper.insert(entity);
 
         GeometryAiRequestEntity saved = requireOwned(user, entity.getRequestId());
@@ -243,8 +243,9 @@ public class GeometryAiServiceImpl implements GeometryAiService {
         }
         requireDailyLimit(user, snapshot);
         // もう一度生成も**利用者が明示的に頼んだ再実行**なので、そのときの有効な設定で固定し直す
-        // （設定を直したのに古い版のままだと、いつまでも同じ失敗を繰り返す）
-        entity.setSettingsSnapshotJson(settings.pinnedConfigJson(entity.getMode()));
+        // （設定を直したのに古い版のままだと、いつまでも同じ失敗を繰り返す）。実行版を +1 する
+        entity.setSettingsSnapshotJson(settings.pinnedConfigJson(entity.getMode(),
+                settings.nextRevision(entity.getSettingsSnapshotJson())));
         entity.setUpdatedBy(user.accountId());
         entity.setUpdateSourceCode("APP");
         entity.setVersion(requireVersion(entity, version));
@@ -302,8 +303,10 @@ public class GeometryAiServiceImpl implements GeometryAiService {
         entity.setUpdatedBy(user.accountId());
         entity.setUpdateSourceCode("APP");
         // 送り直しも**そのときの有効な設定で固定し直す**（利用者が条件を直して頼んでいるので、
-        // 直した設定を拾わせる。並んでいる間は変わらない）
-        entity.setSettingsSnapshotJson(settings.pinnedConfigJson(mode));
+        // 直した設定を拾わせる。並んでいる間は変わらない）。
+        // **実行版を +1** して、どの版で作ったかを追えるようにする
+        entity.setSettingsSnapshotJson(
+                settings.pinnedConfigJson(mode, settings.nextRevision(entity.getSettingsSnapshotJson())));
         if (requestMapper.updateResubmitted(entity) == 0) {
             throw new ConflictException("他の操作で先に更新されました。再読み込みしてください。");
         }

@@ -42,6 +42,15 @@ public class FigureProcessorRegistry {
         }
     }
 
+    /**
+     * バッチコードからモードを解決する（{@code batC51-A} → A）。AI 生図のバッチかどうかの判定にも使う。
+     *
+     * <p>モードが無い時代の裸の {@code batC51} は解決しない（A として扱うのは要求行の側）。</p>
+     */
+    public static java.util.Optional<FigureMode> modeOfTaskCode(String taskCode) {
+        return FigureMode.ofTaskCode(taskCode);
+    }
+
     /** モードのプロセッサ（A〜D が登録済みなら必ず見つかる）。 */
     public FigureProcessor of(FigureMode mode) {
         FigureProcessor processor = mode == null ? null : byMode.get(mode);

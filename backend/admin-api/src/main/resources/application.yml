@@ -56,6 +56,17 @@ study21:
   classroom-ai:
     # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
     stub: "${STUDY21_CLASSROOM_AI_STUB:false}"
+  study-monitor:
+    # 学習状況モニターのスナップショット画像の置き場（batL02 が切り出す）。
+    # DB の 保存パス は、この下からの相対パス（例: 20260726/snapshot_000045.jpg）。
+    # user-api が同じ値で画像を配信するので、**user-api と揃える**（既定値・環境変数名とも同じ）。
+    # 2.0 の設定 STUDY_MONITOR_SNAPSHOT_OUTPUT_DIRECTORY（絶対パス）は使わない
+    # （値が違えば batL02 が警告ログで知らせる）。
+    snapshot-root: "${STUDY21_STUDY_MONITOR_SNAPSHOT_ROOT:${user.dir}/data/snapshots}"
+    # スナップショットを切り出す ffmpeg と、動画の長さを読む ffprobe のパス。
+    # 配備先で PATH が通っていないときは絶対パスを設定する。
+    ffmpeg-command: "${STUDY21_STUDY_MONITOR_FFMPEG_COMMAND:ffmpeg}"
+    ffprobe-command: "${STUDY21_STUDY_MONITOR_FFPROBE_COMMAND:ffprobe}"
   log:
     # 出力先。コンテナ内は /app/logs（NAS 側の logs/ をマウントする）。
     dir: ${STUDY21_LOG_DIR:logs}

@@ -192,6 +192,9 @@ public class ClassroomSttSocketHandler extends AbstractWebSocketHandler {
             body.put("type", "finished");
             body.set("added", MAPPER.valueToTree(push.added()));
             body.put("error", push.error());
+            // 収尾の状態（段階・やり直しの仕方・件数・失敗ではない知らせ）。欄は増えるだけで、
+            // 画面が見ている `type` / `added` / `error` の契約は変えない
+            putFinalizeState(body, push);
             send(session, body.toString());
             session.close(CloseStatus.NORMAL);
         }
@@ -280,7 +283,24 @@ public class ClassroomSttSocketHandler extends AbstractWebSocketHandler {
         body.set("added", MAPPER.valueToTree(push.added()));
         body.put("error", push.error());
         body.put("processedFrames", push.processedFrames());
+        // 収尾の状態も載せる（画面は「まだ収尾が済んでいない」ことを随時知れる）
+        putFinalizeState(body, push);
         send(session, body.toString());
+    }
+
+    /**
+     * 収尾の状態をメッセージへ載せる（`finish` の戻りと 1 回ごとの結果で同じ欄）。
+     *
+     * <p>**欄を増やすだけ**にする（`type` / `added` / `error` の契約は変えない）ので、
+     * 古い画面はそのまま動く。`notice` は失敗ではない知らせ（音声なし・発話なしの終端など）。</p>
+     */
+    private static void putFinalizeState(ObjectNode body, ClassroomSttStreamService.StreamPush push) {
+        body.put("finalizeStatus", push.finalizeStatus());
+        body.put("finalizeCompleted", push.finalizeCompleted());
+        body.put("recovery", push.recovery());
+        body.put("savedCount", push.savedCount());
+        body.put("pendingCount", push.pendingCount());
+        body.put("notice", push.notice());
     }
 
     private void send(WebSocketSession session, String json) throws Exception {

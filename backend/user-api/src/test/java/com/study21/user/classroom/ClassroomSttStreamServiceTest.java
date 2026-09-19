@@ -94,6 +94,19 @@ class ClassroomSttStreamServiceTest {
             listener.onText(this, json, true);
         }
 
+        /**
+         * **停止のあとに尾部が遅れて届く**（同じ接続のまま。新しいセッションは開かない）。
+         *
+         * <p>`finish-task` は 1 回しか送らないので、時間内に `task-finished` が来なかった回の
+         * やり直しでは、この方法でしか尾部を届けられない（本番でも「遅れて届く」形）。</p>
+         */
+        void deliverTail(String... sentences) {
+            for (String sentence : sentences) {
+                emit(sentence);
+            }
+            emit("{\"header\":{\"event\":\"task-finished\"},\"payload\":{}}");
+        }
+
         WebSocket.Listener listener;
         FakeWebSocket bind(WebSocket.Listener listener) { this.listener = listener; return this; }
 
@@ -820,18 +833,30 @@ class ClassroomSttStreamServiceTest {
     }
 
     @Test
-    @DisplayName("認識セッションが無い終了は黙って成功にしない（理由を返す）")
-    void finishWithoutSessionIsNotSilentSuccess() {
+    @DisplayName("音声を 1 つも送っていない音源の終了は「音声なし」の終端（黙って失敗にしない・永久に再試行させない）")
+    void finishWithoutSessionIsTerminalNoAudio() {
         ClassroomSttStreamService service = serviceWith(List.of(List.of()));
 
         ClassroomSttStreamService.StreamPush finished = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
 
-        assertThat(finished.error()).isNotNull();
+        // 終端なので**失敗ではない**（失敗で返すと、画面が永久に再試行を出し続ける）
+        assertThat(finished.error()).isNull();
+        assertThat(finished.finalizeStatus())
+                .isEqualTo(ClassroomSttStreamService.FINALIZE_NO_AUDIO);
+        assertThat(finished.finalizeCompleted()).isTrue();
+        assertThat(finished.notice()).contains("音声は送られていません");
         assertThat(finished.added()).isEmpty();
     }
 
+    /**
+     * **2 回目の収尾は「セッションが無い」ではなく、完了した結果を返す**（利用者の指示 4）。
+     *
+     * <p>画面は応答を失うと収尾をやり直す（`runFinalize` の【続きをやり直す】）。そこで
+     * 「受け付けている認識セッションがありません」を返すと、**保存済みの文を捨てて失敗に落ちる**
+     * （実際に起きていた不具合）。保存済みの文をそのまま返し、行も増やさない。</p>
+     */
     @Test
-    @DisplayName("終了は 2 回呼んでも行を増やさない・壊さない（2 回目は理由つき）")
+    @DisplayName("終了は 2 回呼んでも同じ完了結果を返す（行を増やさない・失敗にしない）")
     void finishTwiceIsIdempotent() {
         when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
@@ -840,17 +865,381 @@ class ClassroomSttStreamServiceTest {
             return 1;
         }).when(segmentMapper).insert(any());
 
-        ClassroomSttStreamService service = serviceWith(
-                List.of(List.of(sentence(1, 0, 900, "一回だけの文。"))));
+        ClassroomSttStreamService service = serviceWith(List.of(List.of()));
 
         service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+        // 停止のあとに届く尾部の文（収尾のこの呼び出しで保存される）
+        sockets.get(0).tailSentences = List.of(sentence(1, 0, 900, "一回だけの文。"));
         ClassroomSttStreamService.StreamPush first = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
         ClassroomSttStreamService.StreamPush second = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
 
         assertThat(first.error()).isNull();
-        // 2 回目は何も足さない（壊さない）が、黙って成功とも言わない
-        assertThat(second.added()).isEmpty();
-        assertThat(second.error()).isNotNull();
+        assertThat(first.finalizeCompleted()).isTrue();
+        assertThat(first.added()).hasSize(1);
+        assertThat(second.error()).isNull();
+        assertThat(second.finalizeStatus()).isEqualTo(ClassroomSttStreamService.FINALIZE_SAVED);
+        assertThat(second.finalizeCompleted()).isTrue();
+        // **保存済みの文をそのまま返す**（画面は詳細へ進める）
+        assertThat(second.added()).hasSize(1);
+        assertThat(second.added().get(0).text()).isEqualTo("一回だけの文。");
+        assertThat(second.savedCount()).isEqualTo(1);
         verify(segmentMapper, org.mockito.Mockito.times(1)).insert(any());
+    }
+
+    /* ---------------- 収尾の復帰（利用者の指示 1〜6・9） ---------------- */
+
+    /**
+     * 収尾のあとに**続きを録れる**（画面の【再開】）。
+     *
+     * <p>画面は録音を再開すると**番号を 1 から数え直す**ので、後端が番号で「送り直し」と
+     * 「続き」を区別すると、続きの音を丸ごと捨ててしまう（音は後から作り直せない）。
+     * 送り直しは**位置**（すでに処理した位置より古い）で落ちるので、番号では弾かない。</p>
+     */
+    @Test
+    @DisplayName("収尾のあとに続きを録れる（番号が 1 からでも音を捨てない・前の文は壊さない）")
+    void continuesAfterCompletedFinalize() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        doAnswer(invocation -> {
+            ((ClassroomSegmentEntity) invocation.getArgument(0)).setSegmentId(2_201L);
+            return 1;
+        }).when(segmentMapper).insert(any());
+
+        // 1 本目（最初の録音）と 2 本目（続き。画面は番号を 1 から数え直す）
+        ClassroomSttStreamService service = serviceWith(List.of(
+                List.of(sentence(1, 0, 900, "最初の文。")),
+                List.of(sentence(1, 0, 900, "続きの文。"))));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1, 0L);
+        ClassroomSttStreamService.StreamPush first = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+        assertThat(first.finalizeCompleted()).isTrue();
+
+        // 再開: 番号は 1 からだが、位置は録音の時間軸のまま進む（1 秒＝16000 サンプル）
+        ClassroomSttStreamService.StreamPush resumed =
+                service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1, 16_000L);
+
+        assertThat(resumed.error()).isNull();
+        assertThat(resumed.finalizeStatus())
+                .isEqualTo(ClassroomSttStreamService.FINALIZE_AUDIO_ACCEPTING);
+        // 続きを録っているので「完了」ではない（終了の検証は新しい収尾を待つ）
+        assertThat(resumed.finalizeCompleted()).isFalse();
+        assertThat(sockets).hasSize(2);
+
+        ClassroomSttStreamService.StreamPush second = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(second.error()).isNull();
+        assertThat(second.finalizeCompleted()).isTrue();
+        // 前の文は壊さず、続きの文を加える（2 行。同じ位置を上書きしていない）
+        ArgumentCaptor<ClassroomSegmentEntity> captor = ArgumentCaptor.forClass(ClassroomSegmentEntity.class);
+        verify(segmentMapper, org.mockito.Mockito.times(2)).insert(captor.capture());
+        assertThat(captor.getAllValues().stream().map(ClassroomSegmentEntity::getUtteranceKey).toList())
+                .containsExactly("mic#0", "mic#1000");
+    }
+    /**
+     * **STT の尾部が時間内に来ない**ときは、状態を残して**完了にしない**（利用者の指示 1・3）。
+     *
+     * <p>接続は閉じない（(a) 元の要求をまだ待てる）。やり直すと同じ要求の尾部をもう一度待つので、
+     * **認識し直さない**（音を送り直さない・新しいセッションを開かない）。</p>
+     */
+    @Test
+    @DisplayName("尾部のタイムアウト: 状態を残して未完了。やり直すと認識し直さずに完了する")
+    void tailTimeoutKeepsStateAndRetryCompletes() {
+        lenient().when(settings.sttTimeoutSeconds(snapshot)).thenReturn(2);
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        doAnswer(invocation -> {
+            ((ClassroomSegmentEntity) invocation.getArgument(0)).setSegmentId(1_801L);
+            return 1;
+        }).when(segmentMapper).insert(any());
+
+        ClassroomSttStreamService service = serviceWith(List.of(List.of()));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+        // 停止のあとに `task-finished` が来ない（＝尾部を取り切れない）
+        sockets.get(0).finishTask = false;
+
+        ClassroomSttStreamService.StreamPush timedOut = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(timedOut.error()).contains("尾部");
+        assertThat(timedOut.finalizeCompleted()).isFalse();
+        assertThat(timedOut.finalizeStatus()).isEqualTo(ClassroomSttStreamService.FINALIZE_FAILED);
+        assertThat(timedOut.recovery()).isEqualTo(ClassroomSttStreamService.RECOVERY_AWAIT_RESULTS);
+        // 状態照会でも「済んでいない・やり直せる・まだ待てる」が見える
+        ClassroomSttStreamService.FinalizeStatus status = service.finalizeStatus(RECORD_ID);
+        assertThat(status.completed()).isFalse();
+        assertThat(status.retryable()).isTrue();
+        ClassroomSttStreamService.SourceFinalizeStatus mic = status.sources().get(0);
+        assertThat(mic.source()).isEqualTo("mic");
+        assertThat(mic.completed()).isFalse();
+        assertThat(mic.retryable()).isTrue();
+        assertThat(mic.recovery()).isEqualTo(ClassroomSttStreamService.RECOVERY_AWAIT_RESULTS);
+        assertThat(mic.reason()).contains("尾部");
+        assertThat(mic.audioReceived()).isTrue();
+
+        // 遅れて尾部が届く（同じ接続のまま。**認識し直していない**）
+        sockets.get(0).deliverTail(sentence(1, 0, 900, "尾部の文。"));
+
+        ClassroomSttStreamService.StreamPush retried = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(retried.error()).isNull();
+        assertThat(retried.finalizeCompleted()).isTrue();
+        assertThat(retried.added()).hasSize(1);
+        assertThat(retried.added().get(0).text()).isEqualTo("尾部の文。");
+        // 認識し直していない（接続は 1 本のまま・音も送り直していない）
+        assertThat(sockets).hasSize(1);
+        assertThat(sockets.get(0).binaryBytes).isEqualTo(32_000L);
+        verify(segmentMapper, org.mockito.Mockito.times(1)).insert(any());
+    }
+
+    /**
+     * **保存に失敗した文は残して、やり直しで保存する**（利用者の指示 2）。
+     *
+     * <p>やり直しでは**認識し直さない**（同じ音を流し直さない）。発話キーは認識した時点で
+     * 確定しているので、同じ行に寄る（行が 2 つにならない）。</p>
+     */
+    @Test
+    @DisplayName("保存に失敗したら文を残す: やり直すと認識し直さずに保存する（行は増えない）")
+    void saveFailureKeepsPendingForRetry() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        // はじめの 6 回（1 文につき 3 回のやり直し × 2）は失敗し、収尾のやり直しで成功する
+        org.springframework.dao.DataIntegrityViolationException broken =
+                new org.springframework.dao.DataIntegrityViolationException("fk");
+        doThrow(broken).doThrow(broken).doThrow(broken).doThrow(broken).doThrow(broken).doThrow(broken)
+                .doAnswer(invocation -> {
+                    ((ClassroomSegmentEntity) invocation.getArgument(0)).setSegmentId(1_901L);
+                    return 1;
+                }).when(segmentMapper).insert(any());
+
+        ClassroomSttStreamService service = serviceWith(
+                List.of(List.of(sentence(1, 0, 900, "あとで保存する文。"))));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+        ClassroomSttStreamService.StreamPush failed = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(failed.error()).contains("保存できませんでした");
+        assertThat(failed.finalizeCompleted()).isFalse();
+        assertThat(failed.pendingCount()).isEqualTo(1);
+        assertThat(failed.recovery()).isEqualTo(ClassroomSttStreamService.RECOVERY_RESAVE_PENDING);
+
+        ClassroomSttStreamService.StreamPush retried = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(retried.error()).isNull();
+        assertThat(retried.finalizeCompleted()).isTrue();
+        assertThat(retried.pendingCount()).isZero();
+        assertThat(retried.added()).hasSize(1);
+        assertThat(retried.added().get(0).text()).isEqualTo("あとで保存する文。");
+        // 認識し直していない（音を送り直さない・セッションも増えない）
+        assertThat(sockets).hasSize(1);
+        assertThat(sockets.get(0).binaryBytes).isEqualTo(32_000L);
+        ArgumentCaptor<ClassroomSegmentEntity> captor = ArgumentCaptor.forClass(ClassroomSegmentEntity.class);
+        verify(segmentMapper, org.mockito.Mockito.times(7)).insert(captor.capture());
+        // 行になるのは 1 回だけ（同じ発話キーに寄る＝行が 2 つにならない）
+        assertThat(captor.getAllValues().stream().map(ClassroomSegmentEntity::getUtteranceKey)
+                .distinct().toList()).containsExactly("mic#0");
+    }
+
+    /**
+     * **接続が復帰しない**（`task-failed`）ときは、死んだ接続を保留の状態として持たず、
+     * **控えた音声から認識し直す**（利用者の指示 3 (b)）。
+     */
+    @Test
+    @DisplayName("認識が失敗したら控えた音声で認識し直す（死んだ接続は持たない）")
+    void unrecoverableConnectionRetranscribesRetainedAudio() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        doAnswer(invocation -> {
+            ((ClassroomSegmentEntity) invocation.getArgument(0)).setSegmentId(2_001L);
+            return 1;
+        }).when(segmentMapper).insert(any());
+
+        // 1 本目は音を受け取ったあとに `task-failed` を返す。2 本目（認識し直し）は尾部の文を返す
+        DashScopeAsrClient client = new DashScopeAsrClient((uri, apiKey, listener, timeout) -> {
+            FakeWebSocket socket = new FakeWebSocket(List.of());
+            socket.bind(listener);
+            if (sockets.isEmpty()) {
+                socket.taskFailed = true;
+            } else {
+                socket.tailSentences = List.of(sentence(1, 0, 900, "認識し直した文。"));
+            }
+            sockets.add(socket);
+            return socket;
+        });
+        ClassroomSttStreamService service =
+                new ClassroomSttStreamService(settings, segmentMapper, recordMapper, client);
+
+        ClassroomSttStreamService.StreamPush pushed =
+                service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+
+        // 認識そのものが失敗した（音声は受け取っている）
+        assertThat(pushed.error()).contains("音声認識が失敗しました");
+        // **保留の状態に閉じた接続を残さない**: 控えた音声でやり直す、と状態に出る
+        ClassroomSttStreamService.SourceFinalizeStatus state =
+                service.finalizeStatus(RECORD_ID).sources().get(0);
+        assertThat(state.status()).isEqualTo(ClassroomSttStreamService.FINALIZE_FAILED);
+        assertThat(state.recovery()).isEqualTo(ClassroomSttStreamService.RECOVERY_RETRANSCRIBE);
+        assertThat(state.audioRetained()).isTrue();
+        assertThat(state.retainedAudioRef()).startsWith("memory:");
+
+        ClassroomSttStreamService.StreamPush finished = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(finished.error()).isNull();
+        assertThat(finished.finalizeCompleted()).isTrue();
+        assertThat(finished.added()).hasSize(1);
+        assertThat(finished.added().get(0).text()).isEqualTo("認識し直した文。");
+        // 2 本目のセッションを開き、控えておいた音を**認識し直している**
+        assertThat(sockets).hasSize(2);
+        assertThat(sockets.get(1).binaryBytes).isEqualTo(32_000L);
+    }
+
+    /** 無音の授業: 音声は受け取ったが確定した文が 1 つも無い＝**発話なしの終端**（利用者の指示 9）。 */
+    @Test
+    @DisplayName("音声はあるが発話が無いときは「発話なし」の終端（失敗でも未完了でもない）")
+    void silenceReachesTerminalNoUtterance() {
+        ClassroomSttStreamService service = serviceWith(List.of(List.of()));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(2), 1);
+        ClassroomSttStreamService.StreamPush finished = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        assertThat(finished.error()).isNull();
+        assertThat(finished.finalizeStatus()).isEqualTo(ClassroomSttStreamService.FINALIZE_NO_UTTERANCE);
+        assertThat(finished.finalizeCompleted()).isTrue();
+        assertThat(finished.savedCount()).isZero();
+        assertThat(finished.notice()).contains("発話");
+        // 2 回目も同じ終端（やり直しを促さない）
+        ClassroomSttStreamService.StreamPush again = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+        assertThat(again.error()).isNull();
+        assertThat(again.finalizeCompleted()).isTrue();
+    }
+
+    /**
+     * **片方の音源が失敗しても、もう片方の保存済みの文は壊れない**（利用者の指示 9・10）。
+     * やり直しは**まだ済んでいない音源だけ**を進める。
+     */
+    @Test
+    @DisplayName("片方の音源が失敗しても、もう片方は完了したまま（やり直しは未完了だけ）")
+    void oneSourceFailureDoesNotDamageTheOther() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        // shared（先生）の INSERT だけ失敗する
+        doAnswer(invocation -> {
+            ClassroomSegmentEntity entity = invocation.getArgument(0);
+            if ("shared".equals(entity.getSource())) {
+                throw new org.springframework.dao.DataIntegrityViolationException("fk");
+            }
+            entity.setSegmentId(2_101L);
+            return 1;
+        }).when(segmentMapper).insert(any());
+
+        ClassroomSttStreamService service = serviceWith(List.of(
+                List.of(sentence(1, 100, 900, "先生の話。")),
+                List.of(sentence(1, 100, 900, "学生の話。"))));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "shared", pcm(1), 1);
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+
+        ClassroomSttStreamService.FinalizeStatus status = service.finalizeStatus(RECORD_ID);
+        // まだ収尾をしていないので両方とも未完了（音声は受け取っている）
+        assertThat(status.completed()).isFalse();
+        assertThat(status.audioReceived()).isTrue();
+
+        ClassroomSttStreamService.StreamPush shared = service.finish(RECORD_ID, ACCOUNT_ID, "shared");
+        ClassroomSttStreamService.StreamPush mic = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+
+        // 失敗したのは shared だけ。mic は完了して文も保存できている
+        assertThat(shared.error()).contains("保存できませんでした");
+        assertThat(shared.finalizeCompleted()).isFalse();
+        assertThat(mic.error()).isNull();
+        assertThat(mic.finalizeCompleted()).isTrue();
+        assertThat(mic.savedCount()).isEqualTo(1);
+
+        // 照会すると、済んだのは mic だけ・やり直せるのは shared だけ
+        ClassroomSttStreamService.FinalizeStatus after = service.finalizeStatus(RECORD_ID);
+        assertThat(after.completed()).isFalse();
+        assertThat(after.sources().get(0).source()).isEqualTo("mic");
+        assertThat(after.sources().get(0).completed()).isTrue();
+        assertThat(after.sources().get(0).retryable()).isFalse();
+        assertThat(after.sources().get(1).source()).isEqualTo("shared");
+        assertThat(after.sources().get(1).completed()).isFalse();
+        assertThat(after.sources().get(1).retryable()).isTrue();
+        assertThat(after.sources().get(1).pendingCount()).isEqualTo(1);
+        // 通す側の条件は「両方済んでいるか」なので、まだ通さない
+        assertThat(after.notice()).contains("共有した音");
+
+        // もう片方（mic）はやり直しても何も変わらない（行が増えない・失敗しない）
+        ClassroomSttStreamService.StreamPush micAgain = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+        assertThat(micAgain.error()).isNull();
+        assertThat(micAgain.finalizeCompleted()).isTrue();
+        assertThat(micAgain.savedCount()).isEqualTo(1);
+        // 保存済みの文を書き換えていない（完了した音源には触らない）
+        verify(segmentMapper, never()).updateByUtterance(anyLong(), any(), any(), any(), any());
+    }
+
+    /**
+     * やり直しても直らない終端（試行の上限）は**失敗として返さない**（利用者の指示 9）。
+     *
+     * <p>失敗として返し続けると、画面が永久に再試行を出し続けて授業を終えられない。
+     * 知らせ（`notice`）で伝え、`/end` は通す（書き起こしが不完全であることは残す）。</p>
+     */
+    @Test
+    @DisplayName("やり直しても直らない収尾は終端: 失敗ではなく知らせで返す")
+    void exhaustedFinalizeIsTerminalNotFailure() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        // データベースがずっと受け付けない（保存待ちが片付かない）
+        when(segmentMapper.insert(any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("fk"));
+
+        ClassroomSttStreamService service = serviceWith(
+                List.of(List.of(sentence(1, 0, 900, "保存できない文。"))));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+
+        ClassroomSttStreamService.StreamPush last = null;
+        for (int attempt = 1; attempt <= ClassroomSttStreamService.MAX_FINALIZE_ATTEMPTS + 1; attempt += 1) {
+            last = service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+        }
+
+        assertThat(last).isNotNull();
+        // 終端: **失敗として返さない**（画面は先へ進める）が、完了とも言わない
+        assertThat(last.error()).isNull();
+        assertThat(last.finalizeCompleted()).isFalse();
+        assertThat(last.notice()).contains("これ以上やり直しても直りません");
+        ClassroomSttStreamService.FinalizeStatus status = service.finalizeStatus(RECORD_ID);
+        assertThat(status.retryable()).isFalse();
+        assertThat(status.sources().get(0).retryable()).isFalse();
+        assertThat(status.sources().get(0).pendingCount()).isEqualTo(1);
+    }
+
+    /** 保持期限: 控えた収尾の状態（保存待ち・控えた音声・完了の控え）は期限を過ぎたら片付ける。 */
+    @Test
+    @DisplayName("収尾の状態は保持期限を過ぎたら片付けられる（資源を無限に増やさない）")
+    void finalizeStateIsReleasedAfterRetention() {
+        when(segmentMapper.findByUtteranceKey(anyLong(), any())).thenReturn(null);
+        when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
+        when(segmentMapper.insert(any()))
+                .thenThrow(new org.springframework.dao.DataIntegrityViolationException("fk"));
+
+        ClassroomSttStreamService service = serviceWith(
+                List.of(List.of(sentence(1, 0, 900, "保存できない文。"))));
+
+        service.push(RECORD_ID, ACCOUNT_ID, "mic", pcm(1), 1);
+        service.finish(RECORD_ID, ACCOUNT_ID, "mic");
+        assertThat(service.finalizeStatus(RECORD_ID).sources().get(0).pendingCount()).isEqualTo(1);
+        assertThat(service.finalizeStatus(RECORD_ID).sources().get(0).audioRetained()).isTrue();
+
+        // 期限の直前は残っている
+        assertThat(service.evictExpired(System.currentTimeMillis()
+                + ClassroomSttStreamService.RETENTION_MILLIS - 1_000L)).isZero();
+        assertThat(service.finalizeStatus(RECORD_ID).sources().get(0).pendingCount()).isEqualTo(1);
+
+        // 期限を過ぎたら片付く（保存待ちも控えた音声も解放される）
+        assertThat(service.evictExpired(System.currentTimeMillis()
+                + ClassroomSttStreamService.RETENTION_MILLIS + 1_000L)).isEqualTo(1);
+        ClassroomSttStreamService.FinalizeStatus after = service.finalizeStatus(RECORD_ID);
+        assertThat(after.sources().get(0).pendingCount()).isZero();
+        assertThat(after.sources().get(0).audioRetained()).isFalse();
+        assertThat(after.sources().get(0).status())
+                .isEqualTo(ClassroomSttStreamService.FINALIZE_NOT_STARTED);
     }
 }

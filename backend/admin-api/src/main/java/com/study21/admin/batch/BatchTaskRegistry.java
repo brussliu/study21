@@ -173,15 +173,18 @@ public class BatchTaskRegistry {
                 "ENGLISH_WORD_DETAIL_AI_RETRY_LIMIT"));
 
         // ---- 学習モニター ----
-        list.add(loop("batL02", "学習モニター動画取込・スナップショット切出（5分ごと、最大5ファイル）", 5, null,
-                "STUDY_MONITOR", "STUDY_MONITOR_VIDEO_SOURCE_DIRECTORY", "STUDY_MONITOR_SNAPSHOT_OUTPUT_DIRECTORY",
-                "STUDY_MONITOR_VIDEO_PROCESSING_START_TIME", "STUDY_MONITOR_VIDEO_PROCESSING_END_TIME",
-                "STUDY_MONITOR_SNAPSHOT_INTERVAL_SECONDS", "STUDY_MONITOR_CAMERA_LOCATION"));
-        list.add(loop("batL03", "学習モニター スナップショットAI分析（5分ごと）", 5, null,
-                "STUDY_MONITOR", "STUDY_MONITOR_AI_BATCH_LIMIT", "STUDY_MONITOR_AI_THREADS",
-                "STUDY_MONITOR_AI_TIMEOUT_SECONDS", "STUDY_MONITOR_AI_IMAGE_RESOLUTION",
-                "STUDY_MONITOR_FIRST_AI_PROVIDER", "STUDY_MONITOR_FIRST_SYSTEM_PROMPT",
-                "STUDY_MONITOR_FIRST_USER_PROMPT"));
+        // 実行の間隔・ずらしは**設定**（STUDY_MONITOR_L02/L03_INTERVAL_MINUTES・_OFFSET_MINUTES）で、
+        // 30 秒スケジューラが読む（docs/BATCH_SCHEDULE.md）。定義には固定の間隔を書かない
+        // （2.0 の「5 分ごと」はコードと画面の案内に固定されていた）。
+        // 必須設定は**工程クラスが宣言したもの**を使う（定義と実装が食い違わないように）
+        list.add(new BatchTaskDefinition("batL02", BatchTaskType.L,
+                "学習モニター動画取込・スナップショット切出（実行間隔は設定。1 回の実行で最大 5 ファイル）",
+                false, null, null, "STUDY_MONITOR",
+                com.study21.admin.studymonitor.StudyMonitorImportHandler.REQUIRED_SETTINGS));
+        list.add(new BatchTaskDefinition("batL03", BatchTaskType.L,
+                "学習モニター スナップショットAI分析（実行間隔は設定）",
+                false, null, null, "STUDY_MONITOR",
+                com.study21.admin.studymonitor.StudyMonitorAnalyzeHandler.REQUIRED_SETTINGS));
 
         // ---- 図形管理（AI生図 / AI画図助手）----
         // 利用者の指示で、AI 生図の流水線は「前処理（通常コード）→ AI 生成（バッチ）→ 検証（通常コード）」
@@ -189,13 +192,16 @@ public class BatchTaskRegistry {
         // AI 画図助手もバッチ（batC52）として実行する（依頼 → その場で即時実行）。
         // 種別 C（呼出）＝他の処理（流水線・授業ノートなど）が工程として呼ぶ。画面からは起動しない
         // （`BatchTaskDefinition#canManualRerun()`。起動時に AI を呼ばないので S にもしない）。
+        // **種別 C の有効は「いま使っているか」の目印**（切り替えはできない＝`canToggleActive()` は false。
+        // 実行の可否にも影響しない）。使っている C は既定で有効にして、一覧で無効に見えないようにする
+        // （利用者の指示。2026-09-19。未実装の C は無効のまま）
         // 必須設定は**工程クラスが宣言したもの**を使う（定義と実装が食い違わないように）
         // AI 生図の AI 生成は**モードごとに 1 バッチ**（batC51-A〜D）。連字符つきの接尾辞は
         // 既存の batC15-1〜3 と同じ扱い（バッチコードの列は VARCHAR(20) で収まる）。
         // 必須設定はモード共通の分（モード別のプロンプト・モデルパラメータは「未設定なら共通を継承」）
         for (FigureMode mode : FigureMode.values()) {
             list.add(new BatchTaskDefinition(mode.taskCode(), BatchTaskType.C,
-                    "AI生図 " + mode.label() + "（GeoGebra コマンド生成）", false, null, null,
+                    "AI生図 " + mode.label() + "（GeoGebra コマンド生成）", true, null, null,
                     "GEOMETRY_AI", AiFigureGenerateStep.REQUIRED_SETTINGS));
         }
         // モードが無い時代の裸の batC51 は登録しない（利用者の指示。2026-09-19）。
@@ -205,18 +211,18 @@ public class BatchTaskRegistry {
         // （`FigureMode.of(null)` → 空 → `orElse(A)`）。過去の実行履歴（バッチコード batC51）は
         // 消さずにそのまま残す（履歴画面はコードをそのまま表示する）。
         list.add(new BatchTaskDefinition("batC52", BatchTaskType.C,
-                "AI画図助手 生成", false, null, null,
+                "AI画図助手 生成", true, null, null,
                 "GEOMETRY_AI", AiAssistGenerateStep.REQUIRED_SETTINGS));
 
         // ---- 授業録音 / AI 授業記録 ----
-        // フェーズ分析（batC61）と最終まとめ（batC62）。種別 C（画面から随時実行）。
+        // フェーズ分析（batC61）と最終まとめ（batC62）。種別 C（他の処理から呼ぶ）。
         // 起動は admin-api の薄い入口（ClassroomAiPipelineService）がノートの種別で 61 か 62 を呼ぶ。
         // 必須設定は工程クラス（ClassroomAiNoteStep）が宣言したものを使う（定義と実装が食い違わないように）
         list.add(new BatchTaskDefinition("batC61", BatchTaskType.C,
-                "授業ノート フェーズ分析", false, null, null,
+                "授業ノート フェーズ分析", true, null, null,
                 "CLASSROOM_AI", ClassroomAiNoteStep.PHASE_REQUIRED_SETTINGS));
         list.add(new BatchTaskDefinition("batC62", BatchTaskType.C,
-                "授業ノート 最終まとめ生成", false, null, null,
+                "授業ノート 最終まとめ生成", true, null, null,
                 "CLASSROOM_AI", ClassroomAiNoteStep.SUMMARY_REQUIRED_SETTINGS));
 
         // ---- システム ----
@@ -232,10 +238,14 @@ public class BatchTaskRegistry {
         list.add(new BatchTaskDefinition("batR02", BatchTaskType.R,
                 "バッチ実行履歴・上網履歴クリーンアップ処理（AI生図の画像も削除）",
                 false, null, null, "SYSTEM", List.of()));
-        list.add(new BatchTaskDefinition("batR03", BatchTaskType.R, "インターネット利用終了（23:30）",
-                false, null, null, "SYSTEM", List.of()));
-        list.add(new BatchTaskDefinition("batR04", BatchTaskType.R, "インターネット利用開始（06:30）",
-                false, null, null, "SYSTEM", List.of()));
+        // batR03 / batR04: インターネット利用の終了／開始（端末モードを S / T に一括切替）。
+        // **実行時刻は説明文に書かない**（2.0 は 23:30 / 06:30 がコードと通知文に固定だった）。
+        // 2.1 は NET_CONTROL_START_TIME / NET_CONTROL_END_TIME をスケジューラが読む。
+        // 有効／無効は BAT_バッチコントロール情報（画面のスイッチ）で切り替える。
+        list.add(new BatchTaskDefinition("batR03", BatchTaskType.R, "インターネット利用終了（端末を停止モードSへ）",
+                false, null, null, "NET_CONTROL", com.study21.admin.network.NetworkStopBatchHandler.REQUIRED_SETTINGS));
+        list.add(new BatchTaskDefinition("batR04", BatchTaskType.R, "インターネット利用開始（端末を通常モードTへ）",
+                false, null, null, "NET_CONTROL", com.study21.admin.network.NetworkStartBatchHandler.REQUIRED_SETTINGS));
         list.add(task("batR05", BatchTaskType.R, "学習タスク未実施リマインド（21:00）", false,
                 "DAILY_REPORT", "DAILY_REPORT_REMINDER_ENABLED"));
 
@@ -256,12 +266,6 @@ public class BatchTaskRegistry {
     private static BatchTaskDefinition task(String code, BatchTaskType type, String desc, boolean active,
                                             String pageCode, String... keys) {
         return new BatchTaskDefinition(code, type, desc, active, null, null, pageCode, reqs(pageCode, keys));
-    }
-
-    private static BatchTaskDefinition loop(String code, String desc, int loopEveryMinutes, Integer minuteOfHour,
-                                            String pageCode, String... keys) {
-        return new BatchTaskDefinition(code, BatchTaskType.L, desc, false, loopEveryMinutes, minuteOfHour,
-                pageCode, reqs(pageCode, keys));
     }
 
     private static List<SettingRequirement> reqs(String pageCode, String... keys) {

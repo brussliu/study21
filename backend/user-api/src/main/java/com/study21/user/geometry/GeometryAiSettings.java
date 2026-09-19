@@ -1,6 +1,7 @@
 package com.study21.user.geometry;
 
 import com.study21.common.core.geometryai.AiFigureConfig;
+import com.study21.common.core.geometryai.AiModelSlot;
 import com.study21.common.core.geometryai.AiFigureSettingKeys;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -187,13 +188,19 @@ public class GeometryAiSettings {
      * 「共通 → モード別」の継承を適用した結果（プロンプトの本文とモデルのパラメータ）を
      * ここで固めておき、働き手はそれをそのまま使う。</p>
      *
-     * <p>**秘密（API Key・URL）は入れない**。入れるのはプロンプトの本文と、
-     * 使うモデルのスロット・上限・出力形式だけ。</p>
+     * <p>固定するのは**モデルのスロット（例 `qwen:4`）と、そのときのモデル名**の両方。
+     * スロットだけだと、同じ ID の下でモデル名を書き換えたときに、並んでいる要求が黙って
+     * 別のモデルへ移ってしまう。モデル名が読めない（`AI_MODEL` が未設定の）ときは空で固定し、
+     * 実行の工程が呼ぶ直前に読み直して固定する。</p>
      *
-     * @param mode 作図モード（A〜D。null は歴史的な要求＝ A として固定する）
+     * <p>**秘密（API Key・URL）は入れない**。入れるのはプロンプトの本文・モデルのスロットと
+     * モデル名・上限・出力形式・タイムアウト・再実行回数と、**実行版**（{@code revision}）だけ。</p>
+     *
+     * @param mode     作図モード（A〜D。null は歴史的な要求＝ A として固定する）
+     * @param revision 実行版（受付＝1。利用者が入力を作り直したら +1）
      * @throws com.study21.common.core.exception.ValidationException 共通の System Prompt が未設定のとき
      */
-    public String pinnedConfigJson(String mode) {
+    public String pinnedConfigJson(String mode, int revision) {
         String normalized = AiFigureSettingKeys.normalizeMode(mode);
         if (normalized.isEmpty() || !List.of("A", "B", "C", "D").contains(normalized)) {
             normalized = "A";
@@ -203,8 +210,36 @@ public class GeometryAiSettings {
                 : settingMapper.findByKeys(PAGE, AiFigureSettingKeys.keysFor(normalized))) {
             values.put(entity.getSettingKey(), entity.getSettingValue());
         }
-        return AiFigureConfig.resolve(normalized, null, values, OffsetDateTime.now().toString())
-                .toSnapshotJson(null);
+        String provider = values.get(AiFigureSettingKeys.PROVIDER);
+        String modeProvider = values.get(AiFigureSettingKeys.modeKey(normalized,
+                AiFigureSettingKeys.SUFFIX_PROVIDER));
+        if (modeProvider != null && !modeProvider.isBlank()) {
+            provider = modeProvider;
+        }
+        return AiFigureConfig.resolve(normalized, null, values, OffsetDateTime.now().toString(),
+                currentModelName(provider), revision).toSnapshotJson(null);
+    }
+
+    /** 受付時のモデル名（`AI_MODEL` のスロットから読む。読めなければ null＝実行時に固定する）。 */
+    private String currentModelName(String providerSlot) {
+        return AiModelSlot.of(providerSlot)
+                .flatMap(slot -> settingMapper
+                        .findByKeys(AiModelSlot.PAGE, List.of(slot.modelKey())).stream()
+                        .findFirst()
+                        .map(GeometryAiSettingEntity::getSettingValue))
+                .map(String::strip)
+                .filter(value -> !value.isEmpty())
+                .orElse(null);
+    }
+
+    /**
+     * いまの要求の次の**実行版**（スナップショットの revision + 1）。
+     *
+     * <p>利用者が入力を直して出し直したときに使う。技術的な再試行（働き手の拾い直し・
+     * AI の再呼び出し）では**増やさない**（同じ版のまま再開する）。</p>
+     */
+    public int nextRevision(String snapshotJson) {
+        return AiFigureConfig.fromSnapshotJson(snapshotJson).map(config -> config.revision() + 1).orElse(1);
     }
 
     public int assistMaxCommands(Snapshot snapshot) {

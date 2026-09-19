@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.studymonitor.StudyMonitorAnalysisMapper">
+
+    <!--
+      分析するスナップショットを選ぶ（2.0 の loadTargets と同じ条件）。
+        * 状態='1' かつ 切出状態コード='CREATED' … **スナップショットが完成している**ものだけ
+          （2.0 は「L02 が済んだ頃だろう」と時間でずらして決め打ちしていた。2.1 は状態を見る）
+        * NOT EXISTS(最新版フラグ='1') … 分析済み（COMPLETED でも ERROR でも）は選ばない。
+          ERROR 行にも最新版フラグを立てるので、**壊れた 1 枚が毎回枠を埋めることも、
+          永久に再試行されることもない**（2.0 は ERROR を消して選び直していた）。
+        * ORDER BY 撮影日時 … 古い画像から処理する（2.0 と同じ）
+        * LIMIT 一度の分析枚数
+    -->
+    <select id="findAnalysisTargets"
+            resultType="com.study21.admin.studymonitor.StudyMonitorAnalysisMapper$Target">
+        SELECT S."スナップショットID" AS "snapshotId",
+               S."保存パス"           AS "savePath",
+               S."撮影日時"           AS "capturedAt"
+          FROM public."MON_学習モニタースナップショット情報" S
+         WHERE S."状態" = '1'
+           AND S."切出状態コード" = 'CREATED'
+           AND NOT EXISTS (
+               SELECT 1
+                 FROM public."MON_学習モニター画像分析情報" A
+                WHERE A."スナップショットID" = S."スナップショットID"
+                  AND A."最新版フラグ" = '1')
+         ORDER BY S."撮影日時", S."スナップショットID"
+         LIMIT #{limit}
+    </select>
+
+    <!--
+      分析結果（一次判定を採用）を 1 行書く。
+        二次判定の列は 2.1 の設定にキーが無いので DB の既定と同じ値のまま
+        （二次判定要否='0' / 二次分析状態コード='NOT_REQUIRED' / 二次判定閾値=0.750）。
+        監査は登録元/更新元コード='BAT_L03'、アカウントID は NULL（バッチが行うため）。
+        撮影日時はスナップショットの 撮影日時 を控えとして入れる（画面の検索を速くするため）。
+    -->
+    <insert id="insertCompleted">
+        INSERT INTO public."MON_学習モニター画像分析情報" (
+            "スナップショットID", "最新版フラグ", "撮影日時", "分析状態コード", "二次判定閾値",
+            "一次分析状態コード", "一次判定結果コード", "一次信頼度", "一次判定理由",
+            "一次AIプロバイダ", "一次AIモデル", "一次分析開始日時", "一次分析完了日時", "一次応答JSON",
+            "二次判定要否", "二次分析状態コード",
+            "最終採用段階コード", "最終分析結果コード", "最終信頼度", "最終判定理由", "分析完了日時",
+            "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード"
+        ) VALUES (
+            #{row.snapshotId}, '1', #{row.capturedAt}, 'COMPLETED', #{row.threshold},
+            'COMPLETED', #{row.firstResultCode}, #{row.firstConfidence}, #{row.firstReason},
+            #{row.firstAiProvider}, #{row.firstAiModel}, #{row.firstStartedAt}, #{row.firstFinishedAt},
+            #{row.firstResponseJson}::jsonb,
+            #{row.secondRequired}, #{row.secondStateCode},
+            #{row.finalStageCode}, #{row.finalResultCode}, #{row.finalConfidence}, #{row.finalReason},
+            #{row.analysisFinishedAt},
+            NULL, NULL, 'BAT_L03', 'BAT_L03'
+        )
+    </insert>
+
+    <!--
+      失敗した 1 枚を ERROR として残す。
+        最新版フラグ='1' なので、次回以降の実行では**対象にならない**（自動リトライしない。
+        人は画面で ERROR を見て、原因を直してから手で直す）。
+        同じスナップショットの最新版は 1 行だけ（部分 UNIQUE uq_mon_analysis_latest）なので、
+        既に行があれば分析状態・エラー内容・レスポンスを上書きする。
+        2.0 は 一次分析開始日時 等を入れず 撮影日時 も入れなかったが、2.1 は控えの 撮影日時 を入れる。
+    -->
+    <insert id="upsertError">
+        INSERT INTO public."MON_学習モニター画像分析情報" (
+            "スナップショットID", "最新版フラグ", "撮影日時", "分析状態コード", "二次判定閾値",
+            "一次分析状態コード", "一次AIプロバイダ", "一次AIモデル", "一次応答JSON", "一次エラー内容",
+            "二次判定要否", "二次分析状態コード", "分析完了日時",
+            "登録者アカウントID", "更新者アカウントID", "登録元コード", "更新元コード"
+        ) VALUES (
+            #{row.snapshotId}, '1', #{row.capturedAt}, 'ERROR', 0.750,
+            'ERROR', #{row.firstAiProvider}, #{row.firstAiModel}, #{row.firstResponseJson}::jsonb,
+            #{row.firstErrorMessage},
+            '0', 'NOT_REQUIRED', CURRENT_TIMESTAMP,
+            NULL, NULL, 'BAT_L03', 'BAT_L03'
+        )
+        ON CONFLICT ("スナップショットID") WHERE "最新版フラグ" = '1'
+        DO UPDATE SET
+            "分析状態コード"   = 'ERROR',
+            "一次分析状態コード" = 'ERROR',
+            "一次エラー内容"   = EXCLUDED."一次エラー内容",
+            "一次AIプロバイダ" = EXCLUDED."一次AIプロバイダ",
+            "一次AIモデル"     = EXCLUDED."一次AIモデル",
+            -- 応答が読めたときだけ差し替える（読めなかった回で前回の生応答を消さない）
+            "一次応答JSON"     = COALESCE(EXCLUDED."一次応答JSON", "MON_学習モニター画像分析情報"."一次応答JSON"),
+            "バージョン"       = "MON_学習モニター画像分析情報"."バージョン" + 1,
+            "更新元コード"     = EXCLUDED."更新元コード",
+            "更新日時"         = CURRENT_TIMESTAMP
+    </insert>
+</mapper>

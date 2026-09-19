@@ -60,18 +60,23 @@ public class AiFigureValidateStep {
     private final GeometryAiRequestRecorder recorder;
     private final FigureOutputValidator validator;
     private final FigureProcessorRegistry processorRegistry;
+    /** 設定の読み出し（許可コマンド・上限の補完にだけ使う。**入口は Resolver 側**）。 */
     private final SettingsService settingsService;
+    /** 設定の入口（生成と同じものを使う。**別の入口を作らない**）。 */
+    private final AiFigureTaskConfigResolver taskConfigResolver;
 
     public AiFigureValidateStep(GeometryAiRequestMapper requestMapper,
                                 GeometryAiRequestRecorder recorder,
                                 FigureOutputValidator validator,
                                 FigureProcessorRegistry processorRegistry,
-                                SettingsService settingsService) {
+                                SettingsService settingsService,
+                                AiFigureTaskConfigResolver taskConfigResolver) {
         this.requestMapper = requestMapper;
         this.recorder = recorder;
         this.validator = validator;
         this.processorRegistry = processorRegistry;
         this.settingsService = settingsService;
+        this.taskConfigResolver = taskConfigResolver;
     }
 
     /** 1 件を検証して確定する。 */
@@ -103,6 +108,9 @@ public class AiFigureValidateStep {
         } catch (AiFigurePreprocessStep.GeometryAiStepException cause) {
             // この中で既に理由を書いてある（二重に書かない）
             throw cause;
+        } catch (AiFigureConfigException cause) {
+            fail(entity, "CONFIG_SNAPSHOT", cause.getMessage());
+            return result;
         } catch (SettingsValidationException cause) {
             fail(entity, "CONFIG", "AI の設定が不足しています。検証の条件（許可コマンド・上限）を"
                     + "確認してください。" + cause.getMessage());
@@ -209,24 +217,23 @@ public class AiFigureValidateStep {
     /**
      * 検証に使う条件を決める。
      *
-     * <p>要求行に固定した設定（受付時のスナップショット）があればそれを、無ければいまの設定を使う。
-     * 待ち行列に並んでいる間の設定変更で検証条件が変わらないようにするため。いまの設定を読むのは
-     * **1 回**にまとめる（設定の読み出しはキーごとに DB を見るので、何度も呼ばない）。</p>
+     * <p>**生成と同じ入口**（{@link AiFigureTaskConfigResolver}）を通す。要求行に固定した設定が
+     * あればそれを使い、無い（歴史的な要求）ときはいまの設定から作る。待ち行列に並んでいる間に
+     * 設定を変えても検証条件が変わらない。固定した設定が壊れているときは
+     * {@link AiFigureConfigException} で失敗する（黙って今の設定に切り替えない）。</p>
      */
     private Limits limitsOf(GeometryAiRequestEntity entity, FigureProcessor processor) {
-        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(entity.getSettingsSnapshotJson()).orElse(null);
-        if (pinned != null && pinned.allowedCommands() != null && !pinned.allowedCommands().isBlank()
-                && pinned.maxCommands() > 0) {
-            return new Limits(pinned.allowedCommands(), pinned.maxCommands());
+        AiFigureConfig config = taskConfigResolver.resolveConfig(processor, entity).config();
+        if (config.allowedCommands() == null || config.allowedCommands().isBlank() || config.maxCommands() <= 0) {
+            // 固定した値が空（手で書かれた行など）のときだけ、いまの設定で補う
+            Map<String, String> values = settingsService.requireSettings(processor.taskCode(), REQUIRED_SETTINGS);
+            String allowed = config.allowedCommands() == null || config.allowedCommands().isBlank()
+                    ? values.get("GEOMETRY_AI_ALLOWED_COMMANDS") : config.allowedCommands();
+            int max = config.maxCommands() > 0
+                    ? config.maxCommands() : intValue(values.get("GEOMETRY_AI_MAX_COMMANDS"), 80);
+            return new Limits(allowed, max);
         }
-        Map<String, String> values = settingsService.requireSettings(processor.taskCode(), REQUIRED_SETTINGS);
-        String allowed = pinned != null && pinned.allowedCommands() != null && !pinned.allowedCommands().isBlank()
-                ? pinned.allowedCommands()
-                : values.get("GEOMETRY_AI_ALLOWED_COMMANDS");
-        int max = pinned != null && pinned.maxCommands() > 0
-                ? pinned.maxCommands()
-                : intValue(values.get("GEOMETRY_AI_MAX_COMMANDS"), 80);
-        return new Limits(allowed, max);
+        return new Limits(config.allowedCommands(), config.maxCommands());
     }
 
     /**

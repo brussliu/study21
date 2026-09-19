@@ -43,7 +43,7 @@ class BatchControlServiceImplTest {
         controlMapper = mock(BatchControlMapper.class);
         var settingsService = mock(com.study21.admin.setting.SettingsService.class);
         service = new BatchServiceImpl(registry, settingsService, executionMapper, controlMapper,
-                mock(AiCallLogMapper.class), List.of());
+                mock(AiCallLogMapper.class), List.of(), List.of());
     }
 
     private BatchTaskDefinition definition(String code, BatchTaskType type, boolean active) {

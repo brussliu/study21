@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.study21.admin.ai.AiConnectionTester;
 import com.study21.admin.ai.SttConnectionTester;
 import com.study21.admin.geometryai.dto.AiResponseSchemaService;
+import com.study21.admin.schedule.ScheduleConfigService;
+import com.study21.admin.schedule.ScheduleSettingValidator;
 import com.study21.admin.setting.SettingsService;
 import com.study21.common.core.exception.GlobalExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +20,7 @@ import java.util.Map;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,14 +40,22 @@ class SettingPageControllerTest {
     private MockMvc mockMvc;
     private AiConnectionTester connectionTester;
     private SttConnectionTester sttConnectionTester;
+    private SettingsService settingsService;
+
+    private ScheduleConfigService scheduleConfigService;
 
     @BeforeEach
     void setUp() {
         connectionTester = mock(AiConnectionTester.class);
         sttConnectionTester = mock(SttConnectionTester.class);
+        settingsService = mock(SettingsService.class);
+        scheduleConfigService = mock(ScheduleConfigService.class);
+        // 保存後にスケジュールのメモリを更新する（既定は「反映できた」）
+        when(scheduleConfigService.refresh(any()))
+                .thenReturn(new ScheduleConfigService.RefreshResult(true, 2L, null, null));
         SettingPageController controller = new SettingPageController(
-                mock(SettingsService.class), new AiResponseSchemaService(new ObjectMapper()), connectionTester,
-                sttConnectionTester);
+                settingsService, new AiResponseSchemaService(new ObjectMapper()), connectionTester,
+                sttConnectionTester, scheduleConfigService, new ScheduleSettingValidator());
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
@@ -154,5 +165,51 @@ class SettingPageControllerTest {
                                 + "\"apiKey\":\"k\",\"url\":\"https://example.com\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("この AI は接続テストに対応していません（bigmodel）。"));
+    }
+
+    @Test
+    void 設定の保存後に実行スケジュールを反映する() throws Exception {
+        when(settingsService.saveGlobalSettingFields(any(), any()))
+                .thenReturn(Map.of("netControlEndTime", "23:30"));
+
+        mockMvc.perform(post("/api/admin/setting/saveSettings")
+                        .contentType("application/json")
+                        .content("{\"userId\":\"admin\",\"settings\":{\"netControlEndTime\":\"23:30\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.schedulePending").value(false))
+                .andExpect(jsonPath("$.message").value("設定を保存しました。"));
+        verify(scheduleConfigService).refresh("設定保存");
+    }
+
+    @Test
+    void 保存が失敗したときは実行スケジュールに触らない() throws Exception {
+        // 検証エラー＝ロールバック。トランザクションの外にいるキャッシュを触ってはいけない
+        // （DB は元のままなのに実行設定だけ変わる、という食い違いを防ぐ）
+        when(settingsService.saveGlobalSettingFields(any(), any()))
+                .thenThrow(new ValidationException("設定値が不正です。"));
+
+        mockMvc.perform(post("/api/admin/setting/saveSettings")
+                        .contentType("application/json")
+                        .content("{\"userId\":\"admin\",\"settings\":{\"netControlEndTime\":\"25:00\"}}"))
+                .andExpect(status().isBadRequest());
+
+        verify(scheduleConfigService, never()).refresh(any());
+    }
+
+    @Test
+    void 実行設定の反映に失敗したら保存済み反映待ちを返す() throws Exception {
+        when(settingsService.saveGlobalSettingFields(any(), any()))
+                .thenReturn(Map.of("netControlEndTime", "23:30"));
+        when(scheduleConfigService.refresh("設定保存"))
+                .thenReturn(new ScheduleConfigService.RefreshResult(false, 4L, "接続できません", null));
+
+        mockMvc.perform(post("/api/admin/setting/saveSettings")
+                        .contentType("application/json")
+                        .content("{\"userId\":\"admin\",\"settings\":{\"netControlEndTime\":\"23:30\"}}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.schedulePending").value(true))
+                .andExpect(jsonPath("$.data.scheduleMessage").value("接続できません"))
+                .andExpect(jsonPath("$.message").value(
+                        "保存済み・実行設定への反映待ち（接続できません）。自動で再試行します。"));
     }
 }

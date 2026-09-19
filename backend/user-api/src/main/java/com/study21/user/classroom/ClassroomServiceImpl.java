@@ -58,6 +58,10 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     private final ClassroomRecordMapper recordMapper;
     private final ClassroomSegmentMapper segmentMapper;
+    /** 録音の分塊（1 塊 1 行 1 ファイル）。転写セグメントとは**別の連番**を持つ。 */
+    private final ClassroomRecordingChunkMapper chunkMapper;
+    /** 保存した分塊から再生用の 1 本を組立てる（分塊が無ければ何もしない）。 */
+    private final ClassroomRecordingAssembler assembler;
     private final ClassroomNoteMapper noteMapper;
     private final ClassroomPresetMapper presetMapper;
     private final ClassroomAiSettings settings;
@@ -74,6 +78,8 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     public ClassroomServiceImpl(ClassroomRecordMapper recordMapper,
                                 ClassroomSegmentMapper segmentMapper,
+                                ClassroomRecordingChunkMapper chunkMapper,
+                                ClassroomRecordingAssembler assembler,
                                 ClassroomNoteMapper noteMapper,
                                 ClassroomPresetMapper presetMapper,
                                 ClassroomAiSettings settings,
@@ -83,6 +89,8 @@ public class ClassroomServiceImpl implements ClassroomService {
                                ClassroomSttStreamService streamService) {
         this.recordMapper = recordMapper;
         this.segmentMapper = segmentMapper;
+        this.chunkMapper = chunkMapper;
+        this.assembler = assembler;
         this.noteMapper = noteMapper;
         this.presetMapper = presetMapper;
         this.settings = settings;
@@ -193,6 +201,17 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     // ------------------------------------------------------------------ 分塊
 
+    /**
+     * 分塊を 1 つ受け取る（音声の保存 → 書き起こし → トリガー評価）。
+     *
+     * <p>音声は **1 塊 1 ファイル**（`chunk-{記録ID}-{連番}.webm`）として保存し、その行を
+     * {@code CR_授業録音分塊情報} に持つ。再生用の 1 本は再生のときに連番順に組立てる
+     * （{@link ClassroomRecordingAssembler}）。</p>
+     *
+     * <p>冪等の判定は**この表の (授業記録ID, 分塊連番)** で行う。以前は転写セグメントの
+     * 最大連番を流用していたため、文の数と分塊の数が違う回に「3 個目の分塊が重複として
+     * 捨てられる」「転写が無い回に二重に追記される」という不具合が出ていた。</p>
+     */
     @Override
     @Transactional
     public ClassroomModels.ChunkUploadResult uploadChunk(UserPrincipal user, long recordId, int seq,
@@ -217,26 +236,41 @@ public class ClassroomServiceImpl implements ClassroomService {
 
         int chunkSeconds = settings.chunkSeconds(snapshot);
         int maxMinutes = settings.maxRecordingMinutes(snapshot);
-        // 録音最大時間（分）を超える分塊は拒否する（コスト・レート制限。決定 Q7）
-        if ((long) seq * chunkSeconds > (long) maxMinutes * 60) {
+
+        byte[] bytes = readBytes(file);
+        String checksum = sha256(bytes);
+
+        /*
+         * 冪等: 同じ連番に**同じ中身**（バイト数 + チェックサム）が既にあれば、保存済みの結果を返す。
+         * 応答を失った再送・ネットワークの波での再送・同時再送のどれでも、音も行も増えない。
+         * 逆に、同じ連番で**中身が違う**ときは上書きしない（別の分塊を黙って捨てない）。明示のエラーにする。
+         * また、大きい連番が既にあっても**小さい連番を捨てない**（順不同で届いた分塊も保存する）。
+         */
+        ClassroomRecordingChunkEntity existing = chunkMapper.findBySeq(recordId, seq);
+        if (existing != null) {
+            if (!existing.sameContent(bytes.length, checksum)) {
+                throw new ConflictException(duplicateSeqMessage(seq));
+            }
+            log.info("classroom chunk re-sent (same content). recordId={} seq={} bytes={}",
+                    recordId, seq, bytes.length);
+            return chunkResult(record, seq, segmentsOfChunk(recordId, seq), null, null);
+        }
+
+        // この分塊が録音のどこか（画面が測った実際の経過秒。無ければ連番から計算する＝旧クライアント）
+        BigDecimal start = startSeconds != null && startSeconds.signum() >= 0
+                ? startSeconds : BigDecimal.valueOf((long) (seq - 1) * chunkSeconds);
+        BigDecimal end = endSeconds != null && endSeconds.compareTo(start) > 0
+                ? endSeconds : start.add(BigDecimal.valueOf(chunkSeconds));
+
+        // 録音の最大時間は**実際の録音の位置（経過秒）**で見る。
+        // 転写セグメントの連番（＝文の数）では測らない（無音の授業では 0 のままになる）
+        BigDecimal position = recordingPositionOf(recordId, seq, chunkSeconds, start, end);
+        if (position.compareTo(BigDecimal.valueOf((long) maxMinutes * 60)) > 0) {
             throw ClassroomApiException.invalid("録音は最大 " + maxMinutes + " 分までです。"
                     + "ここで録音を終了してください。");
         }
 
-        // 冪等: 同じ連番の再送はスキップ（音声も二重に追記しない）
-        Integer existingMax = segmentMapper.maxSeq(recordId);
-        int maxSeq = existingMax == null ? 0 : existingMax;
-        if (seq <= maxSeq) {
-            List<ClassroomModels.SegmentView> appended = segmentMapper
-                    .findByRecordAfter(recordId, seq - 1).stream()
-                    .map(ClassroomServiceImpl::toSegmentView).toList();
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, maxSeq + 1, appended, null, false,
-                    record.getStatus(), null);
-        }
-
-        byte[] bytes = readBytes(file);
-
-        // 音声は**再生用に必ず追記**する（STT の結果が空でも履歴の元音声を残す）
+        // 音声は**再生用にも必ず保存**する（STT の結果が空でも履歴の元音声を残す）
         ClassroomRecordingStorage.StoredRecording stored;
         if (record.getAudioPath() == null || record.getAudioName() == null) {
             stored = storage.newRecording(user.accountId(), file == null ? null : file.getContentType());
@@ -246,34 +280,69 @@ public class ClassroomServiceImpl implements ClassroomService {
             stored = new ClassroomRecordingStorage.StoredRecording(record.getAudioPath(), record.getAudioName(),
                     record.getAudioMime());
         }
-        storage.append(stored.relativeDir(), stored.fileName(), bytes);
+        // 分塊は**連番で決まる名前**で 1 ファイルずつ保存する（同じ連番の再送は同じ名前＝増えない）
+        String chunkName = ClassroomRecordingStorage.chunkFileName(recordId, seq, stored.mime());
+        storage.writeChunk(stored.relativeDir(), chunkName, bytes);
+
+        ClassroomRecordingChunkEntity chunk = new ClassroomRecordingChunkEntity();
+        chunk.setRecordId(recordId);
+        chunk.setSeq(seq);
+        chunk.setStartOffsetSeconds(start);
+        chunk.setEndOffsetSeconds(end);
+        chunk.setByteSize((long) bytes.length);
+        chunk.setChecksum(checksum);
+        chunk.setStorageDir(stored.relativeDir());
+        chunk.setFileName(chunkName);
+        chunk.setMime(stored.mime());
+        // 新しいコンテナ（ヘッダ）から始まるか＝組立てでヘッダを落とす対象か
+        chunk.setContainerHead(RecordingContainerCutter.isContainerHead(bytes, bytes.length));
+        chunk.setProcessingStatus(ClassroomModels.CHUNK_STORED);
+        chunk.setSegmentCount(0);
+        if (chunkMapper.insertIfAbsent(chunk) == 0) {
+            /*
+             * 同時再送で別の要求が先に同じ連番を入れた。
+             * 中身が同じなら**同じ分塊**なので、保存済みの結果を返して終わる（二重に作らない）。
+             */
+            ClassroomRecordingChunkEntity winner = chunkMapper.findBySeq(recordId, seq);
+            if (winner == null) {
+                // 挿入が 0 行なのに行が無い＝別の操作で消えた（記録の削除と競合した）
+                throw new ConflictException("分塊を保存できませんでした。"
+                        + "別の操作でこの録音が削除された可能性があります。");
+            }
+            if (!winner.sameContent(bytes.length, checksum)) {
+                throw new ConflictException(duplicateSeqMessage(seq));
+            }
+            log.info("classroom chunk already stored by another request (concurrent retry)."
+                    + " recordId={} seq={} bytes={}", recordId, seq, bytes.length);
+            return chunkResult(record, seq, segmentsOfChunk(recordId, seq), null, null);
+        }
 
         // 終了のあとに届いた分塊: **音声だけ保存**して書き起こしはしない
         // （録音は終わっていて最終まとめも作られている。音声を捨てると授業の記録が丸ごと消える）
         // STT の接続情報も要らないので、解決する前に返す（設定が不完全でも音声は残せる）
         if (lateChunk) {
+            chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_SKIPPED, 0);
             log.info("classroom late chunk stored after end. recordId={} seq={} bytes={}",
                     recordId, seq, bytes.length);
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return chunkResult(record, seq, List.of(), null, null);
         }
 
         // ストリーミング書き起こしが動いている間は、分塊ごとの STT をしない
         // （同じ音声を二度書き起こさない。音声は上で保存済み）
         if (streamService != null && streamService.isActive(recordId)) {
+            chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_SKIPPED, 0);
             log.info("classroom chunk stored without stt (streaming). recordId={} seq={} bytes={}",
                     recordId, seq, bytes.length);
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return chunkResult(record, seq, List.of(), null, null);
         }
 
         // ここから先は書き起こし（STT）。ブラウザ認識のときはサーバーは STT を呼ばない
         // （書き起こしは画面が認識したテキストを `appendTranscript` で送ってくる。音声は保存だけ）
         if (settings.browserStt(snapshot)) {
+            chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_SKIPPED, 0);
             log.info("classroom chunk stored without stt (browser recognition). recordId={} seq={} bytes={}",
                     recordId, seq, bytes.length);
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return chunkResult(record, seq, List.of(), null, null);
         }
 
         ClassroomAiSettings.SttConnection connection = settings.resolveStt(snapshot);
@@ -307,20 +376,20 @@ public class ClassroomServiceImpl implements ClassroomService {
              * 音声は後から作り直せないので、保存して受け入れ、書き起こしだけを諦める
              * （理由はログに残す。画面には警告として出る）。</p>
              */
+            chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_SKIPPED, 0);
             log.warn("classroom chunk stt failed; audio kept. recordId={} seq={} mime={} reason={}",
                     recordId, seq, sttMime, response.errorMessage());
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return chunkResult(record, seq, List.of(), null, null);
         }
 
         String text = joinText(response.segments());
         if (text.isEmpty()) {
             // 認識結果が空: **埋め草を入れずに何も作らない**（文字数と AI まとめを汚さないため）。
             // 実測: 「（聞き取れませんでした）」が並び、まとめの材料を薄めていた
+            chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_SKIPPED, 0);
             log.info("classroom chunk transcribed empty. recordId={} seq={} bytes={}", recordId, seq,
                     sttBytes.length);
-            return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return chunkResult(record, seq, List.of(), null, null);
         }
         String speaker = response.segments().stream()
                 .map(ClassroomSttClient.Segment::speaker).filter(s -> s != null && !s.isBlank()).findFirst()
@@ -328,13 +397,6 @@ public class ClassroomServiceImpl implements ClassroomService {
         String language = response.segments().stream()
                 .map(ClassroomSttClient.Segment::language).filter(s -> s != null && !s.isBlank()).findFirst()
                 .orElse(languageCode);
-
-        // 時間は**画面が測った実際の経過秒**を優先する（分塊の長さの設定を録音中に変えても時系列が壊れない）。
-        // 送られてこないとき（旧クライアント）は連番×分塊の長さで計算する
-        BigDecimal start = startSeconds != null && startSeconds.signum() >= 0
-                ? startSeconds : BigDecimal.valueOf((long) (seq - 1) * chunkSeconds);
-        BigDecimal end = endSeconds != null && endSeconds.compareTo(start) > 0
-                ? endSeconds : start.add(BigDecimal.valueOf(chunkSeconds));
 
         ClassroomSegmentEntity segment = new ClassroomSegmentEntity();
         segment.setRecordId(recordId);
@@ -346,6 +408,7 @@ public class ClassroomServiceImpl implements ClassroomService {
         segment.setLanguage(language);
         segmentMapper.insert(segment);
         recordMapper.addTranscribedChars(recordId, text.length());
+        chunkMapper.updateStatus(recordId, seq, ClassroomModels.CHUNK_TRANSCRIBED, 1);
 
         // トリガー評価 → 成立したら PENDING のフェーズノートを作る
         Long pendingNoteId = evaluateTrigger(recordId, user.accountId(), text, snapshot);
@@ -353,10 +416,79 @@ public class ClassroomServiceImpl implements ClassroomService {
         List<ClassroomModels.SegmentView> appended = List.of(toSegmentView(segment));
         log.info("classroom chunk transcribed. recordId={} seq={} chars={} triggered={}",
                 recordId, seq, text.length(), pendingNoteId != null);
-        return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, appended, pendingNoteId,
-                pendingNoteId != null, record.getStatus(),
+        return chunkResult(record, seq, appended, pendingNoteId,
                 pendingNoteId == null ? null : ClassroomModels.noteRunPath(pendingNoteId));
     }
+
+    /** 同じ連番に違う中身が来たときの理由（画面にそのまま出す日本語）。 */
+    private static String duplicateSeqMessage(int seq) {
+        return "同じ連番（" + seq + "）に違う内容の音声が届きました。"
+                + "保存済みの分塊は書き換えていません。画面を開き直して録音をやり直してください。";
+    }
+
+    /**
+     * 分塊アップロードの結果を組み立てる。
+     *
+     * <p>`nextSeq`（書き起こしのポーリング用）は**取りこぼさない側**に倒して `seq + 1` を返す
+     * （分塊は順不同で届き得るので、分塊表の最大連番 + 1 を返すと、まだ取っていない文を
+     * 飛ばしてしまう）。次の**分塊**の連番は分塊表から取る（`nextChunkSeq`）。</p>
+     */
+    private ClassroomModels.ChunkUploadResult chunkResult(ClassroomRecordEntity record, int seq,
+                                                          List<ClassroomModels.SegmentView> appended,
+                                                          Long pendingNoteId, String runPath) {
+        return new ClassroomModels.ChunkUploadResult(record.getRecordId(), seq,
+                seq + 1, maxChunkSeqOf(record.getRecordId()) + 1,
+                appended, pendingNoteId, pendingNoteId != null, record.getStatus(), runPath);
+    }
+
+    /** その分塊が作った転写セグメント（再送に応えるため。サーバー STT は分塊の連番＝セグメントの連番）。 */
+    private List<ClassroomModels.SegmentView> segmentsOfChunk(long recordId, int seq) {
+        return segmentMapper.findByRecordAfter(recordId, seq - 1).stream()
+                .filter(segment -> segment.getSeq() != null && segment.getSeq() == seq)
+                .map(ClassroomServiceImpl::toSegmentView).toList();
+    }
+
+    private int maxChunkSeqOf(long recordId) {
+        Integer max = chunkMapper.maxSeq(recordId);
+        return max == null ? 0 : max;
+    }
+
+    /**
+     * この分塊が示す**録音の位置（秒）**。録音の最大時間の判定に使う。
+     *
+     * <p>画面が測った実際の経過秒を第一にする（分塊の長さの設定を録音中に変えても壊れない）。
+     * 送られてこない旧クライアントだけ「連番 × 分塊の長さ」に落とす。保存済みの分塊より
+     * 前には戻さない（遅れて届いた分塊で位置が巻き戻ると、上限の判定が緩くなる）。</p>
+     */
+    private BigDecimal recordingPositionOf(long recordId, int seq, int chunkSeconds,
+                                           BigDecimal start, BigDecimal end) {
+        BigDecimal position = end != null ? end : start;
+        if (position == null) {
+            position = BigDecimal.valueOf((long) seq * chunkSeconds);
+        }
+        BigDecimal stored = chunkMapper.maxEndOffsetSeconds(recordId);
+        if (stored != null && stored.compareTo(position) > 0) {
+            position = stored;
+        }
+        return position;
+    }
+
+    /** 分塊のバイト列の照合に使う SHA-256（16 進 64 文字）。 */
+    private static String sha256(byte[] bytes) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes);
+            StringBuilder builder = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                builder.append(Character.forDigit((value >> 4) & 0x0F, 16));
+                builder.append(Character.forDigit(value & 0x0F, 16));
+            }
+            return builder.toString();
+        } catch (java.security.NoSuchAlgorithmException cause) {
+            // SHA-256 は必ずある（無い環境では起動時に気づく）
+            throw new IllegalStateException("チェックサムを計算できませんでした。", cause);
+        }
+    }
+
 
     /**
      * ブラウザ（Web Speech API）の認識結果を 1 件足す。
@@ -404,7 +536,8 @@ public class ClassroomServiceImpl implements ClassroomService {
         log.info("classroom transcript appended. recordId={} seq={} chars={} triggered={}",
                 recordId, seq, text.length(), pendingNoteId != null);
         return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1,
-                List.of(toSegmentView(segment)), pendingNoteId, pendingNoteId != null, record.getStatus(),
+                maxChunkSeqOf(recordId) + 1, List.of(toSegmentView(segment)), pendingNoteId,
+                pendingNoteId != null, record.getStatus(),
                 pendingNoteId == null ? null : ClassroomModels.noteRunPath(pendingNoteId));
     }
 
@@ -491,6 +624,20 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     // ------------------------------------------------------------------ 終了
 
+    /**
+     * 録音を終える（**サーバー側で状態を検証してから**最終まとめの行を作る）。
+     *
+     * <p>画面の【授業を終了】を信じない。見るのは 2 つ:</p>
+     * <ol>
+     *   <li>**音源ごとの収尾（finish）が済んでいるか**。済んでいないまま最終まとめの範囲を
+     *       固定すると、あとから保存された尾部の文がまとめに入らない（＝静かな取りこぼし）。
+     *       まだやり直せる未完了は **409 で理由つきに断る**（画面は【続きをやり直す】を出す）</li>
+     *   <li>**録音の分塊（音声の実体）が保存されているか**。書き起こしがあるのに分塊が 0 件なら、
+     *       音声が 1 つも保存されていない（音は後から作り直せない）ので、これも断る</li>
+     * </ol>
+     * <p>やり直しても直らない終端（試行の上限・音声なし・発話なし）は**断らずに通し**、
+     * {@code notice} で知らせる（終われない授業を作らない）。</p>
+     */
     @Override
     @Transactional
     public ClassroomModels.EndResult end(UserPrincipal user, long recordId) {
@@ -499,6 +646,9 @@ public class ClassroomServiceImpl implements ClassroomService {
         if (!ClassroomModels.STATUS_RECORDING.equals(record.getStatus())) {
             throw new ConflictException("この録音は録音中ではありません（" + statusLabel(record.getStatus()) + "）。");
         }
+        int maxSeq = maxSeqOf(recordId);
+        // **状態は先に検証する**（updateEnded のあとだと、断ったときに記録だけが終わってしまう）
+        String finalizeNotice = requireFinalizeComplete(record, maxSeq);
         int durationSeconds = durationSecondsOf(record, snapshot);
         if (recordMapper.updateEnded(recordId, durationSeconds, settings.retentionDays(snapshot),
                 user.accountId(), versionOf(record)) == 0) {
@@ -510,16 +660,16 @@ public class ClassroomServiceImpl implements ClassroomService {
         // ノート行の対象範囲は DDL の CK_CR_授業ノート_範囲 で「終了連番 >= 開始連番」なので、
         // 0 件で作ると制約違反になり、@Transactional のため終了そのものが失敗して
         // 記録が RECORDING のまま残ってしまう。
-        int maxSeq = maxSeqOf(recordId);
         Long finalNoteId = null;
-        String notice = null;
+        String notice = finalizeNotice;
         if (!settings.noteEnabled(snapshot)) {
             // AI 解析（batC62）が無効: 最終まとめの行も作らない（書き起こしだけ残す）
-            notice = "AI 解析（フェーズノート・最終まとめ）は現在オフのため、最終まとめは作成しませんでした。";
+            notice = join(notice, "AI 解析（フェーズノート・最終まとめ）は現在オフのため、"
+                    + "最終まとめは作成しませんでした。");
             log.info("classroom record ended with ai notes disabled. recordId={} durationSeconds={}",
                     recordId, durationSeconds);
         } else if (maxSeq < 1) {
-            notice = "書き起こしが無かったため、最終まとめは作成しませんでした。";
+            notice = join(notice, "書き起こしが無かったため、最終まとめは作成しませんでした。");
             log.info("classroom record ended without transcript. recordId={} durationSeconds={}",
                     recordId, durationSeconds);
         } else {
@@ -538,9 +688,119 @@ public class ClassroomServiceImpl implements ClassroomService {
 
         log.info("classroom record ended. recordId={} finalNoteId={} durationSeconds={}",
                 recordId, finalNoteId, durationSeconds);
+        // 再生用の 1 本をここで作っておく（失敗しても終了は成功のまま。再生のときに作り直される）
+        assembleQuietly(record);
         return new ClassroomModels.EndResult(recordId, ClassroomModels.STATUS_STOPPED,
                 statusLabel(ClassroomModels.STATUS_STOPPED), finalNoteId,
                 finalNoteId == null ? null : ClassroomModels.noteRunPath(finalNoteId), notice);
+    }
+
+    /**
+     * 終了してよいかを**サーバー側で**確かめる（収尾と分塊）。
+     *
+     * @return 通すが知らせを出すべきこと（日本語。無ければ null）
+     * @throws ConflictException まだやり直せる未完了がある（理由つき）
+     */
+    private String requireFinalizeComplete(ClassroomRecordEntity record, int maxSeq) {
+        long recordId = record.getRecordId();
+        // ストリーミング書き起こしを使っていない構成（分塊ごとの STT だけ・テスト）では収尾の状態が無い
+        ClassroomSttStreamService.FinalizeStatus status =
+                streamService == null ? null : streamService.finalizeStatus(recordId);
+        String notice = null;
+        List<String> terminal = new ArrayList<>();
+        if (status != null) {
+            List<String> incomplete = new ArrayList<>();
+            for (ClassroomSttStreamService.SourceFinalizeStatus source : status.sources()) {
+                if (source.completed()) {
+                    continue;
+                }
+                String reason = "【" + source.label() + "】" + (source.reason() == null
+                        ? source.statusLabel() : source.reason());
+                if (source.retryable()) {
+                    incomplete.add(reason);
+                } else {
+                    terminal.add(reason);
+                }
+            }
+            if (!incomplete.isEmpty()) {
+                throw new ConflictException("書き起こしの収尾（最後の確定文の取り込みと保存）が済んでいません。"
+                        + String.join(" ", incomplete)
+                        + "【続きをやり直す】を押してから、もう一度終了してください。");
+            }
+            notice = terminal.isEmpty() ? null
+                    : "書き起こしを完了できなかった音源があります。" + String.join(" ", terminal);
+            if (notice == null && !status.completed() && status.notice() != null) {
+                notice = status.notice();
+            }
+        }
+        /*
+         * 音声の分塊（実体）: 書き起こしがあるのに 1 件も無いなら、音声が保存されていない
+         * （音は後から作り直せない）。ただし**録音した音声にだけ**言えることなので、
+         * 取り込み（mp3 1 本・貼り付けだけ）は除く（分塊を持たない作りなので、断ると終われない）。
+         */
+        boolean audioReceived = status != null && status.audioReceived();
+        boolean imported = record.getAudioName() != null
+                && record.getAudioName().toLowerCase(Locale.ROOT).endsWith(".mp3");
+        boolean audioExpected = (maxSeq > 0 || audioReceived) && !imported
+                && (record.getAudioPath() != null || audioReceived);
+        if (audioExpected && chunkMapper.countByRecord(recordId) == 0) {
+            throw new ConflictException("録音の音声（分塊）が 1 つも保存されていません。"
+                    + "通信の状態を確かめて、録音画面からもう一度送ってから終了してください。");
+        }
+        return notice;
+    }
+
+    /** 知らせを足す（空は無視して連結する）。 */
+    private static String join(String first, String second) {
+        if (first == null || first.isBlank()) {
+            return second;
+        }
+        return first + " " + second;
+    }
+
+    // ------------------------------------------------------------------ 分塊の状態
+
+    /**
+     * その記録に保存済みの分塊（**画面が「次に送る連番」を知るための入口**）。
+     *
+     * <p>画面は以前、開き直したときの続きの連番を**転写セグメントの最大連番**から作っていた。
+     * 文の数と分塊の数は違うので、続きの番号がずれる（同じ連番を送り直す・飛ぶ）。
+     * ここでは分塊表の連番だけを返す。</p>
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public ClassroomModels.ChunkListResult chunks(UserPrincipal user, long recordId, int afterSeq) {
+        requireVisible(user, recordId);
+        List<ClassroomModels.ChunkView> items = chunkMapper.findByRecordAfter(recordId, afterSeq).stream()
+                .map(ClassroomServiceImpl::toChunkView).toList();
+        int maxSeq = maxChunkSeqOf(recordId);
+        BigDecimal recorded = chunkMapper.maxEndOffsetSeconds(recordId);
+        return new ClassroomModels.ChunkListResult(items, chunkMapper.countByRecord(recordId),
+                maxSeq, maxSeq + 1, chunkMapper.totalBytes(recordId),
+                recorded == null ? null : recorded.doubleValue());
+    }
+
+    private static ClassroomModels.ChunkView toChunkView(ClassroomRecordingChunkEntity chunk) {
+        return new ClassroomModels.ChunkView(chunk.getSeq(),
+                chunk.getByteSize() == null ? 0L : chunk.getByteSize(),
+                toDouble(chunk.getStartOffsetSeconds()), toDouble(chunk.getEndOffsetSeconds()),
+                chunk.getMime(), Boolean.TRUE.equals(chunk.getContainerHead()),
+                chunk.getProcessingStatus(),
+                chunk.getSegmentCount() == null ? 0 : chunk.getSegmentCount(),
+                iso(chunk.getCreatedAt()));
+    }
+
+    /** 分塊があれば再生用の 1 本を組立て直す（理由はログに残す。例外は投げない）。 */
+    private void assembleQuietly(ClassroomRecordEntity record) {
+        if (assembler == null) {
+            return;
+        }
+        try {
+            assembler.assembleIfNeeded(record);
+        } catch (RuntimeException cause) {
+            log.warn("授業録音の組立てに失敗しました（分塊は残っています）。recordId={}",
+                    record.getRecordId(), cause);
+        }
     }
 
     // ------------------------------------------------------------------ 配信
@@ -552,6 +812,12 @@ public class ClassroomServiceImpl implements ClassroomService {
         if (record.getAudioPath() == null || record.getAudioName() == null) {
             throw ClassroomApiException.notFound("録音が見つかりません。");
         }
+        /*
+         * 保存は分塊ごとのファイルなので、再生のときに**連番順に 1 本へ組み立てる**。
+         * 分塊が 1 つも無い（改修前の録音・取り込み）ときは何もしない＝今までどおり 1 本を配信する。
+         * 既に新しい 1 本があれば作り直さない（毎回の再生で作り直さない）。
+         */
+        assembleQuietly(record);
         java.nio.file.Path path = storage.resolve(record.getAudioPath(), record.getAudioName());
         if (path == null || !java.nio.file.Files.isRegularFile(path)) {
             throw ClassroomApiException.notFound("録音が見つかりません。");
@@ -573,6 +839,16 @@ public class ClassroomServiceImpl implements ClassroomService {
         }
         boolean deletedAudio = record.getAudioPath() == null || record.getAudioName() == null
                 ? false : storage.delete(record.getAudioPath(), record.getAudioName());
+        /*
+         * 分塊のファイルも消す。**行が指す実体だけ**を消す（置き場は複数の記録で共有し得るので、
+         * ディレクトリごと消すと他の記録の音声まで巻き込む）。分塊の行は記録の削除（FK CASCADE）で消える。
+         */
+        for (ClassroomRecordingChunkEntity chunk : chunkMapper.findByRecord(recordId)) {
+            deletedAudio |= storage.delete(chunk.getStorageDir(), chunk.getFileName());
+        }
+        if (record.getAudioPath() != null) {
+            storage.removeDirectoryIfEmpty(record.getAudioPath());
+        }
         recordMapper.delete(recordId, user.accountId());
         log.info("classroom record deleted. recordId={} deletedAudio={}", recordId, deletedAudio);
         return new ClassroomModels.DeleteResult(recordId, deletedAudio);
@@ -633,7 +909,18 @@ public class ClassroomServiceImpl implements ClassroomService {
         return max == null ? 0 : max;
     }
 
+    /**
+     * 録音時間（秒）。
+     *
+     * <p>第一に**保存した分塊が示す実際の位置**（画面が測った経過秒。無音の授業でも正しい）。
+     * 分塊が無い（改修前の録音・取り込み）ときだけ、開始時刻からの経過と
+     * 転写セグメントの連番（旧データの互換）に落とす。</p>
+     */
     private int durationSecondsOf(ClassroomRecordEntity record, ClassroomAiSettings.Snapshot snapshot) {
+        BigDecimal recorded = chunkMapper.maxEndOffsetSeconds(record.getRecordId());
+        if (recorded != null && recorded.signum() > 0) {
+            return recorded.setScale(0, java.math.RoundingMode.HALF_UP).intValue();
+        }
         if (record.getStartTime() != null) {
             long seconds = ChronoUnit.SECONDS.between(record.getStartTime().toLocalDateTime(),
                     LocalDateTime.now());
@@ -763,8 +1050,8 @@ public class ClassroomServiceImpl implements ClassroomService {
             }
         }
         if (sttText.isBlank()) {
-            return new ClassroomModels.ChunkUploadResult(recordId, 0, 1, List.of(), null, false,
-                    record.getStatus(), null);
+            return new ClassroomModels.ChunkUploadResult(recordId, 0, 1, maxChunkSeqOf(recordId) + 1,
+                    List.of(), null, false, record.getStatus(), null);
         }
 
         // 貼り付け・認識結果を**文ごとに分けて**セグメントにする（時間は順番に割り当てる）
@@ -787,8 +1074,8 @@ public class ClassroomServiceImpl implements ClassroomService {
         }
         log.info("classroom source imported. recordId={} audio={} segments={} chars={}",
                 recordId, hasAudio, appended.size(), sttText.length());
-        return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1, appended, null, false,
-                record.getStatus(), null);
+        return new ClassroomModels.ChunkUploadResult(recordId, seq, seq + 1,
+                maxChunkSeqOf(recordId) + 1, appended, null, false, record.getStatus(), null);
     }
 
     /** 貼り付け・認識結果を文（行）ごとに分ける（空行は捨てる）。 */
@@ -993,5 +1280,10 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     private static String iso(Timestamp value) {
         return value == null ? null : value.toLocalDateTime().toString();
+    }
+
+    /** BigDecimal を画面用の Double にする（null はそのまま null）。 */
+    private static Double toDouble(BigDecimal value) {
+        return value == null ? null : value.doubleValue();
     }
 }

@@ -78,6 +78,7 @@ public class AiFigurePipelineService {
 
         // 1. 前処理（バッチではない。通常コードで直接実行）
         String reason = null;
+        String code = UNEXPECTED_CODE;
         try {
             preprocessStep.run(aiRequestId);
         } catch (AiFigurePreprocessStep.GeometryAiStepException cause) {
@@ -88,7 +89,7 @@ public class AiFigurePipelineService {
             reason = messageOf(cause);
         }
         if (stoppedAt != null) {
-            ensureFailed(aiRequestId, "PREPROCESS", reason);
+            ensureFailed(aiRequestId, "PREPROCESS", reason, code);
         }
 
         // 2. AI 生成（モード別のバッチ。唯一のバッチ工程）
@@ -109,13 +110,18 @@ public class AiFigurePipelineService {
                 stoppedAt = "GENERATE";
                 reason = cause.getMessage();
                 writeFailure = false;
+            } catch (AiFigureConfigException cause) {
+                // 実行前の設定検証（固定した設定）で止まった。理由の種類が分かるように符号を分ける
+                stoppedAt = "GENERATE";
+                reason = cause.getMessage();
+                code = "CONFIG_SNAPSHOT";
             } catch (Exception cause) {
                 stoppedAt = "GENERATE";
                 reason = messageOf(cause);
             }
             if (stoppedAt != null) {
                 if (writeFailure) {
-                    ensureFailed(aiRequestId, "GENERATE", reason);
+                    ensureFailed(aiRequestId, "GENERATE", reason, code);
                 } else {
                     log.info("AI 生図の生成は他の実行が担当しています。requestId={} reason={}", aiRequestId, reason);
                 }
@@ -134,7 +140,7 @@ public class AiFigurePipelineService {
                 reason = messageOf(cause);
             }
             if (stoppedAt != null) {
-                ensureFailed(aiRequestId, "VALIDATE", reason);
+                ensureFailed(aiRequestId, "VALIDATE", reason, code);
             }
         }
 
@@ -165,17 +171,22 @@ public class AiFigurePipelineService {
         List<Map<String, Object>> steps = new ArrayList<>();
         String stoppedAt = null;
         String reason = null;
+        String code = UNEXPECTED_CODE;
         try {
             validateStep.run(aiRequestId);
         } catch (AiFigurePreprocessStep.GeometryAiStepException cause) {
             stoppedAt = "VALIDATE";
             reason = cause.getMessage();
+        } catch (AiFigureConfigException cause) {
+            stoppedAt = "VALIDATE";
+            reason = cause.getMessage();
+            code = "CONFIG_SNAPSHOT";
         } catch (Exception cause) {
             stoppedAt = "VALIDATE";
             reason = messageOf(cause);
         }
         if (stoppedAt != null) {
-            ensureFailed(aiRequestId, "VALIDATE", reason);
+            ensureFailed(aiRequestId, "VALIDATE", reason, code);
         }
         GeometryAiRequestEntity saved = requestMapper.findById(aiRequestId);
         Map<String, Object> result = new LinkedHashMap<>();
@@ -199,7 +210,7 @@ public class AiFigurePipelineService {
      * `GENERATED` / `VALIDATING`）は**失敗として理由を残す**。これで働き手が同じ行を拾い続けず、
      * 後ろに並んだ要求が進む。</p>
      */
-    private void ensureFailed(long aiRequestId, String stage, String reason) {
+    private void ensureFailed(long aiRequestId, String stage, String reason, String errorCode) {
         GeometryAiRequestEntity row = requestMapper.findById(aiRequestId);
         if (row == null) {
             return;
@@ -213,7 +224,7 @@ public class AiFigurePipelineService {
                 ? "AI 生図の " + stage + " 工程で失敗しました（理由が取得できませんでした）。"
                 : reason;
         row.setFailedStage(stage);
-        row.setErrorCode(UNEXPECTED_CODE);
+        row.setErrorCode(errorCode == null ? UNEXPECTED_CODE : errorCode);
         row.setErrorMessage(message);
         try {
             recorder.updateFailed(row);
@@ -223,6 +234,21 @@ public class AiFigurePipelineService {
             // ここで落ちても働き手は止めない（次に拾ったときに同じ判断をする）
             log.error("AI 生図の失敗を書き込めませんでした。requestId={} stage={}", aiRequestId, stage, cause);
         }
+    }
+
+    /**
+     * バッチが「成功しなかった」と言ったときの符号。
+     *
+     * <p>実行前の設定検証（AI 生図の固定した設定）で止まった場合は、`BatchServiceImpl` が
+     * 例外を投げずに失敗の要約だけを返すことがある。理由の文面から**固定した設定の問題**だと
+     * 分かるときは、その符号にして画面で見分けられるようにする。</p>
+     */
+    private static String failureCodeOf(String message) {
+        if (message == null) {
+            return UNEXPECTED_CODE;
+        }
+        return message.contains("固定した設定") || message.contains("設定スナップショット")
+                ? "CONFIG_SNAPSHOT" : UNEXPECTED_CODE;
     }
 
     private static String messageOf(Throwable cause) {

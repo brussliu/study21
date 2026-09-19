@@ -15,6 +15,7 @@ import com.study21.admin.geometryai.processor.FigureProcessorD;
 import com.study21.admin.geometryai.processor.FigureProcessorRegistry;
 import com.study21.admin.setting.SettingsService;
 import com.study21.common.core.geometryai.AiFigureConfig;
+import com.study21.common.core.geometryai.AiFigureSettingKeys;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -75,12 +76,15 @@ class AiFigureGenerateStepTest {
                 new FigureProcessorA(), new FigureProcessorB(), new FigureProcessorC(), new FigureProcessorD()));
         FigureProcessorSettings processorSettings = new FigureProcessorSettings(settingsService,
                 new AiResponseSchemaService(new ObjectMapper()));
+        // 設定の入口は本物（要求に固定した設定を使う規則そのものを確かめる）
+        AiFigureTaskConfigResolver taskConfigResolver =
+                new AiFigureTaskConfigResolver(processorSettings, connectionResolver);
         // 出力形式の注入は本物を使う（DTO から生成した JSON Schema がプロンプトへ入ることを確かめる）
-        step = new AiFigureGenerateStep(requestMapper, recorder, storage, connectionResolver,
+        step = new AiFigureGenerateStep(requestMapper, recorder, storage, taskConfigResolver,
                 registry, processorSettings, new FigurePromptBuilder(), aiClient,
                 new AiResponseFormatPrompt(new AiResponseSchemaService(new ObjectMapper())));
 
-        when(connectionResolver.resolve(anyString(), anyString())).thenReturn(
+        when(connectionResolver.resolve(anyString(), anyString(), any())).thenReturn(
                 new GeometryAiConnectionResolver.AiConnection("qwen", "qwen-vl-max",
                         "https://example.com/v1/chat/completions", "secret"));
         when(storage.read(anyString(), anyString())).thenReturn(new byte[]{1, 2, 3});
@@ -553,7 +557,7 @@ class AiFigureGenerateStepTest {
         stubSettings(0);
         GeometryAiRequestEntity entity = request("PREPROCESSED", null);
         when(requestMapper.findById(REQUEST_ID)).thenReturn(entity);
-        when(connectionResolver.resolve(anyString(), anyString()))
+        when(connectionResolver.resolve(anyString(), anyString(), any()))
                 .thenThrow(new com.study21.common.core.exception.ValidationException(
                         "AI モデルの接続設定がありません（qwen:4）。"));
 
@@ -581,10 +585,14 @@ class AiFigureGenerateStepTest {
         pinnedValues.put("GEOMETRY_AI_ALLOWED_COMMANDS", "Point,Segment,Polygon,Text,Function");
         pinnedValues.put("GEOMETRY_AI_MAX_COMMANDS", "40");
         GeometryAiRequestEntity entity = request("PREPROCESSED", null);
-        entity.setSettingsSnapshotJson(
-                AiFigureConfig.resolve("A", "batC51-A", pinnedValues, "2026-09-19T00:00:00").toSnapshotJson(null));
+        entity.setSettingsSnapshotJson(AiFigureConfig.resolve("A", "batC51-A", pinnedValues,
+                "2026-09-19T00:00:00", "qwen-vl-max", 3).toSnapshotJson(null));
         when(requestMapper.findById(REQUEST_ID)).thenReturn(entity);
         when(aiClient.call(any())).thenReturn(ok(A_JSON));
+        // 固定したモデル（qwen-vl-max）がそのまま使われる
+        when(connectionResolver.resolve(anyString(), anyString(), any())).thenReturn(
+                new GeometryAiConnectionResolver.AiConnection("qwen", "qwen-vl-max",
+                        "https://example.com/v1/chat/completions", "secret", "qwen:4", "qwen-vl-max", false));
 
         step.run(execution(REQUEST_ID), FigureMode.A);
 
@@ -593,6 +601,8 @@ class AiFigureGenerateStepTest {
         assertThat(captor.getValue().systemPrompt())
                 .contains("受付時の共通ルール。")
                 .doesNotContain("共通のルールです。");
+        // モデルは固定した版（いまの設定は使わない）
+        assertThat(captor.getValue().model()).isEqualTo("qwen-vl-max");
         // 上限も受付時の値（いまの設定は 80）
         ArgumentCaptor<GeometryAiRequestEntity> saved = ArgumentCaptor.forClass(GeometryAiRequestEntity.class);
         verify(recorder).updateGenerated(saved.capture());

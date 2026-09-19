@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.schedule.SchedulePlanMapper">
+
+    <!--
+      計画実行点の確保（claim）。1 文で原子的に判定する:
+        * 行が無ければ挿入して確保
+        * 行があるときは「いまの 最終予定日時 より新しい」ときだけ更新
+      確保できたときだけ 最終予定日時 を返す（0 件 = 既に確保済み・古い点）。
+      再起動・多重起動・ポーリングのゆらぎでも、同じ計画実行点は 1 回しか確保できない。
+
+      注: INSERT ... RETURNING を <select> で受けるため、MyBatis の一次キャッシュ
+      （同じ SqlSession 内で「同じ statement + 同じ引数」の結果を使い回す）を**切る**。
+      切らないと、同じ計画実行点を同じトランザクションでもう一度確保しようとしたときに
+      **前回の戻り値が返って「確保できた」と誤判定**する（＝二重実行の判定を誤る）。
+    -->
+    <select id="claim" flushCache="true" useCache="false" resultType="java.lang.String">
+        INSERT INTO public."BAT_スケジュール状態情報"
+            ("バッチコード", "最終予定日時", "最終確保日時", "バージョン", "登録日時", "更新日時")
+        VALUES
+            (#{batchCode}, #{plannedAt}::timestamp, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ("バッチコード") DO UPDATE
+           SET "最終予定日時" = EXCLUDED."最終予定日時",
+               "最終確保日時" = CURRENT_TIMESTAMP,
+               "バージョン"   = public."BAT_スケジュール状態情報"."バージョン" + 1,
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE public."BAT_スケジュール状態情報"."最終予定日時" IS NULL
+            OR public."BAT_スケジュール状態情報"."最終予定日時" &lt; EXCLUDED."最終予定日時"
+        RETURNING "最終予定日時"
+    </select>
+
+    <update id="attachExecution">
+        UPDATE public."BAT_スケジュール状態情報"
+           SET "最終実行ID" = #{executionId},
+               "更新日時"   = CURRENT_TIMESTAMP
+         WHERE "バッチコード" = #{batchCode}
+    </update>
+
+    <select id="findPlans" resultType="java.util.LinkedHashMap">
+        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId"
+          FROM public."BAT_スケジュール状態情報"
+         WHERE "バッチコード" IN
+            <foreach collection="taskCodes" item="taskCode" open="(" separator="," close=")">
+                #{taskCode}
+            </foreach>
+    </select>
+
+    <select id="findPlan" resultType="java.util.LinkedHashMap">
+        SELECT "バッチコード" AS "batchCode", "最終予定日時" AS "lastPlannedAt", "最終実行ID" AS "lastExecutionId"
+          FROM public."BAT_スケジュール状態情報"
+         WHERE "バッチコード" = #{batchCode}
+    </select>
+</mapper>

@@ -28,13 +28,16 @@ public class ClassroomRecordingCleanup {
     private static final int BATCH_LIMIT = 200;
 
     private final ClassroomRecordMapper recordMapper;
+    private final ClassroomRecordingChunkMapper chunkMapper;
     private final ClassroomRecordingStorage storage;
     private final SettingsService settingsService;
 
     public ClassroomRecordingCleanup(ClassroomRecordMapper recordMapper,
+                                     ClassroomRecordingChunkMapper chunkMapper,
                                      ClassroomRecordingStorage storage,
                                      SettingsService settingsService) {
         this.recordMapper = recordMapper;
+        this.chunkMapper = chunkMapper;
         this.storage = storage;
         this.settingsService = settingsService;
     }
@@ -52,22 +55,31 @@ public class ClassroomRecordingCleanup {
 
         List<ClassroomRecordEntity> targets = recordMapper.findRetentionTargets(retentionDays, BATCH_LIMIT);
         int deletedFiles = 0;
+        int deletedChunks = 0;
         int clearedRows = 0;
         for (ClassroomRecordEntity target : targets) {
             if (storage.delete(target.getAudioPath(), target.getAudioName())) {
                 deletedFiles += 1;
             }
+            /*
+             * 分塊（`chunk-{記録ID}-*.webm`）も消す。再生用の 1 本は分塊から作られるので、
+             * 分塊を残すとディスクだけが太る（1 授業で数十 MB）。実体を消したら行も消す
+             * （「保存済み」に見えると、user-api の冪等判定が実体の無い分塊を在ると見なす）。
+             */
+            deletedChunks += storage.deleteChunks(target.getAudioPath(), target.getRecordId());
+            chunkMapper.deleteByRecord(target.getRecordId());
             recordMapper.clearAudioFiles(target.getRecordId());
             clearedRows += 1;
         }
         result.put("retentionDays", retentionDays);
         result.put("targets", targets.size());
         result.put("deletedFiles", deletedFiles);
+        result.put("deletedChunks", deletedChunks);
         result.put("clearedRows", clearedRows);
         result.put("message", "授業録音の音声を削除しました。（対象 " + targets.size() + " 件 / うちファイルあり "
-                + deletedFiles + " 件・保持 " + retentionDays + " 日）");
-        log.info("classroom recording cleanup finished. retentionDays={} targets={} deleted={} rows={}",
-                retentionDays, targets.size(), deletedFiles, clearedRows);
+                + deletedFiles + " 件・分塊 " + deletedChunks + " 件・保持 " + retentionDays + " 日）");
+        log.info("classroom recording cleanup finished. retentionDays={} targets={} deleted={} chunks={} rows={}",
+                retentionDays, targets.size(), deletedFiles, deletedChunks, clearedRows);
         return result;
     }
 

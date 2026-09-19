@@ -65,6 +65,24 @@ class BatchTaskRegistryTest {
     }
 
     @Test
+    void callBatchesInUseAreActiveByDefault() {
+        // 種別 C（呼出）は有効／無効を切り替えられない（スイッチは置灰）が、
+        // 「いま使っているバッチ」は一覧で**有効**として見えるようにする（利用者の指示。2026-09-19）。
+        // C の有効は実行の可否には影響しない（`rerunStep` は見ない）。**使っているか**の目印。
+        assertThat(registry.findByCode("batC52").active()).as("AI画図助手").isTrue();
+        assertThat(registry.findByCode("batC61").active()).as("授業ノート フェーズ分析").isTrue();
+        assertThat(registry.findByCode("batC62").active()).as("授業ノート 最終まとめ").isTrue();
+        // 作図モード別の AI 生成も使っている（今の DB は コントロール情報 の行で有効。
+        // 行が無い環境でも同じに見えるよう、定義の既定値も有効にする）
+        for (FigureMode mode : FigureMode.values()) {
+            assertThat(registry.findByCode(mode.taskCode()).active()).as(mode.taskCode()).isTrue();
+        }
+        // まだ使っていない C（未実装）は無効のまま
+        assertThat(registry.findByCode("batC01").active()).isFalse();
+        assertThat(registry.findByCode("batC04").active()).isFalse();
+    }
+
+    @Test
     void preprocessAndValidateAreNotBatches() {
         // 前処理・検証はバッチではないので、対応するタスクコードが無い
         assertThat(registry.findByCode("batC52")).isNotNull(); // 助手（番号を再利用）

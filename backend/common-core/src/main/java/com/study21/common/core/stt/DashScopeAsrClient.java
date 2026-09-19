@@ -230,6 +230,8 @@ public class DashScopeAsrClient {
         private WebSocket socket;
         private String startError;
         private volatile boolean closed;
+        /** `finish-task`（音声の終わり）を送ったか（二度送らない）。 */
+        private boolean finishSent;
         /** `finish-task` のあと、認識の終わりを時間内に受け取れたか（`tailFinished()`）。 */
         private boolean tailFinished;
 
@@ -348,24 +350,63 @@ public class DashScopeAsrClient {
             }
         }
 
-        /** 終わりを伝えて閉じる（残りの確定文は閉じる前の {@link #poll()} で取る）。 */
+        /**
+         * **終わりを伝えるだけ**（`finish-task` を送る。**接続は閉じない**）。
+         *
+         * <p>尾部の確定文はこのあとに届くので、「送る」と「待つ」と「閉じる」を分けておくと、
+         * 時間内に尾部を取り切れなかったときに**閉じずに持ち越して、あとからもう一度待てる**
+         * （授業録音の収尾は、待てなかったことを理由にセッションを捨てない）。</p>
+         *
+         * <p>二度呼んでも `finish-task` は 1 回しか送らない（同じ要求を 2 回終わらせない）。</p>
+         */
+        public synchronized void requestFinish() {
+            if (closed || finishSent || socket == null) {
+                return;
+            }
+            finishSent = true;
+            try {
+                socket.sendText(finishTaskJson(taskId), true).join();
+            } catch (RuntimeException ignored) {
+                // すでに切れているときは何もしない（理由は collector / startError が持っている）
+            }
+        }
+
+        /**
+         * 認識の終わり（`task-finished`）を待つ。**尾部の確定文はこの待ちの間に届く**。
+         *
+         * <p>すでに受け取っていれば待たずに true。取れなかったときは false を返し、
+         * {@link #tailFinished()} も false のままになる（＝遅れて確定した文が残らない可能性）。</p>
+         */
+        public boolean awaitTail(int maxSeconds) {
+            try {
+                boolean arrived = collector.awaitFinished(Math.min(5, Math.max(2, maxSeconds)));
+                if (arrived) {
+                    tailFinished = true;
+                }
+                return arrived;
+            } catch (InterruptedException cause) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+
+        /**
+         * 終わりを伝えて閉じる（残りの確定文は閉じる前の {@link #poll()} で取る）。
+         *
+         * <p>まだ {@link #requestFinish()} を送っていなければ送り、尾部を**この呼び出しの中で**
+         * 待ってから閉じる（今までの `close()` と同じ振る舞い）。</p>
+         */
         @Override
         public synchronized void close() {
             if (closed) {
                 return;
             }
-            closed = true;
             if (socket != null) {
-                try {
-                    socket.sendText(finishTaskJson(taskId), true).join();
-                    // 尾部の確定文はこの待ちの間に届く。取れなかったことを呼ぶ側が分かるように残す
-                    tailFinished = collector.awaitFinished(Math.min(5, Math.max(2, request.timeoutSeconds())));
-                } catch (InterruptedException cause) {
-                    Thread.currentThread().interrupt();
-                } catch (RuntimeException ignored) {
-                    // すでに切れているときは何もしない
-                }
+                requestFinish();
+                // 尾部の確定文はこの待ちの間に届く。取れなかったことを呼ぶ側が分かるように残す
+                awaitTail(request.timeoutSeconds());
             }
+            closed = true;
             closeQuietly(socket);
         }
     }

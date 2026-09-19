@@ -167,6 +167,18 @@ public final class SettingPageFields {
         put(m, "monitorAiImageResolution",         "STUDY_MONITOR", "STUDY_MONITOR_AI_IMAGE_RESOLUTION");
         put(m, "monitorFirstSystemPrompt",         "STUDY_MONITOR", "STUDY_MONITOR_FIRST_SYSTEM_PROMPT");
         put(m, "monitorFirstUserPrompt",           "STUDY_MONITOR", "STUDY_MONITOR_FIRST_USER_PROMPT");
+        // バッチの**実行設定**（いつ動かすか）。切図間隔（SNAPSHOT_INTERVAL_SECONDS）や
+        // 動画の処理時間帯（VIDEO_PROCESSING_*）とは別の概念なので混ぜない
+        put(m, "monitorL02IntervalMinutes",        "STUDY_MONITOR", "STUDY_MONITOR_L02_INTERVAL_MINUTES");
+        put(m, "monitorL02OffsetMinutes",          "STUDY_MONITOR", "STUDY_MONITOR_L02_OFFSET_MINUTES");
+        put(m, "monitorL03IntervalMinutes",        "STUDY_MONITOR", "STUDY_MONITOR_L03_INTERVAL_MINUTES");
+        put(m, "monitorL03OffsetMinutes",          "STUDY_MONITOR", "STUDY_MONITOR_L03_OFFSET_MINUTES");
+
+        // --- ネットワーク制御 (NET_CONTROL) ---
+        // 2.0 は batR03 / batR04 の実行時刻（23:30 / 06:30）がコードと通知文に固定だった。
+        // 2.1 は設定で変えられるようにする（スケジューラがこの値を読んで計画実行点を決める）
+        put(m, "netControlStartTime",              "NET_CONTROL", "NET_CONTROL_START_TIME");
+        put(m, "netControlEndTime",                "NET_CONTROL", "NET_CONTROL_END_TIME");
 
         // --- 学習日報 (DAILY_REPORT) ---
         put(m, "dailyReportReminderEnabled", "DAILY_REPORT", "DAILY_REPORT_REMINDER_ENABLED");

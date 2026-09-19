@@ -5,6 +5,8 @@ import com.study21.admin.geometryai.processor.FigureProcessorB;
 import com.study21.admin.geometryai.processor.FigureProcessorC;
 import com.study21.admin.geometryai.processor.FigureProcessorD;
 import com.study21.admin.geometryai.processor.FigureProcessorRegistry;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.study21.admin.geometryai.dto.AiResponseSchemaService;
 import com.study21.admin.setting.SettingsService;
 import com.study21.admin.setting.SettingsValidationException;
 import com.study21.common.core.geometryai.AiFigureConfig;
@@ -59,6 +61,8 @@ class AiFigureValidateStepTest {
     private GeometryAiRequestMapper requestMapper;
     private GeometryAiRequestRecorder recorder;
     private SettingsService settingsService;
+    private GeometryAiConnectionResolver connectionResolver;
+    private AiFigureTaskConfigResolver taskConfigResolver;
     private AiFigureValidateStep step;
 
     @BeforeEach
@@ -66,16 +70,32 @@ class AiFigureValidateStepTest {
         requestMapper = mock(GeometryAiRequestMapper.class);
         recorder = mock(GeometryAiRequestRecorder.class);
         settingsService = mock(SettingsService.class);
+        connectionResolver = mock(GeometryAiConnectionResolver.class);
         FigureProcessorRegistry registry = new FigureProcessorRegistry(List.of(
                 new FigureProcessorA(), new FigureProcessorB(), new FigureProcessorC(), new FigureProcessorD()));
+        // 設定の入口は生成と**同じもの**を使う（別の入口を作らないことをテストでも固定する）
+        taskConfigResolver = new AiFigureTaskConfigResolver(
+                new FigureProcessorSettings(settingsService, new AiResponseSchemaService(new ObjectMapper())),
+                connectionResolver);
         step = new AiFigureValidateStep(requestMapper, recorder,
-                new FigureOutputValidator(new GeometryCommandValidator()), registry, settingsService);
+                new FigureOutputValidator(new GeometryCommandValidator()), registry, settingsService,
+                taskConfigResolver);
 
+        // 固定した設定が無い（歴史的な）行は、いまの設定を読んで検証する。
+        // 生成と同じ入口を通るので、共通の設定は必須の分がそろっている必要がある
         Map<String, String> values = new LinkedHashMap<>();
         values.put(AiFigureSettingKeys.ENABLED, "true");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
+        values.put(AiFigureSettingKeys.OUTPUT_FORMAT, "JSON");
+        values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルールです。");
+        values.put(AiFigureSettingKeys.TEMPERATURE, "0.2");
+        values.put(AiFigureSettingKeys.MAX_COMPLETION_TOKENS, "4096");
+        values.put(AiFigureSettingKeys.REQUEST_TIMEOUT_SECONDS, "120");
+        values.put(AiFigureSettingKeys.RETRY_LIMIT, "0");
         values.put(AiFigureSettingKeys.ALLOWED_COMMANDS, "Point,Segment,Polygon,Text,Function");
         values.put(AiFigureSettingKeys.MAX_COMMANDS, "80");
         when(settingsService.requireSettings(anyString(), any())).thenReturn(values);
+        when(settingsService.findGlobal(eq(AiFigureSettingKeys.PAGE), anyString())).thenReturn(java.util.Optional.empty());
     }
 
     private GeometryAiRequestEntity request(String status, String failedStage) {
@@ -239,6 +259,25 @@ class AiFigureValidateStepTest {
                 .hasMessageContaining("Polygon");
 
         // 固定版があるので、いまの設定は読まない
+        verify(settingsService, never()).requireSettings(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("固定した設定が壊れていたら FAILED(VALIDATE, CONFIG_SNAPSHOT) で止める（黙って切り替えない）")
+    void failsOnBrokenSnapshot() {
+        GeometryAiRequestEntity entity = request("GENERATED", null);
+        entity.setSettingsSnapshotJson("{\"version\":1,\"config\":{\"version\":1,\"mode\":\"A\"}}");
+        when(requestMapper.findById(REQUEST_ID)).thenReturn(entity);
+
+        assertThatThrownBy(() -> step.run(REQUEST_ID))
+                .isInstanceOf(AiFigurePreprocessStep.GeometryAiStepException.class)
+                .hasMessageContaining("固定した設定を使えません");
+
+        ArgumentCaptor<GeometryAiRequestEntity> captor = ArgumentCaptor.forClass(GeometryAiRequestEntity.class);
+        verify(recorder).updateFailed(captor.capture());
+        assertThat(captor.getValue().getFailedStage()).isEqualTo("VALIDATE");
+        assertThat(captor.getValue().getErrorCode()).isEqualTo("CONFIG_SNAPSHOT");
+        // いまの設定（有効な許可リスト）では検証しない
         verify(settingsService, never()).requireSettings(anyString(), any());
     }
 

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.classroom.ClassroomRecordingChunkMapper">
+
+    <resultMap id="ChunkMap" type="com.study21.user.classroom.ClassroomRecordingChunkEntity">
+        <id     property="chunkId"            column="録音分塊ID"/>
+        <result property="recordId"           column="授業記録ID"/>
+        <result property="seq"                column="分塊連番"/>
+        <result property="startOffsetSeconds" column="開始オフセット秒"/>
+        <result property="endOffsetSeconds"   column="終了オフセット秒"/>
+        <result property="byteSize"           column="バイト数"/>
+        <result property="checksum"           column="チェックサム"/>
+        <result property="storageDir"         column="保存先"/>
+        <result property="fileName"           column="保存ファイル名"/>
+        <result property="mime"               column="MIME"/>
+        <result property="containerHead"      column="コンテナ先頭"/>
+        <result property="processingStatus"   column="処理状態"/>
+        <result property="segmentCount"       column="転写セグメント数"/>
+        <result property="createdAt"          column="登録日時"/>
+        <result property="updatedAt"          column="更新日時"/>
+    </resultMap>
+
+    <sql id="ChunkColumns">
+        "録音分塊ID", "授業記録ID", "分塊連番", "開始オフセット秒", "終了オフセット秒",
+        "バイト数", "チェックサム", "保存先", "保存ファイル名", "MIME", "コンテナ先頭",
+        "処理状態", "転写セグメント数", "登録日時", "更新日時"
+    </sql>
+
+    <!--
+      同じ連番があれば何もしない（ON CONFLICT DO NOTHING）。
+      一意制約違反の例外にすると、PostgreSQL はそのトランザクションを中断してしまい、
+      続けて「既にある行の中身」を照会できない（＝再送を冪等に扱えない）。
+    -->
+    <insert id="insertIfAbsent" parameterType="com.study21.user.classroom.ClassroomRecordingChunkEntity"
+            useGeneratedKeys="true" keyProperty="chunkId">
+        INSERT INTO public."CR_授業録音分塊情報" (
+            "授業記録ID", "分塊連番", "開始オフセット秒", "終了オフセット秒",
+            "バイト数", "チェックサム", "保存先", "保存ファイル名", "MIME",
+            "コンテナ先頭", "処理状態", "転写セグメント数"
+        ) VALUES (
+            #{recordId}, #{seq}, #{startOffsetSeconds}, #{endOffsetSeconds},
+            #{byteSize}, #{checksum}, #{storageDir}, #{fileName}, #{mime},
+            COALESCE(#{containerHead}, FALSE), COALESCE(#{processingStatus}, 'STORED'),
+            COALESCE(#{segmentCount}, 0)
+        )
+        ON CONFLICT ("授業記録ID", "分塊連番") DO NOTHING
+    </insert>
+
+    <update id="updateStatus">
+        UPDATE public."CR_授業録音分塊情報"
+           SET "処理状態"         = #{status},
+               "転写セグメント数" = #{segmentCount},
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+           AND "分塊連番"   = #{seq}
+    </update>
+
+    <select id="findBySeq" resultMap="ChunkMap">
+        SELECT <include refid="ChunkColumns"/>
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "分塊連番"   = #{seq}
+    </select>
+
+    <select id="findByRecordAfter" resultMap="ChunkMap">
+        SELECT <include refid="ChunkColumns"/>
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+           AND "分塊連番" &gt; #{afterSeq}
+         ORDER BY "分塊連番"
+    </select>
+
+    <select id="findByRecord" resultMap="ChunkMap">
+        SELECT <include refid="ChunkColumns"/>
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+         ORDER BY "分塊連番"
+    </select>
+
+    <select id="maxSeq" resultType="int">
+        SELECT COALESCE(MAX("分塊連番"), 0)
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <select id="countByRecord" resultType="int">
+        SELECT COUNT(*)
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <select id="totalBytes" resultType="long">
+        SELECT COALESCE(SUM("バイト数"), 0)
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <select id="maxEndOffsetSeconds" resultType="java.math.BigDecimal">
+        SELECT MAX("終了オフセット秒")
+          FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+    </select>
+</mapper>

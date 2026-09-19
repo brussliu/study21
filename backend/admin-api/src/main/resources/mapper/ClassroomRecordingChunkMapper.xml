@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.classroomai.ClassroomRecordingChunkMapper">
+
+    <!-- 保持期限切れの掃除: 実体を消したあとに呼ぶ（音声の無い行を残さない） -->
+    <delete id="deleteByRecord">
+        DELETE FROM public."CR_授業録音分塊情報"
+         WHERE "授業記録ID" = #{recordId}
+    </delete>
+</mapper>

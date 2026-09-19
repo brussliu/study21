@@ -70,7 +70,7 @@ class GeometryAiSettingsTest {
         values.put(AiFigureSettingKeys.modeKey("B", AiFigureSettingKeys.SUFFIX_PROVIDER), "qwen:2");
         storeAll(values);
 
-        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("B")).orElseThrow();
+        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("B", 1)).orElseThrow();
 
         assertThat(pinned.mode()).isEqualTo("B");
         // System Prompt は共通＋モード別（モード別で上書きしない）
@@ -88,10 +88,11 @@ class GeometryAiSettingsTest {
     void pinsModeAForLegacyRequests() {
         java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
         values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルール。");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
         values.put(AiFigureSettingKeys.systemPromptKey("A"), "A のルール。");
         storeAll(values);
 
-        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson(null)).orElseThrow();
+        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson(null, 1)).orElseThrow();
 
         assertThat(pinned.mode()).isEqualTo("A");
         assertThat(pinned.systemPromptMode()).isEqualTo("A のルール。");
@@ -104,9 +105,63 @@ class GeometryAiSettingsTest {
         values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "   ");
         storeAll(values);
 
-        assertThatThrownBy(() -> settings.pinnedConfigJson("A"))
+        assertThatThrownBy(() -> settings.pinnedConfigJson("A", 1))
                 .isInstanceOf(ValidationException.class)
                 .hasMessageContaining(AiFigureSettingKeys.SYSTEM_PROMPT);
+    }
+
+    @Test
+    @DisplayName("受付時にモデル名も固定する（スロットだけでは別のモデルへ移ってしまう）")
+    void pinsTheModelNameAtSubmit() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルール。");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
+        values.put(AiFigureSettingKeys.ALLOWED_COMMANDS, "Point");
+        storeAll(values);
+        // AI_MODEL のスロット（qwen:4 → AI_QWEN_MODEL_4）は別のページなので、そちらも返す
+        GeometryAiSettingEntity modelRow = new GeometryAiSettingEntity();
+        modelRow.setSettingKey("AI_QWEN_MODEL_4");
+        modelRow.setSettingValue("qwen-vl-max");
+        when(settingMapper.findByKeys(eq("AI_MODEL"), any())).thenReturn(List.of(modelRow));
+
+        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("A", 1)).orElseThrow();
+
+        assertThat(pinned.provider()).isEqualTo("qwen:4");
+        assertThat(pinned.model()).isEqualTo("qwen-vl-max");
+        assertThat(pinned.revision()).isEqualTo(1);
+        // URL と API Key は固定しない（実行時に読む）
+        assertThat(AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("A", 1)))
+                .hasValueSatisfying(config ->
+                        assertThat(config.toSnapshotJson(null)).doesNotContain("http").doesNotContain("apiKey"));
+    }
+
+    @Test
+    @DisplayName("AI_MODEL が未設定ならモデル名は空で固定する（実行の直前に読み直して固定する）")
+    void leavesTheModelUnpinnedWhenTheSlotIsMissing() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルール。");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
+        storeAll(values);
+        when(settingMapper.findByKeys(eq("AI_MODEL"), any())).thenReturn(List.of());
+
+        AiFigureConfig pinned = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("A", 1)).orElseThrow();
+
+        assertThat(pinned.hasPinnedModel()).isFalse();
+    }
+
+    @Test
+    @DisplayName("送り直し・もう一度生成の実行版は、前の版 +1 になる")
+    void incrementsTheRevisionOnResubmit() {
+        java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
+        values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルール。");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
+        storeAll(values);
+
+        AiFigureConfig first = AiFigureConfig.fromSnapshotJson(settings.pinnedConfigJson("A", 1)).orElseThrow();
+        assertThat(settings.nextRevision(first.toSnapshotJson(null))).isEqualTo(2);
+        // 固定が無い（歴史的な）行は 1 から
+        assertThat(settings.nextRevision(null)).isEqualTo(1);
+        assertThat(settings.nextRevision("壊れた JSON")).isEqualTo(1);
     }
 
     @Test
@@ -115,10 +170,11 @@ class GeometryAiSettingsTest {
         java.util.Map<String, String> values = new java.util.LinkedHashMap<>();
         values.put(AiFigureSettingKeys.SYSTEM_PROMPT, "共通のルール。");
         values.put(AiFigureSettingKeys.INSTRUCTION_TEMPLATE, "作図してください。");
+        values.put(AiFigureSettingKeys.PROVIDER, "qwen:4");
         values.put(AiFigureSettingKeys.ALLOWED_COMMANDS, "Point");
         storeAll(values);
 
-        String json = settings.pinnedConfigJson("A");
+        String json = settings.pinnedConfigJson("A", 1);
 
         assertThat(json)
                 .contains("\"systemPromptCommon\":\"共通のルール。\"")

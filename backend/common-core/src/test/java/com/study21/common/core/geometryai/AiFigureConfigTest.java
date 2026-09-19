@@ -145,6 +145,18 @@ class AiFigureConfigTest {
     }
 
     @Test
+    @DisplayName("モデル（GEOMETRY_AI_PROVIDER）が空なら理由の分かる例外にする（壊れたスナップショットを作らない）")
+    void rejectsBlankProvider() {
+        Map<String, String> values = common();
+        values.put(AiFigureSettingKeys.PROVIDER, "  ");
+
+        assertThatThrownBy(() -> AiFigureConfig.resolve("A", "batC51-A", values, null))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining(AiFigureSettingKeys.PROVIDER)
+                .hasMessageContaining("図形管理");
+    }
+
+    @Test
     @DisplayName("共通の System Prompt が空なら理由の分かる例外にする")
     void rejectsBlankCommonSystemPrompt() {
         Map<String, String> values = common();

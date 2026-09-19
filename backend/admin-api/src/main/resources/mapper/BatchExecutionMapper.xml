@@ -59,6 +59,9 @@
     <update id="markFinished">
         UPDATE public."BAT_バッチ実行履歴情報"
            SET "状態" = #{status},
+               <!-- 終了状態（FAILED など）は 開始時刻 が必須（CHECK 制約）。
+                    実行前に落ちた行（開始時刻が NULL）は 登録日時 を開始時刻として埋める -->
+               "開始時刻" = COALESCE("開始時刻", "登録日時"),
                "終了時刻" = CURRENT_TIMESTAMP,
                "処理時間ms" = #{durationMs},
                "メッセージ" = #{message},
@@ -82,6 +85,39 @@
          ORDER BY "実行ID" DESC
          LIMIT 1
     </select>
+
+    <!--
+      スケジューラ用: 未完了の実行を探すが、**自分の実行記録は除く**
+      （スケジューラは実行記録を作ってから実行するので、自分の「待機中」を
+       前回の実行と取り違えない）。
+    -->
+    <select id="findRunningByBatchCodeExcept" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "バッチコード" = #{batchCode}
+           AND "実行ID" &lt;&gt; #{executionId}
+           AND "状態" IN ('QUEUED','RUNNING')
+         ORDER BY "実行ID" DESC
+         LIMIT 1
+    </select>
+
+    <!--
+      サービス再起動の復旧: 未完了の実行を失敗として閉じる
+      （残したままだと、そのタスクの次の実行が「前回が実行中」と見なされて走らない）。
+      処理時間は開始時刻がある行だけ入れる。
+    -->
+    <update id="markUnfinishedAsFailed">
+        UPDATE public."BAT_バッチ実行履歴情報"
+           SET "状態" = 'FAILED',
+               <!-- 終了状態は 開始時刻 が必須（CHECK 制約）。実行前に落ちた行は 登録日時 を埋める -->
+               "開始時刻" = COALESCE("開始時刻", "登録日時"),
+               "終了時刻" = CURRENT_TIMESTAMP,
+               "処理時間ms" = (EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - COALESCE("開始時刻", "登録日時"))) * 1000)::bigint,
+               "メッセージ" = #{message},
+               "エラー詳細" = #{message},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "状態" IN ('QUEUED','RUNNING')
+    </update>
 
     <!--
       AI 生図の工程ごとの実行を要求から引く（要求内容 = {"aiRequestId": N}）。

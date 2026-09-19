@@ -100,6 +100,14 @@ public interface ClassroomService {
     /** 追記セグメントの取得（ポーリング用）。 */
     ClassroomModels.SegmentListResult segments(UserPrincipal user, long recordId, int afterSeq);
 
+    /**
+     * 保存済みの**分塊**の取得（画面が「次に送る分塊の連番」と録音の位置を知るための入口）。
+     *
+     * <p>画面は開き直したときに続きの連番をここから取る。転写セグメントの連番（＝文の数）から
+     * 作ると、文の数と分塊の数が違う回に番号がずれる（同じ番号を送り直す・番号が飛ぶ）。</p>
+     */
+    ClassroomModels.ChunkListResult chunks(UserPrincipal user, long recordId, int afterSeq);
+
     /** 記録詳細（状態・転写全文・ノート一覧・前置詞）。 */
     ClassroomModels.RecordDetail detail(UserPrincipal user, long recordId);
 

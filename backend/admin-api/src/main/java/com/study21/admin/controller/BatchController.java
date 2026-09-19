@@ -1,6 +1,7 @@
 package com.study21.admin.controller;
 
 import com.study21.admin.batch.BatchService;
+import com.study21.admin.schedule.ScheduleConfigService;
 import com.study21.common.core.api.ApiResponse;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -23,9 +24,12 @@ import java.util.Map;
 public class BatchController {
 
     private final BatchService batchService;
+    /** 有効／無効を切り替えた**コミット後**に実行スケジュールのメモリを更新する。 */
+    private final ScheduleConfigService scheduleConfigService;
 
-    public BatchController(BatchService batchService) {
+    public BatchController(BatchService batchService, ScheduleConfigService scheduleConfigService) {
         this.batchService = batchService;
+        this.scheduleConfigService = scheduleConfigService;
     }
 
     /** バッチ一覧（有効／無効・最新実行・設定充足状態）。 */
@@ -50,6 +54,9 @@ public class BatchController {
     /**
      * バッチの有効／無効を切り替える（batS / batL / batR のみ）。
      * 2.0 は COM_設定情報 に保存していたが、2.1 は BAT_バッチコントロール情報 に保存する。
+     *
+     * <p>切り替え（コミット）のあとに実行スケジュールのメモリを更新する。失敗しても保存は
+     * 巻き戻さない（前の設定のまま動かし、自動で再試行する）。</p>
      */
     @PostMapping("/tasks/{batchCode}/active")
     public ApiResponse<Map<String, Object>> updateActive(
@@ -57,7 +64,15 @@ public class BatchController {
             @RequestBody(required = false) Map<String, Object> request) {
         boolean active = Boolean.TRUE.equals(request == null ? null : request.get("active"));
         String operator = stringOf(request == null ? null : request.get("operator"));
-        return ApiResponse.ok(batchService.updateActive(batchCode, active, operator));
+        Map<String, Object> result = batchService.updateActive(batchCode, active, operator);
+        ScheduleConfigService.RefreshResult refresh = scheduleConfigService.refresh("有効／無効の切替");
+        result.put("scheduleVersion", refresh.version());
+        result.put("schedulePending", !refresh.published());
+        result.put("scheduleMessage", refresh.published() ? null : refresh.error());
+        String message = refresh.published()
+                ? String.valueOf(result.get("message"))
+                : "保存済み・実行設定への反映待ち（" + refresh.error() + "）。自動で再試行します。";
+        return ApiResponse.ok(result, message);
     }
 
     /** 実行履歴（新しい順・ページング。バッチコード／状態／キーワードで絞り込み）。 */

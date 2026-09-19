@@ -31,6 +31,24 @@ public interface BatchExecutionMapper {
     BatchExecutionEntity findRunningByBatchCode(@Param("batchCode") String batchCode);
 
     /**
+     * 未完了の実行を探す（**自分自身は除く**）。
+     *
+     * <p>スケジューラは「実行記録を作ってから実行する」ので、自分の行（待機中）を
+     * 「前回の実行」と取り違えないようにするために使う。</p>
+     */
+    BatchExecutionEntity findRunningByBatchCodeExcept(@Param("batchCode") String batchCode,
+                                                      @Param("executionId") long executionId);
+
+    /**
+     * 未完了（待機中・実行中）の実行をまとめて失敗として閉じる（サービス再起動時の復旧）。
+     *
+     * <p>残したままだと、そのタスクの次の実行が「前回が実行中」と見なされて走らない。</p>
+     *
+     * @return 閉じた件数
+     */
+    int markUnfinishedAsFailed(@Param("message") String message);
+
+    /**
      * 要求内容（JSONB）の aiRequestId で実行履歴を引く（AI 生図の工程ごとの状況）。
      * 古い順（batC51 → 52 → 53 の順）に返す。
      */

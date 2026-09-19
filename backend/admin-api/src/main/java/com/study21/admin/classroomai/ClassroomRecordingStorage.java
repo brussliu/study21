@@ -59,6 +59,47 @@ public class ClassroomRecordingStorage {
         }
     }
 
+    /**
+     * その録音の**分塊**（`chunk-{記録ID}-*.webm`）を消す（保持期限切れの掃除）。
+     *
+     * <p>ファイル名に記録 ID が入っているので、置き場を他の記録と共有していても
+     * （改修前から続いている録音の月ごとのディレクトリ）巻き込まない。</p>
+     */
+    public int deleteChunks(String relativeDir, long recordId) {
+        if (relativeDir == null || relativeDir.isBlank()) {
+            return 0;
+        }
+        Path base;
+        try {
+            base = requireUnder(relativeDir, "work").getParent();
+        } catch (ValidationException cause) {
+            log.warn("授業録音のパスが不正です。dir={}", relativeDir);
+            return 0;
+        }
+        if (base == null || !Files.isDirectory(base)) {
+            return 0;
+        }
+        String prefix = "chunk-" + recordId + "-";
+        int deleted = 0;
+        try (java.util.stream.Stream<Path> entries = Files.list(base)) {
+            for (Path entry : entries.toList()) {
+                if (Files.isRegularFile(entry) && entry.getFileName().toString().startsWith(prefix)
+                        && Files.deleteIfExists(entry)) {
+                    deleted += 1;
+                }
+            }
+            // 空になった置き場だけ消す（中身が残っていれば他の記録のもの）
+            try (java.util.stream.Stream<Path> left = Files.list(base)) {
+                if (left.findAny().isEmpty()) {
+                    Files.deleteIfExists(base);
+                }
+            }
+        } catch (IOException cause) {
+            log.warn("授業録音の分塊を消せませんでした。dir={}", relativeDir, cause);
+        }
+        return deleted;
+    }
+
     private Path requireUnder(String relativeDir, String fileName) {
         String dir = relativeDir == null ? "" : relativeDir.trim().replace('\\', '/');
         if (dir.startsWith("/") || dir.contains("..") || dir.contains("\0")) {

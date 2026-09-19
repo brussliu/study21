@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.schedule.ScheduleConfigMapper">
+
+    <!--
+      スケジュール対象タスクが必要とする設定だけをまとめて読む（全設定は読まない）。
+      COM_設定情報 の GLOBAL 行だけを見る。
+    -->
+    <select id="findSettingValues" resultType="java.util.LinkedHashMap">
+        SELECT "設定キー" AS "settingKey", "設定値" AS "settingValue"
+          FROM public."COM_設定情報"
+         WHERE "スコープ" = 'GLOBAL'
+           AND "ページ区分" IN
+            <foreach collection="pageCodes" item="pageCode" open="(" separator="," close=")">
+                #{pageCode}
+            </foreach>
+           AND "設定キー" IN
+            <foreach collection="settingKeys" item="settingKey" open="(" separator="," close=")">
+                #{settingKey}
+            </foreach>
+    </select>
+
+    <!-- 有効／無効は BAT_バッチコントロール情報 が唯一の正（2 つ目のスイッチを作らない）。 -->
+    <select id="findControlStatuses" resultType="java.util.LinkedHashMap">
+        SELECT "バッチコード" AS "batchCode", "状態" AS "status"
+          FROM public."BAT_バッチコントロール情報"
+         WHERE "バッチコード" IN
+            <foreach collection="taskCodes" item="taskCode" open="(" separator="," close=")">
+                #{taskCode}
+            </foreach>
+    </select>
+</mapper>
