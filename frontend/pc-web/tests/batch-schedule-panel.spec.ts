@@ -43,6 +43,10 @@ function task(overrides: Partial<BatchScheduleTask> = {}): BatchScheduleTask {
     nextRunAt: '2026-09-19T12:36:00',
     nextRunLabel: '2026-09-19 12:36',
     configEffectiveFrom: null,
+    planVersion: 0,
+    fallbackFailures: 0,
+    nextFallbackCheckAt: null,
+    fallbackMessage: null,
     lastPlannedAt: null,
     ...overrides
   }
@@ -58,6 +62,8 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
     lastRefreshAt: '2026-09-19T03:30:00Z',
     lastRefreshError: null,
     nextRetryAt: null,
+    configMissing: false,
+    configMissingMessage: null,
     checkIntervalSeconds: 30,
     runningWorkers: 1,
     queuedWorkers: 2,
@@ -75,7 +81,10 @@ function payload(overrides: Record<string, unknown> = {}): Record<string, unknow
         offsetMinutes: null,
         examplePoints: [],
         nextRunAt: null,
-        nextRunLabel: '設定が不正なため次回実行はありません'
+        nextRunLabel: '設定が不正なため次回実行はありません',
+        fallbackFailures: 3,
+        nextFallbackCheckAt: '2026-09-19T03:31:00Z',
+        fallbackMessage: '設定が不正なため自動実行しません（3 回連続。次に 12:31:00 に再確認します）。'
       })
     ],
     ...overrides
@@ -173,7 +182,8 @@ describe('実行スケジュール（読み取り専用）', () => {
             dailyTime: '21:00',
             examplePoints: ['21:00'],
             nextRunLabel: '2026-09-20 21:00',
-            configEffectiveFrom: '2026-09-19 22:00'
+            configEffectiveFrom: '2026-09-19 22:00',
+            planVersion: 3
           }),
           task()
         ]
@@ -186,9 +196,33 @@ describe('実行スケジュール（読み取り専用）', () => {
     expect(changed.text()).toContain('2026-09-20 21:00')
     expect(changed.get('[data-testid="task-effective-from"]').text())
       .toContain('設定の適用: 2026-09-19 22:00')
+    expect(changed.get('[data-testid="task-effective-from"]').text()).toContain('設定版 3')
     // 実行設定を変えていないタスクには出さない（無関係な設定の保存で過去の補償を止めない）
     expect(wrapper.get('tbody tr[data-task-code="batL02"]')
       .find('[data-testid="task-effective-from"]').exists()).toBe(false)
+  })
+
+  it('設定が無い・不正のタスクは、動かない理由と次に確認する時刻を出す（托底の退避中）', async () => {
+    const context = await setup({
+      schedule: payload({
+        configMissing: true,
+        configMissingMessage: '実行設定が無い・不正なため自動実行しないバッチがあります（batL03）。次に 12:31:00 に再確認します。'
+      })
+    })
+    wrapper = context.wrapper
+
+    const invalid = wrapper.get('tbody tr[data-task-code="batL03"]')
+    expect(invalid.get('[data-testid="task-fallback"]').text())
+      .toContain('設定が不正なため自動実行しません')
+    expect(invalid.get('[data-testid="task-fallback"]').text()).toContain('12:31:00')
+    // 実行設定を変えていないタスクには出さない
+    expect(wrapper.get('tbody tr[data-task-code="batL02"]')
+      .find('[data-testid="task-fallback"]').exists()).toBe(false)
+
+    const missing = wrapper.get('[data-testid="schedule-config-missing"]')
+    expect(missing.text()).toContain('自動実行しないバッチがあります')
+    expect(missing.text()).toContain('12:31:00')
+    expect(missing.classes()).toContain('alert--warning')
   })
 
   it('設定が未設定・設定不正のタスクは状態と理由を出す', async () => {

@@ -124,6 +124,20 @@ public interface ClassroomService {
                                  ClassroomModels.ChunkManifest manifest);
 
     /**
+     * 結合（再生用の 1 本）の状態を読む（**画面が「保存済み／生成中／失敗」を出せるように**）。
+     *
+     * <p>分塊の数も返すので、結合に失敗していても「**音は残っている**」と言える。</p>
+     */
+    ClassroomModels.AssemblyView assembly(UserPrincipal user, long recordId);
+
+    /**
+     * 結合をやり直す（画面の【再生用を作り直す】）。
+     *
+     * <p>**分塊は 1 つも消さない**（作り直しの材料）。権限は録音の所有者だけ。</p>
+     */
+    ClassroomModels.AssemblyView retryAssembly(UserPrincipal user, long recordId);
+
+    /**
      * **引用されていない分塊**を片付ける（保持期限切れの掃除と同じ入口から呼ぶ）。
      *
      * <p>「ファイルは書けたがトランザクションが失敗した」分塊は、行から引用されないまま

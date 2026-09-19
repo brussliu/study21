@@ -49,6 +49,14 @@ public interface BatchService {
     void markQueuedAsFailed(long executionId, String message);
 
     /**
+     * スケジューラ用: **実行せずにスキップ**として閉じる（実行の直前に計画が無効になった等）。
+     *
+     * <p>失敗ではない（業務は正しく判断して実行しなかった）ので、履歴には {@code SKIPPED} と
+     * 理由を残す。待機中のまま残すと、次の計画実行点が確保できなくなる。</p>
+     */
+    void markQueuedAsSkipped(long executionId, String message);
+
+    /**
      * AI 生図の要求（`要求内容` の aiRequestId）に紐づく実行履歴を古い順に返す。
      * 工程ごとの実行 ID・状態・処理時間・エラーを画面に出すために使う。
      */

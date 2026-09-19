@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,6 +53,9 @@ public class ScheduleConfigService {
             Duration.ofSeconds(240), Duration.ofSeconds(300)};
 
     private static final DateTimeFormatter DATE_TIME_LABEL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+    /** 画面・ログに出す「次に再確認する時刻」（秒まで出す。30 秒周期なので分だけでは足りない）。 */
+    private static final DateTimeFormatter RETRY_LABEL = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     private static final Logger log = LoggerFactory.getLogger(ScheduleConfigService.class);
 
@@ -114,35 +118,68 @@ public class ScheduleConfigService {
     }
 
     /**
-     * このタスクの設定を**使える状態にしてから**返す（メモリ優先。無いときだけ DB 托底）。
+     * メモリに無い・不正なタスクがあれば、托底を**1 回だけ**試して最新のスナップショットを返す。
      *
-     * <p>托底は「まとめて 1 回」だけ（複数スレッドが同時に不足しても 1 回。ロック内で再確認）。
-     * 退避中は DB を引かない。</p>
+     * <p>托底は「足りないタスクぶんをまとめて 1 回」だけ（1 回の読み込みで**全タスクの状態**が
+     * 更新される）。同じ回・同時に何本要求されても読み込みは 1 回（ロック内で再確認）。
+     * タスクごとの退避中は DB を引かない。</p>
+     *
+     * <p>スケジューラは 1 回の検査でこれを 1 回だけ呼ぶ（タスクごとに呼ばない）。</p>
      */
-    public ScheduleConfigSnapshot ensureTaskConfig(String taskCode) {
+    public ScheduleConfigSnapshot ensureUsableConfig() {
         ScheduleConfigSnapshot current = snapshot.get();
-        if (current.statusOf(taskCode).usable()) {
-            return current;
+        if (allUsable(current)) {
+            return current;   // 設定がそろっている → メモリだけ（DB を引かない）
         }
-        if (isBackoffActive() || isFallbackBackoffActive(taskCode)) {
-            return current;
+        if (isBackoffActive()) {
+            return current;   // DB を読めなかったときの退避中
+        }
+        if (!anyFallbackDue(current)) {
+            return current;   // 足りないタスクはすべて「設定なし・不正」の退避中
         }
         long sequence = requestSequence.incrementAndGet();
         synchronized (refreshLock) {
             ScheduleConfigSnapshot again = snapshot.get();
-            if (again.statusOf(taskCode).usable() || isBackoffActive() || isFallbackBackoffActive(taskCode)) {
+            if (allUsable(again) || isBackoffActive() || !anyFallbackDue(again)) {
                 return again;   // 他のスレッドが先に読んだ／退避中
             }
-            refreshLocked("托底: " + taskCode, sequence);
-            ScheduleConfigSnapshot loaded = snapshot.get();
-            if (!loaded.statusOf(taskCode).usable()) {
-                // 読めたが、そのタスクの設定が無い・不正だった。
-                // 毎回 DB を引きに行かないよう、タスクごとに退避する
-                // （設定を保存すれば refresh が走って退避は消える）
-                noteFallbackMiss(taskCode);
-            }
-            return loaded;
+            refreshLocked("托底: 設定が足りません", sequence);
+            return snapshot.get();
         }
+    }
+
+    /**
+     * そのタスクの設定を使える状態にしてから返す（{@link #ensureUsableConfig()} と同じ規則）。
+     *
+     * <p>托底は 1 回の読み込みで全タスクを見るため、結果は他のタスクにも同時に反映される。</p>
+     */
+    public ScheduleConfigSnapshot ensureTaskConfig(String taskCode) {
+        return ensureUsableConfig();
+    }
+
+    /** 4 タスクすべての設定が使えるか。 */
+    private boolean allUsable(ScheduleConfigSnapshot current) {
+        for (String taskCode : catalog.taskCodes()) {
+            if (!current.statusOf(taskCode).usable()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 托底を試す時期が来ている「使えないタスク」があるか（タスクごとの退避を見る）。 */
+    private boolean anyFallbackDue(ScheduleConfigSnapshot current) {
+        Instant now = clock.instant();
+        for (String taskCode : catalog.taskCodes()) {
+            if (current.statusOf(taskCode).usable()) {
+                continue;
+            }
+            Instant next = fallbackNextCheckAt.get(taskCode);
+            if (next == null || !now.isBefore(next)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** そのタスクの托底が「設定なし・不正」で終わったときの、次の確認までの待ち。 */
@@ -151,9 +188,22 @@ public class ScheduleConfigService {
         fallbackNextCheckAt.put(taskCode, clock.instant().plus(backoff(failures)));
     }
 
-    private boolean isFallbackBackoffActive(String taskCode) {
-        Instant next = fallbackNextCheckAt.get(taskCode);
-        return next != null && clock.instant().isBefore(next);
+    /**
+     * 読み込みが成功したあとの、タスクごとの退避の更新。
+     *
+     * <p><b>使えるようになったタスクだけ**退避を消す</b>。</b>まだ設定が無い・不正なタスクの回数は
+     * **残して進める**（消してしまうと退避が 30 秒に戻り、30 秒ごとに DB を引き続ける）。
+     * これが「DB を読めなかった」ときの退避（{@link #isBackoffActive()}）とは別物である点に注意。</p>
+     */
+    private void updateFallbackStateAfterLoad(ScheduleConfigSnapshot published) {
+        for (String taskCode : catalog.taskCodes()) {
+            if (published.statusOf(taskCode).usable()) {
+                fallbackMisses.remove(taskCode);
+                fallbackNextCheckAt.remove(taskCode);
+            } else {
+                noteFallbackMiss(taskCode);
+            }
+        }
     }
 
     /**
@@ -212,9 +262,58 @@ public class ScheduleConfigService {
         List<ScheduleConfigReport.TaskStatus> tasks = catalog.taskCodes().stream()
                 .map(taskCode -> toTaskStatus(current, taskCode, now))
                 .toList();
+        List<String> missing = tasks.stream()
+                .filter(task -> !TaskConfigStatus.valueOf(task.status()).usable())
+                .map(ScheduleConfigReport.TaskStatus::taskCode)
+                .toList();
         return new ScheduleConfigReport(ZONE.getId(), current.version(), current.loadedAt(),
                 pendingRefresh, lastRefreshAt, lastRefreshError, nextRetryAt,
-                suppressedFailures.get(), tasks);
+                suppressedFailures.get(), configMissingMessage(missing), tasks);
+    }
+
+    /**
+     * 「設定が無い・不正で自動実行できないタスク」の案内（無ければ null）。
+     *
+     * <p>次にいつ確認するかも出す（退避で待っている間に「なぜ動かないのか」が分かるように）。</p>
+     */
+    private String configMissingMessage(List<String> missing) {
+        if (missing.isEmpty()) {
+            return null;
+        }
+        Optional<Instant> next = missing.stream()
+                .map(fallbackNextCheckAt::get)
+                .filter(java.util.Objects::nonNull)
+                .min(Instant::compareTo);
+        String when = next.map(instant -> "次に " + LocalDateTime.ofInstant(instant, ZONE).format(RETRY_LABEL)
+                + " に再確認します。").orElse("次の検査で再確認します。");
+        return "実行設定が無い・不正なため自動実行しないバッチがあります（" + String.join("、", missing) + "）。" + when;
+    }
+
+    /** 読み込み結果のログ（**限頻**。設定が無いタスクは退避の段階ごとに 1 行だけ出す）。 */
+    private void logRefreshResult(String reason, ScheduleConfigSnapshot published) {
+        List<String> unusable = new ArrayList<>();
+        int maxFailures = 0;
+        for (String taskCode : catalog.taskCodes()) {
+            TaskConfigStatus status = published.statusOf(taskCode);
+            if (status.usable()) {
+                continue;
+            }
+            unusable.add(taskCode + "（" + status.label() + "）");
+            maxFailures = Math.max(maxFailures, fallbackMisses.getOrDefault(taskCode, 0));
+        }
+        if (unusable.isEmpty()) {
+            log.info("バッチのスケジュール設定を反映しました。reason={} version={} {}", reason,
+                    published.version(), report().summarize());
+            return;
+        }
+        String message = "バッチのスケジュール設定を反映しましたが、自動実行できないタスクがあります。"
+                + "reason={} version={} tasks={} 設定を確認してください（退避で自動的に再確認します）。";
+        if (maxFailures <= BACKOFF.length) {
+            // 退避の段階が変わるたびに 1 行（毎回の検査で同じことを出さない）
+            log.warn(message, reason, published.version(), unusable);
+        } else {
+            log.debug(message + " failures={}", reason, published.version(), unusable, maxFailures);
+        }
     }
 
     // ------------------------------------------------------------------ 内部
@@ -227,7 +326,7 @@ public class ScheduleConfigService {
                     loader.load(catalog.requiredSettingKeys(), catalog.taskCodes());
             ScheduleConfigSnapshot built = build(data, now);
             ScheduleConfigSnapshot published = built.next(now,
-                    built.tasks(), built.statuses(), null);
+                    built.tasks(), built.statuses(), built.planVersions(), null);
             snapshot.set(published);
             // **この要求自身の番号**を発行済みにする。requestSequence.get() を使うと、
             // まだ読み込んでいない後続の要求まで「発行済み」になり、
@@ -238,11 +337,9 @@ public class ScheduleConfigService {
             pendingRefresh = false;
             lastRefreshError = null;
             suppressedFailures.set(0);
-            // 反映できたので、タスクごとの托底の退避も消す
-            fallbackMisses.clear();
-            fallbackNextCheckAt.clear();
-            log.info("バッチのスケジュール設定を反映しました。reason={} version={} {}", reason,
-                    published.version(), report().summarize());
+            // タスクごとの退避は「使えるようになったタスクだけ」消す（設定が無いタスクの回数は残す）
+            updateFallbackStateAfterLoad(published);
+            logRefreshResult(reason, published);
             return RefreshResult.published(published.version());
         } catch (ScheduleConfigLoader.ScheduleConfigLoadException cause) {
             return onFailure(reason, cause);
@@ -279,16 +376,21 @@ public class ScheduleConfigService {
     }
 
     /**
-     * 読んだ値からスナップショットを作る。
+     * 読んだ値からスナップショットを作る（**何も書かない**）。
      *
-     * <p><b>設定の適用時刻（effectiveFrom）</b>をここで決める。利用者が実行時刻・間隔・ずらしを変えたら、
-     * その時刻**より前**の計画実行点は実行しない（22:00 に「停止 23:30 → 21:00」と変えても、
-     * 21:00 の点を今さら実行しないため）。サービス再起動のときは DB に保存した適用時刻を使い、
-     * **「利用者の設定変更」と「再起動の補執行」を区別**する（再起動では適用時刻を進めない）。</p>
+     * <p><b>設定の適用時刻（effectiveFrom）</b>は DB が正（{@code BAT_スケジュール状態情報}）。
+     * 利用者が実行時刻・間隔・ずらし・有効／無効を変えたとき、**設定値の保存と同じトランザクション**で
+     * 適用時刻と計画バージョンが書かれている（{@code ScheduleTimingRecorder}）。
+     * ここ（キャッシュの読み込み）で補って書くと、書けたかどうか分からないまま
+     * 「新しい設定＋古い適用時刻」が残り、過去の計画実行点を実行しかねない。</p>
+     *
+     * <p>サービス再起動のときは DB の適用時刻をそのまま使う（＝「利用者の設定変更」と
+     * 「再起動の補執行」を区別する。再起動では適用時刻を進めない）。</p>
      */
     private ScheduleConfigSnapshot build(ScheduleConfigLoader.ScheduleSourceData data, Instant loadedAt) {
         Map<String, TaskSchedule> tasks = new LinkedHashMap<>();
         Map<String, TaskConfigStatus> statuses = new LinkedHashMap<>();
+        Map<String, Long> planVersions = new LinkedHashMap<>();
         ScheduleConfigSnapshot previous = snapshot.get();
         boolean firstLoad = !previous.loadedOnce();
         LocalDateTime nowLocal = LocalDateTime.ofInstant(loadedAt, ZONE);
@@ -297,41 +399,46 @@ public class ScheduleConfigService {
             String taskCode = rule.taskCode();
             Resolved resolved = resolve(rule, data);
             statuses.put(taskCode, resolved.status());
+            planVersions.put(taskCode, data.planVersions().getOrDefault(taskCode, 0L));
             if (resolved.schedule().isEmpty()) {
                 continue;
             }
             TaskSchedule schedule = resolved.schedule().orElseThrow();
             TaskSchedule before = previous.taskOf(taskCode).orElse(null);
+            LocalDateTime dbEffective = data.configEffectiveFrom().get(taskCode);
             LocalDateTime effectiveFrom;
             if (firstLoad) {
-                // 起動時: DB に保存されている適用時刻を引き継ぐ（再起動で過去の点を実行しない）
-                effectiveFrom = data.configEffectiveFrom().get(taskCode);
+                // 起動時: DB に保存されている適用時刻をそのまま使う（再起動で過去の点を実行しない）
+                effectiveFrom = dbEffective;
             } else if (before != null && before.sameTiming(schedule)) {
-                // 変わっていない → 前の適用時刻をそのまま
-                effectiveFrom = before.effectiveFrom();
+                // 実行設定は変わっていない → DB とメモリの**遅い方**（安全側。過去の点を実行しない）
+                effectiveFrom = laterOf(dbEffective, before.effectiveFrom());
+            } else if (data.planVersions().getOrDefault(taskCode, 0L) > previous.planVersionOf(taskCode)
+                    && dbEffective != null) {
+                // **保存トランザクションが一緒に書いた適用時刻**（設定値と同じ版）を使う
+                effectiveFrom = dbEffective;
             } else {
-                // **利用者が設定を変えた**（または未設定から使えるようになった）→ いまから有効
+                // 設定は変わったのに適用時刻が記録されていない＝アプリの保存経路以外で変わった
+                // （DB を直接書き換えた等）。記録はせず、**メモリだけで**「いまから」にする
                 effectiveFrom = nowLocal;
-                persistEffectiveFrom(taskCode, effectiveFrom);
+                log.warn("実行設定がアプリの保存経路以外で変更されました。適用時刻を記録できないため、"
+                        + "いまから新しい設定として扱います（次の保存で記録されます）。taskCode={}", taskCode);
             }
             tasks.put(taskCode, schedule.withEffectiveFrom(effectiveFrom));
         }
         // loadedAt は refresh 側で入れるのでここでは現在の版をそのまま使う
-        return new ScheduleConfigSnapshot(previous.version(), loadedAt, ZONE, tasks, statuses, null);
+        return new ScheduleConfigSnapshot(previous.version(), loadedAt, ZONE, tasks, statuses, planVersions, null);
     }
 
-    /**
-     * 設定の適用時刻を DB に保存する（再起動しても「この時刻より前の点は実行しない」を保つ）。
-     * 保存に失敗しても反映そのものは続ける（メモリでは効いている。再起動で失われる可能性を警告する）。
-     */
-    private void persistEffectiveFrom(String taskCode, LocalDateTime effectiveFrom) {
-        try {
-            loader.saveConfigEffectiveFrom(taskCode, effectiveFrom);
-            log.info("実行設定の適用時刻を記録しました。taskCode={} effectiveFrom={}", taskCode, effectiveFrom);
-        } catch (RuntimeException cause) {
-            log.warn("実行設定の適用時刻を保存できませんでした（再起動で過去の計画実行点を実行する可能性があります）。"
-                    + "taskCode={} effectiveFrom={} reason={}", taskCode, effectiveFrom, messageOf(cause));
+    /** 2 つのうち遅い方（null は「制限なし」なので、値がある方を採る）。 */
+    private static LocalDateTime laterOf(LocalDateTime a, LocalDateTime b) {
+        if (a == null) {
+            return b;
         }
+        if (b == null) {
+            return a;
+        }
+        return a.isAfter(b) ? a : b;
     }
 
     private Resolved resolve(ScheduleTaskRule rule, ScheduleConfigLoader.ScheduleSourceData data) {
@@ -365,9 +472,14 @@ public class ScheduleConfigService {
                                                          LocalDateTime now) {
         TaskConfigStatus status = current.statusOf(taskCode);
         TaskSchedule schedule = current.tasks().get(taskCode);
+        int failures = fallbackMisses.getOrDefault(taskCode, 0);
+        Instant nextCheck = fallbackNextCheckAt.get(taskCode);
+        String fallback = status.usable() ? null : fallbackMessage(status, failures, nextCheck);
+        long planVersion = current.planVersionOf(taskCode);
         if (schedule == null) {
             return new ScheduleConfigReport.TaskStatus(taskCode, status.name(), status.label(), null,
-                    status.label(), null, null, null, List.of(), null, status.label(), null);
+                    status.label(), null, null, null, List.of(), null, status.label(), null,
+                    failures, nextCheck, fallback, planVersion);
         }
         // 画面の「次回実行時刻」は**スケジューラが実際に実行する点**と同じ規則で出す
         // （設定の適用時刻より前の点は実行しないため、そこは飛ばす）
@@ -377,7 +489,18 @@ public class ScheduleConfigService {
                 schedule.kind() == ScheduleKind.DAILY ? schedule.dailyTime().toString() : null,
                 schedule.pointsOfDay(now.toLocalDate()).stream().map(LocalTime::toString).toList(),
                 next, next.format(DATE_TIME_LABEL),
-                schedule.effectiveFrom() == null ? null : schedule.effectiveFrom().format(DATE_TIME_LABEL));
+                schedule.effectiveFrom() == null ? null : schedule.effectiveFrom().format(DATE_TIME_LABEL),
+                failures, nextCheck, fallback, planVersion);
+    }
+
+    /** タスク 1 件の「動かない理由と次にいつ確認するか」。 */
+    private String fallbackMessage(TaskConfigStatus status, int failures, Instant nextCheck) {
+        if (nextCheck == null) {
+            return "設定が" + (status == TaskConfigStatus.MISSING ? "無い" : "不正") + "ため自動実行しません。";
+        }
+        return "設定が" + (status == TaskConfigStatus.MISSING ? "無い" : "不正")
+                + "ため自動実行しません（" + failures + " 回連続。次に "
+                + LocalDateTime.ofInstant(nextCheck, ZONE).format(RETRY_LABEL) + " に再確認します）。";
     }
 
     private static String messageOf(Throwable cause) {

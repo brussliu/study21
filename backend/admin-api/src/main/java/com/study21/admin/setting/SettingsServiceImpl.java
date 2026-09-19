@@ -31,6 +31,11 @@ public class SettingsServiceImpl implements SettingsService {
     private final SettingValueMapper valueMapper;
     /** ドメイン固有の検証（プロンプトの変数など）。無い構成でも動く。 */
     private final List<SettingValueValidator> valueValidators;
+    /**
+     * 保存トランザクションの中で呼ぶフック（実行スケジュールの適用時刻・計画バージョンなど）。
+     * 無い構成でも動く。
+     */
+    private final List<SettingSaveTransactionHook> saveHooks;
 
     /**
      * Spring が使う入口。
@@ -40,17 +45,27 @@ public class SettingsServiceImpl implements SettingsService {
      */
     @Autowired
     public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper,
-                               ObjectProvider<SettingValueValidator> valueValidators) {
+                               ObjectProvider<SettingValueValidator> valueValidators,
+                               ObjectProvider<SettingSaveTransactionHook> saveHooks) {
         this(catalogMapper, valueMapper,
-                valueValidators == null ? List.of() : valueValidators.orderedStream().toList());
+                valueValidators == null ? List.of() : valueValidators.orderedStream().toList(),
+                saveHooks == null ? List.of() : saveHooks.orderedStream().toList());
     }
 
-    /** 検証を明示的に渡す入口（テストと、検証を持たない構成）。 */
+    /** 検証だけを明示的に渡す入口（フック無し。テストと、検証を持たない構成）。 */
     public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper,
                                List<SettingValueValidator> valueValidators) {
+        this(catalogMapper, valueMapper, valueValidators, List.of());
+    }
+
+    /** 検証とフックを明示的に渡す入口（テスト用）。 */
+    public SettingsServiceImpl(SettingCatalogMapper catalogMapper, SettingValueMapper valueMapper,
+                               List<SettingValueValidator> valueValidators,
+                               List<SettingSaveTransactionHook> saveHooks) {
         this.catalogMapper = catalogMapper;
         this.valueMapper = valueMapper;
         this.valueValidators = valueValidators == null ? List.of() : valueValidators;
+        this.saveHooks = saveHooks == null ? List.of() : saveHooks;
     }
 
     @Override
@@ -210,6 +225,8 @@ public class SettingsServiceImpl implements SettingsService {
 
         List<SettingValueEntity> upserts = new ArrayList<>();
         Map<String, String> saved = new LinkedHashMap<>();
+        // 値が**変わった**項目だけを集める（保存トランザクションの中で使うフックに渡す）
+        Map<String, Map<String, String>> changedByPage = new LinkedHashMap<>();
         for (Map.Entry<String, Map<String, String>> pageEntry : byPage.entrySet()) {
             String pageCode = pageEntry.getKey();
             Map<String, SettingPageFields.FieldRef> refs = pageEntry.getValue().keySet().stream()
@@ -256,6 +273,10 @@ public class SettingsServiceImpl implements SettingsService {
                 entity.setUpdatedBy(operatorId);
                 upserts.add(entity);
                 saved.put(fieldKey, normalized);
+                if (existing == null || !java.util.Objects.equals(existing.getSettingValue(), normalized)) {
+                    changedByPage.computeIfAbsent(pageCode, k -> new LinkedHashMap<>())
+                            .put(ref.settingKey(), normalized);
+                }
             }
         }
 
@@ -263,6 +284,12 @@ public class SettingsServiceImpl implements SettingsService {
             throw new SettingsValidationException(errors);
         }
         upserts.forEach(valueMapper::upsertGlobal);
+        // 保存と**同じトランザクション**で書かないと困るもの（実行スケジュールの適用時刻など）を、
+        // コミット前のここで書く。フックが例外を投げたら保存ごとロールバックする（片方だけ残さない）
+        for (SettingSaveTransactionHook hook : saveHooks) {
+            hook.onSettingsSaved(new SettingSaveTransactionHook.SettingSaveEvent(
+                    operatorId, Map.copyOf(changedByPage)));
+        }
         return saved;
     }
 

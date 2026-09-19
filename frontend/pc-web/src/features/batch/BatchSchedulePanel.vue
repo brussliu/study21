@@ -16,7 +16,9 @@ import '@/features/batch/batch.css'
  *   * 時計（zone = Asia/Tokyo）・設定の版・読み込み時刻
  *   * タスクごとの**実行タイミング**（`describe`）と**次回実行時刻**（`nextRunLabel`）
  *   * 実行時間の例（`examplePoints`）と、実行待ち／実行中の本数
- *   * **設定の状態**（有効／未設定／設定不正。`MISSING` / `INVALID` は**自動実行しない**）
+ *   * **設定の状態**（有効／未設定／設定不正。`MISSING` / `INVALID` は**自動実行しない**。
+ *     托底の退避中は「次にいつ確認するか」も出す）
+ *   * **実行設定の計画バージョン**（設定値の保存と同じトランザクションで進む版）
  *   * **保存済み・実行設定への反映待ち**（`pendingRefresh`。理由と次の再試行を目立たせる）
  *
  * **Cron は編集させない**（入力欄を出さない）。有効／無効の切替もしない
@@ -155,6 +157,17 @@ onMounted(load)
         </span>
       </p>
 
+      <!-- 設定が無い・不正で自動実行できないタスクがあるときの案内（次の確認時刻つき） -->
+      <p
+        v-if="schedule.configMissing"
+        class="alert alert--warning batch-schedule__missing"
+        data-testid="schedule-config-missing"
+        role="status"
+      >
+        <AppIcon name="alert" size="sm" />
+        <span>{{ schedule.configMissingMessage }}</span>
+      </p>
+
       <p
         v-if="reloadResult"
         class="batch-schedule__result"
@@ -183,6 +196,15 @@ onMounted(load)
               <td class="cell-strong">{{ task.taskCode }}</td>
               <td>
                 <span class="badge" :class="scheduleStatusBadgeClass(task.status)">{{ task.statusLabel }}</span>
+                <!-- 設定が無い・不正で自動実行できないときは、理由と**次にいつ確認するか**を出す
+                     （托底は 30→60→120→240→300 秒と退避するので、待っている間が見える） -->
+                <span
+                  v-if="task.fallbackMessage"
+                  class="batch-schedule__fallback"
+                  data-testid="task-fallback"
+                >
+                  {{ task.fallbackMessage }}
+                </span>
               </td>
               <td class="align-center">
                 <!-- 表示だけ（スイッチは置かない）。有効／無効の唯一の正は
@@ -199,7 +221,7 @@ onMounted(load)
                   class="batch-schedule__effective"
                   data-testid="task-effective-from"
                 >
-                  設定の適用: {{ task.configEffectiveFrom }} 以降
+                  設定の適用: {{ task.configEffectiveFrom }} 以降（設定版 {{ task.planVersion }}）
                 </span>
               </td>
               <td class="cell-muted">{{ task.examplePoints.join(' / ') }}</td>

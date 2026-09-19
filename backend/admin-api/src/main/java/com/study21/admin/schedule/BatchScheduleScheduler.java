@@ -20,13 +20,15 @@ import java.util.List;
  * <ol>
  *   <li>メモリのスナップショットを 1 枚取り、**その 1 枚だけ**で各タスクの計画実行点を決める
  *       （検査の途中で設定が入れ替わって、古い間隔と新しい時刻が混ざらない）。</li>
- *   <li>メモリに無いタスクだけ {@link ScheduleConfigService#ensureTaskConfig} で DB 托底
- *       （退避中は DB を引かない）。設定が無い・不正なタスクは**実行しない**（隠れた既定値を使わない）。</li>
+ *   <li>設定が足りないタスクがあれば {@link ScheduleConfigService#ensureUsableConfig()} を
+ *       **1 回だけ**呼んで托底する（タスクごとに読みに行かない。退避中は DB を引かない）。</li>
  *   <li>「いま以前で最後に到来した計画実行点」を確保（claim）する。**最新の 1 点だけ**なので、
- *       何度取りこぼしても一括の補跑にはならない（L は最大 1 回の合并、R は最新の有効な 1 点）。</li>
+ *       何度取りこぼしても一括の補跑にはならない（L は最新の 1 点に合并、R は最新の有効な 1 点）。</li>
+ *   <li>「実行してよいか」の判定は {@link SchedulePlanGuard} に一本化する（再起動の復旧・実行直前の
+ *       再検証と同じ規則。同じ判定を 3 か所に書かない）。</li>
  *   <li>確保できたものだけ実行記録を作り、業務は {@link BatchScheduleExecutor} に渡す
  *       （検査のスレッドは ffmpeg・AI・ネット制御で塞がない）。</li>
- *   <li>無効なタスクは**計画だけ進める**（有効に戻したときに古い計画実行点を実行しない）。</li>
+ *   <li>無効なタスク・適用時刻より前の点は**計画だけ進める**（有効に戻したときに古い点を実行しない）。</li>
  * </ol>
  *
  * <p>時刻は常に Asia/Tokyo（サーバーの OS タイムゾーンに依存しない）。</p>
@@ -40,6 +42,7 @@ public class BatchScheduleScheduler {
     private final ScheduledTriggerStore triggerStore;
     private final BatchScheduleExecutor executor;
     private final ScheduleRuleCatalog catalog;
+    private final SchedulePlanGuard planGuard;
     private final Clock clock;
 
     /** 設定が読めないときの案内ログを出しすぎないための間隔（この回数ごとに 1 行）。 */
@@ -52,8 +55,9 @@ public class BatchScheduleScheduler {
                                   ScheduledTriggerStore triggerStore,
                                   BatchScheduleExecutor executor,
                                   ScheduleRuleCatalog catalog,
+                                  SchedulePlanGuard planGuard,
                                   @Value("${study21.batch.schedule.skip-log-every:20}") int skipLogEvery) {
-        this(configService, triggerStore, executor, catalog, skipLogEvery,
+        this(configService, triggerStore, executor, catalog, planGuard, skipLogEvery,
                 Clock.system(ScheduleConfigService.ZONE));
     }
 
@@ -62,12 +66,14 @@ public class BatchScheduleScheduler {
                                   ScheduledTriggerStore triggerStore,
                                   BatchScheduleExecutor executor,
                                   ScheduleRuleCatalog catalog,
+                                  SchedulePlanGuard planGuard,
                                   int skipLogEvery,
                                   Clock clock) {
         this.configService = configService;
         this.triggerStore = triggerStore;
         this.executor = executor;
         this.catalog = catalog;
+        this.planGuard = planGuard;
         this.skipLogEvery = Math.max(1, skipLogEvery);
         this.clock = clock;
     }
@@ -93,21 +99,15 @@ public class BatchScheduleScheduler {
         // 反映できていない設定があれば、退避の期限が来ていれば読み直す
         configService.retryPendingIfDue();
 
-        ScheduleConfigSnapshot snapshot = configService.snapshot();
+        // 設定が足りないタスクがあれば**まとめて 1 回**托底する（タスクごとに読みに行かない）
+        ScheduleConfigSnapshot snapshot = configService.ensureUsableConfig();
         LocalDateTime nowLocal = LocalDateTime.ofInstant(now, ScheduleConfigService.ZONE);
         List<String> triggered = new ArrayList<>();
         List<String> skipped = new ArrayList<>();
         List<String> deferred = new ArrayList<>();
 
-        // メモリに無い（未読込・未設定・不正）タスクだけ托底を試す
-        for (ScheduleTaskRule rule : catalog.rules()) {
-            if (!snapshot.statusOf(rule.taskCode()).usable()) {
-                snapshot = configService.ensureTaskConfig(rule.taskCode());
-            }
-        }
-
         // (1) 種別 R（ネット利用の開始／終了）は**1 つのネット状態の切替**として扱う
-        runNetworkGroup(snapshot, nowLocal, triggered, skipped, deferred);
+        runNetworkGroup(snapshot, now, nowLocal, triggered, skipped, deferred);
 
         // (2) 種別 L（学習モニターの取込・分析）はタスクごと
         for (ScheduleTaskRule rule : catalog.rules()) {
@@ -121,25 +121,12 @@ public class BatchScheduleScheduler {
                 skipped.add(taskCode);
                 continue;
             }
-            // 設定の適用時刻より前の点は実行しない（利用者が間隔・ずらしを変えた直後の過去の点）
+            // 適用時刻より前の点は実行しない（利用者が間隔・ずらしを変えた直後の過去の点）
             LocalDateTime due = schedule.previousRunnablePointAtOrBefore(nowLocal).orElse(null);
-            if (due == null) {
+            if (due == null || triggerStore.alreadyClaimed(taskCode, due)) {
                 continue;
             }
-            if (!schedule.enabled()) {
-                // 無効の間は計画だけ進める（実行記録は残さない＝履歴をゴミで埋めない）
-                triggerStore.advanceWithoutRun(taskCode, due);
-                continue;
-            }
-            if (triggerStore.alreadyClaimed(taskCode, due)) {
-                continue;
-            }
-            Long executionId = triggerStore.claimAndRecord(taskCode, due, "L");
-            if (executionId == null) {
-                continue;   // 他の実行（別インスタンス・前の検査）が先に確保した
-            }
-            executor.submit(taskCode, executionId);
-            triggered.add(taskCode + "@" + due);
+            claimAndRun(taskCode, due, now, triggered, skipped, null);
         }
 
         if (!triggered.isEmpty()) {
@@ -159,11 +146,8 @@ public class BatchScheduleScheduler {
      * 実行すると、適用する順番によっては「開始したのに止まっている」という誤った状態になる。
      * そこで「いま以前で最後に到来した 1 点（＝現在有効なはずのネット状態）」だけを実行し、
      * それより古い点は**実行せずに計画だけ進める**（逆向きの操作を後から走らせない）。</p>
-     *
-     * <p>最新の点が「無効」または「設定の適用時刻より前」なら、古い点も実行しない
-     * （利用者が止めた／設定を変えた直後に、古い状態を適用しないため）。</p>
      */
-    private void runNetworkGroup(ScheduleConfigSnapshot snapshot, LocalDateTime nowLocal,
+    private void runNetworkGroup(ScheduleConfigSnapshot snapshot, Instant now, LocalDateTime nowLocal,
                                  List<String> triggered, List<String> skipped, List<String> deferred) {
         List<NetworkCandidate> candidates = new ArrayList<>();
         for (ScheduleTaskRule rule : catalog.rules()) {
@@ -180,7 +164,7 @@ public class BatchScheduleScheduler {
             if (due == null || triggerStore.alreadyClaimed(taskCode, due)) {
                 continue;
             }
-            candidates.add(new NetworkCandidate(taskCode, schedule, due));
+            candidates.add(new NetworkCandidate(taskCode, due));
         }
         if (candidates.isEmpty()) {
             return;
@@ -203,49 +187,50 @@ public class BatchScheduleScheduler {
                         candidate.taskCode(), candidate.due());
             }
         }
+        claimAndRun(newest.taskCode(), newest.due(), now, triggered, skipped, deferred);
+    }
 
-        if (!newest.schedule().canRunAt(newest.due())) {
-            // 設定の適用時刻より前＝利用者が設定を変えた直後。過去の点は実行しない
-            triggerStore.advanceWithoutRun(newest.taskCode(), newest.due());
-            log.info("設定変更後なので、過去の計画実行点は実行しません。taskCode={} due={} effectiveFrom={}",
-                    newest.taskCode(), newest.due(), newest.schedule().effectiveFrom());
+    /**
+     * 判定（{@link SchedulePlanGuard}）してから確保・投入する。
+     *
+     * <p>実行しないと判定された点は**計画だけ進める**（無効・適用時刻より前・新しい点に追い越された等）。</p>
+     */
+    private void claimAndRun(String taskCode, LocalDateTime due, Instant now,
+                             List<String> triggered, List<String> skipped, List<String> deferred) {
+        SchedulePlanGuard.PlanDecision decision =
+                planGuard.decide(taskCode, due, now, SchedulePlanGuard.Stage.SCHEDULING);
+        if (decision.deferred()) {
+            if (deferred != null) {
+                deferred.add(taskCode);
+            }
+            log.info("{} taskCode={} due={} configVersion={}", decision.reason(), taskCode, due,
+                    decision.configVersion());
             return;
         }
-        if (!newest.schedule().enabled()) {
-            // いま有効なはずの状態の切替が無効 → 古い状態も適用しない（計画だけ進める）
-            triggerStore.advanceWithoutRun(newest.taskCode(), newest.due());
+        if (!decision.allowed()) {
+            if (triggerStore.advanceWithoutRun(taskCode, due)) {
+                log.info("計画実行点を実行せずに進めました。taskCode={} due={} reason={} configVersion={}",
+                        taskCode, due, decision.reason(), decision.configVersion());
+            }
             return;
         }
-        // もう一方のネット切替が実行中なら、今回は見送る（点は確保しない＝次の検査で再挑戦）
-        String sibling = siblingTaskCode(newest.taskCode());
-        if (sibling != null && triggerStore.isTaskRunning(sibling)) {
-            deferred.add(newest.taskCode());
-            log.info("もう一方のネット切替が実行中のため、今回は見送ります（次の検査で再挑戦）。taskCode={} running={}",
-                    newest.taskCode(), sibling);
-            return;
-        }
-
-        Long executionId = triggerStore.claimAndRecord(newest.taskCode(), newest.due(), "R");
+        Long executionId = triggerStore.claimAndRecord(taskCode, due, batchTypeOf(taskCode));
         if (executionId == null) {
-            return;   // 他の実行が先に確保した
+            return;   // 他の実行（別インスタンス・前の検査）が先に確保した
         }
-        executor.submit(newest.taskCode(), executionId);
-        triggered.add(newest.taskCode() + "@" + newest.due());
+        executor.submit(taskCode, executionId, due);
+        triggered.add(taskCode + "@" + due);
     }
 
-    /** ネット利用のもう一方のタスク（batR03 ⇄ batR04）。 */
-    private String siblingTaskCode(String taskCode) {
-        if ("batR03".equals(taskCode)) {
-            return "batR04";
-        }
-        if ("batR04".equals(taskCode)) {
-            return "batR03";
-        }
-        return null;
+    /** 実行記録の 起動種別（R = 定時 / L = 循環）。 */
+    private String batchTypeOf(String taskCode) {
+        return catalog.find(taskCode)
+                .map(rule -> rule.kind() == ScheduleKind.DAILY ? "R" : "L")
+                .orElse("C");
     }
 
-    /** 種別 R の候補（タスク・その設定・いま以前で最後の計画実行点）。 */
-    private record NetworkCandidate(String taskCode, TaskSchedule schedule, LocalDateTime due) {
+    /** 種別 R の候補（タスクと、いま以前で最後の計画実行点）。 */
+    private record NetworkCandidate(String taskCode, LocalDateTime due) {
     }
 
     /** いまの時計（Asia/Tokyo）。 */
@@ -259,7 +244,7 @@ public class BatchScheduleScheduler {
      * @param checkedAt    検査時刻（Asia/Tokyo）
      * @param configVersion 使ったスナップショットの版
      * @param triggered    確保して実行を投入した計画実行点（{@code taskCode@yyyy-MM-ddTHH:mm}）
-     * @param skipped      設定が無い・不正で実行しなかったタスク
+     * @param skipped      設定が無い・不正、または実行しないと判定したタスク
      * @param deferred     もう一方のネット切替が実行中のため、次の検査に回したタスク
      * @param runningWorkers 実行中の業務の本数
      * @param queuedWorkers  実行待ちの本数

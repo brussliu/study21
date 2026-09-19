@@ -148,6 +148,17 @@ export interface BatchScheduleTask {
    * 起動時の読み込みなど、まだ変更していないときは null。
    */
   configEffectiveFrom: string | null
+  /**
+   * 実行設定の**計画バージョン**（時刻・間隔・ずらし・有効／無効を変えるたびに 1 つ進む）。
+   * 設定値の保存と**同じトランザクション**で進むので、適用時刻と必ず揃う。
+   */
+  planVersion: number
+  /** 「設定が無い・不正」が続いた回数（托底で読み直しを試した回数。使える状態なら 0）。 */
+  fallbackFailures: number
+  /** 次に托底で設定を読み直す時刻（退避中でなければ null）。 */
+  nextFallbackCheckAt: string | null
+  /** 動かない理由と次にいつ確認するか（使える状態なら null）。 */
+  fallbackMessage: string | null
   /** この画面が最後に計画実行点を確保した時刻（未実行は null）。 */
   lastPlannedAt: string | null
 }
@@ -170,6 +181,10 @@ export interface BatchScheduleResult {
   lastRefreshError: string | null
   /** 次の自動再試行の予定時刻（待避中でなければ null）。 */
   nextRetryAt: string | null
+  /** 設定が無い・不正で自動実行できないタスクがあるか。 */
+  configMissing: boolean
+  /** その案内（次にいつ確認するかを含む。無ければ null）。 */
+  configMissingMessage: string | null
   /** スケジューラが設定を確認する間隔（秒）。 */
   checkIntervalSeconds: number
   /** 実行中の本数。 */

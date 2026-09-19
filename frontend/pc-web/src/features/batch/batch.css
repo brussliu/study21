@@ -139,6 +139,14 @@
   font-size: var(--fs-xs);
 }
 
+/* 設定が無い・不正のときの「動かない理由と次に確認する時刻」。状態バッジの下に小さく出す。 */
+.batch-schedule__fallback {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+  color: var(--color-text-muted);
+}
+
 /* 実行設定の適用時刻（この時刻より前の計画実行点は実行しない）。次回実行の下に小さく出す。 */
 .batch-schedule__effective {
   display: block;

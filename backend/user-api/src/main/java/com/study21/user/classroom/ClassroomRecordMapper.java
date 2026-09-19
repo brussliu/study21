@@ -39,6 +39,30 @@ public interface ClassroomRecordMapper {
                       @Param("operator") Long operator,
                       @Param("version") int version);
 
+    /**
+     * 収尾（終了処理）の**鍵を取る**: 状態を {@code TRANSCRIBING}（収尾中）にする。
+     *
+     * <p>`状態 = RECORDING` のときだけ 1 行を更新する（**原子的な確保**）。0 行なら
+     * 「別の要求が先に収尾を始めた・すでに終わっている」なので、呼び側は 409 で断る。
+     * これで「確認したあとに未調整のアップロードが入る」競合を作らない
+     * （状態そのものが排他になる）。</p>
+     *
+     * @return 1 = 確保できた / 0 = 取れなかった
+     */
+    int claimFinalize(@Param("recordId") long recordId, @Param("operator") long operator);
+
+    /**
+     * 収尾（終了処理）を**完了**させる: 状態を {@code STOPPED} にして長さ・保持期限を書く。
+     *
+     * <p>確保（{@link #claimFinalize}）でバージョンが進むので、**そのバージョン**を渡す
+     * （収尾のあいだに別の操作が入っていないことを確かめる）。</p>
+     */
+    int markFinalized(@Param("recordId") long recordId,
+                      @Param("durationSeconds") int durationSeconds,
+                      @Param("retentionDays") int retentionDays,
+                      @Param("operator") long operator,
+                      @Param("version") int version);
+
     /** 最初の分塊で音声ファイルの保存先を確定する。 */
     int updateAudio(@Param("recordId") long recordId,
                     @Param("path") String path,

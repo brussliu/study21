@@ -17,6 +17,8 @@ import org.springframework.http.MediaType;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.util.StreamUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -256,6 +258,36 @@ public class ClassroomController {
             @RequestParam(value = "page", defaultValue = "1") int page,
             @RequestParam(value = "size", defaultValue = "20") int size) {
         return ApiResponse.ok(classroomService.list(user, status, page, size));
+    }
+
+    /**
+     * 音声の一覧がそろっていないときの応答（**409 + 構造化した欠落の一覧**）。
+     *
+     * <p>画面はここから `data` を読み取って「足りない連番」を出す（**日本語の文面で判断しない**）。</p>
+     */
+    @ExceptionHandler(com.study21.user.classroom.ChunkChecklistException.class)
+    public ResponseEntity<ApiResponse<ClassroomModels.ChunkChecklist>> handleChunkChecklist(
+            com.study21.user.classroom.ChunkChecklistException exception) {
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CONFLICT)
+                .body(ApiResponse.error(exception.getErrorCode().code(), exception.getMessage(),
+                        exception.checklist()));
+    }
+
+    /** 結合（再生用の 1 本）の状態（画面が「生成中／失敗」を出す）。 */
+    @GetMapping("/{recordId}/assembly")
+    public ApiResponse<ClassroomModels.AssemblyView> assembly(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId) {
+        return ApiResponse.ok(classroomService.assembly(user, recordId));
+    }
+
+    /** 結合をやり直す（分塊は消さない。所有者だけ）。 */
+    @PostMapping("/{recordId}/assembly/retry")
+    public ApiResponse<ClassroomModels.AssemblyView> retryAssembly(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId) {
+        return ApiResponse.ok(classroomService.retryAssembly(user, recordId),
+                "再生用の音声を作り直しました。");
     }
 
     @PostMapping("/{recordId}/end")

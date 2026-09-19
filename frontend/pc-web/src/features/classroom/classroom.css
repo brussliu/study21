@@ -814,6 +814,44 @@
   word-break: break-word;
 }
 
+/* 画面内の確認（不完全なまま終える・保存が途中で移動する） */
+.cr-confirm {
+  margin: 0 var(--sp-5) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border-strong);
+  border-left: 4px solid var(--color-warning, #d97706);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.cr-confirm__title {
+  margin: 0 0 var(--sp-1);
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  word-break: break-word;
+}
+
+.cr-confirm__impact {
+  margin: 0 0 var(--sp-1);
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+  word-break: break-word;
+}
+
+.cr-confirm__note {
+  margin: 0 0 var(--sp-2);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  word-break: break-word;
+}
+
+.cr-confirm__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
 /* 話者の凡例（色だけに頼らない） */
 .cr-speaker-legend {
   padding: 0 var(--sp-2);

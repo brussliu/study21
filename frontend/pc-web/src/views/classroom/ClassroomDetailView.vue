@@ -7,6 +7,7 @@ import {
   classroomAudioUrl,
   deleteClassroomRecord,
   fetchClassroomRecord,
+  retryClassroomAssembly,
   orderClassroomSegments,
   segmentSpeakerOf,
   type ClassroomRecordDetail
@@ -188,12 +189,63 @@ function onAudioError(): void {
 }
 /** プレーヤーを出すか（実体があると記録が言っていて、まだ読めていないとき）。 */
 const showAudioPlayer = computed(() => audioUrl.value !== '' && !audioFailed.value)
-/** 音声の欄に出す案内（日本語）。 */
+/** 結合（再生用の 1 本）の状態（サーバーが判断したもの）。 */
+const assembly = computed(() => detail.value?.assembly ?? null)
+
+/**
+ * 音声の欄に出す案内（日本語）。
+ *
+ * <p>**「音声が保存できているか」と「再生用の 1 本ができているか」を分けて**出す:
+ * 結合に失敗していても分塊は残っているので、「音は残っている・あとで作り直せる」と言える。</p>
+ */
 const audioNote = computed(() => {
   if (audioFailed.value) return '録音の音声を読み込めませんでした（保存期間を過ぎた可能性があります）。'
   if (audioUrl.value === '') return 'この授業の音声はありません（保存期間を過ぎると消えます）。'
-  return '録音した音声をそのまま再生できます。'
+  const state = assembly.value
+  if (state === null || state === undefined) return '録音した音声をそのまま再生できます。'
+  if (state.state === 'READY' && state.complete) {
+    return '録音した音声をそのまま再生できます（音声は保存されています）。'
+  }
+  if (state.state === 'FAILED' || state.state === 'INCOMPLETE') {
+    return `音声は保存されています（${state.storedChunks} 件）。`
+      + '再生用の音声はまだ作れていません（作り直せます）。'
+  }
+  return `音声は保存されています（${state.storedChunks} 件）。再生用の音声を作成中です。`
 })
+
+/** 再生用の 1 本を作り直せるか（作れなかったときだけ出す）。 */
+const canRetryAssembly = computed(() => {
+  const state = assembly.value
+  return state !== null && state !== undefined
+    && (state.state === 'FAILED' || state.state === 'INCOMPLETE')
+})
+
+/** 作り直しの実行中か（連打で二重に走らせない）。 */
+const retryingAssembly = ref(false)
+
+/** 作り直しの結果（日本語。空なら出さない）。 */
+const assemblyNotice = ref('')
+
+/** 再生用の 1 本を作り直す（分塊は消さない）。 */
+async function retryAssembly(): Promise<void> {
+  const id = detail.value?.recordId ?? recordId.value
+  if (id === null || retryingAssembly.value) return
+  retryingAssembly.value = true
+  assemblyNotice.value = ''
+  try {
+    const response = await retryClassroomAssembly(id)
+    assemblyNotice.value = response.data.complete
+      ? '再生用の音声を作り直しました。'
+      : '再生用の音声を作り直しましたが、欠けている音声があります（'
+        + (response.data.reason ?? '理由は記録されています') + '）。'
+    // 状態を取り直す（作れた 1 本をすぐ再生できるように）
+    await refresh()
+  } catch (caught) {
+    assemblyNotice.value = messageOf(caught, '再生用の音声を作り直せませんでした。')
+  } finally {
+    retryingAssembly.value = false
+  }
+}
 
 let pollTimer: number | null = null
 /** ポーリングの間隔（AI 生図と同じ 2 秒）。 */
@@ -349,6 +401,19 @@ onBeforeUnmount(() => {
             <div class="cr-audio__body">
               <span class="cr-audio__title">録音の再生</span>
               <span class="cr-audio__note" data-cr-audio-note>{{ audioNote }}</span>
+              <!--
+                再生用の 1 本を作れなかったときだけ出す入口。
+                **分塊（元の音）は残っている**ので、ここから作り直せる。
+              -->
+              <span v-if="assemblyNotice !== ''" class="cr-audio__note" data-cr-assembly-notice>
+                {{ assemblyNotice }}
+              </span>
+              <button
+                v-if="canRetryAssembly" type="button" class="btn btn--secondary btn--sm"
+                :disabled="retryingAssembly" data-cr-assembly-retry @click="retryAssembly"
+              >
+                {{ retryingAssembly ? '作り直しています...' : '再生用の音声を作り直す' }}
+              </button>
               <div class="cr-audio__player" aria-label="音声プレーヤー" data-cr-audio-player>
                 <audio
                   v-if="showAudioPlayer" :src="audioUrl" controls preload="none"

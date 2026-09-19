@@ -228,6 +228,26 @@ function sameSegment(left: ClassroomSegment, right: ClassroomSegment): boolean {
   return left.seq === right.seq
 }
 
+/**
+ * 結合（再生用の 1 本）の状態。**「音声は保存されている」と「再生できる」は別**。
+ *
+ * <p>`FAILED` / `INCOMPLETE` でも `storedChunks` の分だけ音は残っている（やり直せる）。</p>
+ */
+export interface ClassroomAssemblyView {
+  /** `NONE`（まだ作っていない）/ `READY` / `INCOMPLETE`（欠落）/ `FAILED`（作れなかった）。 */
+  state: 'NONE' | 'READY' | 'INCOMPLETE' | 'FAILED'
+  /** いまある分塊の**全部**を含んだ 1 本があるか。 */
+  complete: boolean
+  /** 保存できている分塊の数（**音は残っている**ことの根拠）。 */
+  storedChunks: number
+  /** できた 1 本の長さ（秒。分からなければ null）。 */
+  durationSeconds: number | null
+  /** 欠けている連番（あれば）。 */
+  missingSeqs: number[]
+  /** 画面に出す理由（日本語。無ければ null）。 */
+  reason: string | null
+}
+
 /** AI 授業ノート（PHASE / FINAL）。`noteJson` は AI が返した JSON 文字列。 */
 export interface ClassroomNote {
   noteId: number
@@ -270,6 +290,13 @@ export interface ClassroomRecordDetail {
   version: number
   createdAt: string | null
   updatedAt: string | null
+  /**
+   * 結合（再生用の 1 本）の状態。
+   *
+   * <p>「音声は保存されている／再生用を作成中／作成に失敗」を分けて出すために使う
+   * （失敗しても分塊は残っている＝やり直せる）。</p>
+   */
+  assembly?: ClassroomAssemblyView | null
 }
 
 /** 一覧の 1 行。 */
@@ -389,12 +416,30 @@ export interface ClassroomFinalizeCheck {
  * まだ届いていない最後の分塊が分からない）。</p>
  */
 export interface ClassroomChunkManifest {
-  /** 画面が送った最後の分塊の連番。 */
+  /**
+   * **実際に録れた**最後の分塊の連番（分塊を作った時点で決まる）。
+   *
+   * <p>「送れた数」ではない。送信が失敗しても**録れた事実**は残す（そうしないと、
+   * 最後の分塊の送信が失敗した回にサーバーが取りこぼしを見つけられない）。</p>
+   */
+  expectedLastSeq: number
+  /** **実際に録れた**分塊の数（分塊を作った時点で数える）。 */
+  expectedCount: number
+  /** **送信が成功した**連番（1 から連続しているはず）。 */
+  uploadedSeqs: number[]
+  /** 送信が成功した最後の連番（1 つも無ければ 0）。 */
   lastSeq: number
-  /** 画面が送った分塊の数。 */
+  /** **送信が成功した**分塊の数（分塊を作った数ではない）。 */
   totalCount: number
-  /** 最後の分塊が終わる録音回放の時間軸の位置（16kHz のサンプル数）。 */
+  /** 最後に**録れた**分塊が終わる録音回放の時間軸の位置（16kHz のサンプル数）。 */
   endSample?: number
+  /**
+   * **もう送り直しても直らない**分塊の連番（4xx＝内容の問題）。
+   *
+   * <p>黙って捨てない: 画面はこの連番を「失った音声」として出し、利用者が確認してから
+   * 不完全なまま終われるようにする。</p>
+   */
+  unrecoverableSeqs?: number[]
 }
 
 /**
@@ -722,6 +767,15 @@ export function endClassroomRecord(
     manifest: options.manifest ?? null
   }
   return http.post<ClassroomEndResult>(`${BASE}/${recordId}/end`, { body })
+}
+
+/**
+ * 結合（再生用の 1 本）をやり直す（所有者のみ）。
+ *
+ * <p>**分塊は 1 つも消さない**（作り直しの材料）。作れなかったときの入口。</p>
+ */
+export function retryClassroomAssembly(recordId: number): Promise<ApiResponse<ClassroomAssemblyView>> {
+  return http.post<ClassroomAssemblyView>(`${BASE}/${recordId}/assembly/retry`)
 }
 
 /** 授業記録を削除する（所有者のみ。音声の実体も消える）。 */

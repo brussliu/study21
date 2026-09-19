@@ -158,6 +158,37 @@
            AND "バージョン" = #{version}
     </update>
 
+    <!--
+      収尾の鍵を取る（状態 = RECORDING のときだけ TRANSCRIBING へ）。
+      1 文で条件つき更新にするので、同時に 2 本来ても勝つのは 1 つだけ（状態そのものが排他）。
+    -->
+    <update id="claimFinalize">
+        UPDATE public."CR_授業記録情報"
+           SET "状態"             = 'TRANSCRIBING',
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+           AND "状態"         = 'RECORDING'
+    </update>
+
+    <!-- 収尾の完了（状態 = STOPPED。長さと保持期限はここで書く） -->
+    <update id="markFinalized">
+        UPDATE public."CR_授業記録情報"
+           SET "状態"             = 'STOPPED',
+               "終了時刻"         = COALESCE("終了時刻", CURRENT_TIMESTAMP),
+               "録音時間秒"       = #{durationSeconds},
+               "保持期限"         = CURRENT_DATE + #{retentionDays},
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = 'APP',
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+           AND "バージョン"   = #{version}
+           AND "状態"         = 'TRANSCRIBING'
+    </update>
+
     <delete id="delete">
         DELETE FROM public."CR_授業記録情報"
          WHERE "授業記録ID" = #{recordId}

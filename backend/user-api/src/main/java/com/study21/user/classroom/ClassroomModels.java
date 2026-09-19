@@ -258,7 +258,12 @@ public final class ClassroomModels {
             List<NoteView> notes,
             int version,
             String createdAt,
-            String updatedAt) {
+            String updatedAt,
+            /**
+             * 結合（再生用の 1 本）の状態。**「音声は保存されている」と「再生できる」を
+             * 分けて出す**ために返す（失敗しても分塊は残っている＝再試行できる）。
+             */
+            AssemblyView assembly) {
     }
 
     // ------------------------------------------------------------------ 分塊
@@ -325,25 +330,113 @@ public final class ClassroomModels {
             List<Integer> missingSeqs,
             /** 保存できている分塊の数。 */
             int storedChunks,
-            /** 画面が宣言した（送ったつもりの）最後の連番。分からなければ 0。 */
+            /** 画面が宣言した（送れた）最後の連番。分からなければ 0。 */
             int expectedChunks,
             /** 画面に出す理由（日本語。終了できるときは null）。 */
-            String reason) {
+            String reason,
+            /** **実体が無い／壊れている**連番（行はあるが音が無い）。 */
+            List<Integer> brokenSeqs,
+            /** **宣言していないのに保存されている**連番（画面の一覧と食い違い）。 */
+            List<Integer> extraSeqs) {
 
         /** 終了できるときの形。 */
         public static ChunkChecklist ready(int stored) {
-            return new ChunkChecklist(true, List.of(), stored, stored, null);
+            return new ChunkChecklist(true, List.of(), stored, stored, null, List.of(), List.of());
         }
     }
 
     /**
-     * 画面が停止のあとに送る「送った分塊の一覧」（終了前の確認に使う）。
+     * 画面が停止のあとに送る「**実際に送れた**分塊の一覧」（終了前の確認に使う）。
      *
-     * @param lastSeq    画面が送った最後の分塊の連番（1 から連続して送っている）
-     * @param totalCount 画面が送った分塊の数
-     * @param endSample  最後の分塊が終わる**録音回放の時間軸**の位置（16kHz のサンプル数。任意）
+     * <p><b>3 つの欄の意味を固定する</b>（食い違う一覧は受け付けない）:</p>
+     * <ul>
+     *   <li>`uploadedSeqs` … **送信が成功した**連番（1 から連続しているはず）。</li>
+     *   <li>`lastSeq` … `uploadedSeqs` の最大（送れた最後の連番）。</li>
+     *   <li>`totalCount` … `uploadedSeqs` の**件数**（分塊を作った数ではない）。</li>
+     *   <li>`endSample` … 最後に送れた分塊が終わる**録音回放の時間軸**（16kHz。任意）。</li>
+     * </ul>
+     *
+     * <p>3 つが食い違う一覧（例: `lastSeq=3` なのに `uploadedSeqs.size()=1`）は
+     * **矛盾した一覧**として断る。画面が「作った数」を送ってしまうと、最後の分塊が
+     * 届いていないのに「そろっている」と見てしまう。</p>
+     *
+     * @param lastSeq      送れた最後の連番（1 から連続）
+     * @param totalCount   送れた分塊の件数
+     * @param endSample    最後に送れた分塊の終わりの位置（16kHz のサンプル数。任意）
+     * @param uploadedSeqs **送れた連番そのもの**（任意。渡されれば対応表の正解として使う）
      */
-    public record ChunkManifest(int lastSeq, int totalCount, Long endSample) {
+    public record ChunkManifest(int lastSeq, int totalCount, Long endSample, List<Integer> uploadedSeqs) {
+
+        /** 送れた連番の一覧（渡されていなければ `1..lastSeq` とみなす＝旧い画面）。 */
+        public List<Integer> uploaded() {
+            if (uploadedSeqs != null && !uploadedSeqs.isEmpty()) {
+                return uploadedSeqs;
+            }
+            List<Integer> derived = new java.util.ArrayList<>();
+            for (int seq = 1; seq <= Math.max(0, lastSeq); seq += 1) {
+                derived.add(seq);
+            }
+            return derived;
+        }
+
+        /**
+         * 一覧そのものが矛盾していないか（`lastSeq`・`totalCount`・`uploadedSeqs` の整合）。
+         *
+         * <p>矛盾していれば**その理由**（日本語）を返す。問題なければ null。</p>
+         */
+        public String inconsistency() {
+            if (lastSeq < 0 || totalCount < 0) {
+                return "一覧の数が負の値になっています。";
+            }
+            if (uploadedSeqs == null || uploadedSeqs.isEmpty()) {
+                // 旧い画面（連番だけ）: 数は 1..lastSeq とみなす
+                return totalCount == lastSeq ? null
+                        : "送った数（" + totalCount + " 件）と最後の連番（" + lastSeq + "）が合いません。";
+            }
+            java.util.TreeSet<Integer> unique = new java.util.TreeSet<>(uploadedSeqs);
+            if (unique.size() != uploadedSeqs.size()) {
+                return "送れた連番に重複があります。";
+            }
+            if (!unique.isEmpty() && (unique.first() < 1 || unique.last() != lastSeq)) {
+                return "送れた連番の範囲（" + unique.first() + "〜" + unique.last()
+                        + "）と最後の連番（" + lastSeq + "）が合いません。";
+            }
+            if (uploadedSeqs.size() != totalCount) {
+                return "送れた連番の数（" + uploadedSeqs.size() + " 件）と一覧の数（"
+                        + totalCount + " 件）が合いません。";
+            }
+            return null;
+        }
+    }
+
+    /**
+     * 結合（分塊 → 再生用の 1 本）の状態（**画面が読む形**）。
+     *
+     * <p>「音声が保存できているか」と「再生用の 1 本ができているか」は**別**のこと。
+     * 保存できていれば音は残っている（結合はあとからやり直せる）。</p>
+     *
+     * @param state          NONE（まだ作っていない）/ READY（できた）/ INCOMPLETE（欠落がある）/
+     *                       FAILED（作れなかった・もう一度試せる）
+     * @param complete       いまある分塊の**全部**を含んだ 1 本があるか
+     * @param storedChunks   保存できている分塊の数（**音は残っている**ことの根拠）
+     * @param durationSeconds できた 1 本の長さ（秒。分からなければ null）
+     * @param missingSeqs    欠けている連番（あれば）
+     * @param reason         画面に出す理由（日本語。無ければ null）
+     */
+    public record AssemblyView(
+            String state,
+            boolean complete,
+            int storedChunks,
+            Double durationSeconds,
+            List<Integer> missingSeqs,
+            String reason) {
+
+        /** まだ何もしていないときの形。 */
+        public static AssemblyView of(String state, boolean complete, int storedChunks,
+                                      Double durationSeconds, List<Integer> missingSeqs, String reason) {
+            return new AssemblyView(state, complete, storedChunks, durationSeconds,
+                    missingSeqs == null ? List.of() : missingSeqs, reason);
+        }
     }
 
     /** 終了の要求（不完全なまま終える明示と、送った分塊の一覧）。 */

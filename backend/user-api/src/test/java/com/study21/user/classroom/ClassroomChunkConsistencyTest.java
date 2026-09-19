@@ -52,6 +52,7 @@ class ClassroomChunkConsistencyTest {
 
     private ClassroomRecordingStorage storage;
     private RecordingChunkMapperDouble chunks;
+    private ClassroomRecordMapper recordMapper;
     private ClassroomServiceImpl service;
     private UserPrincipal student;
 
@@ -62,7 +63,7 @@ class ClassroomChunkConsistencyTest {
     void setUp() {
         storage = new ClassroomRecordingStorage(root.toString());
         chunks = new RecordingChunkMapperDouble();
-        ClassroomRecordMapper recordMapper = mock(ClassroomRecordMapper.class);
+        recordMapper = mock(ClassroomRecordMapper.class);
         ClassroomAiSettings settings = mock(ClassroomAiSettings.class);
         ClassroomAiSettings.Snapshot snapshot = new ClassroomAiSettings.Snapshot(Map.of());
         lenient().when(recordMapper.findById(RECORD_ID)).thenAnswer(invocation -> recordingRecord());
@@ -179,6 +180,166 @@ class ClassroomChunkConsistencyTest {
 
         assertThat(failures).isEmpty();
         assertThat(Files.isDirectory(storage.resolveDirectory(fresh))).isTrue();
+    }
+
+    /* ---------------- ② 終了の確認は「行がそろっている」だけでは足りない ---------------- */
+
+    /**
+     * 実体の**大きさ**が記録と食い違っていたら、その連番を欠落として返す。
+     *
+     * <p>行がそろっていても、実体が差し替わっている・途中で切れていることがある。
+     * 「行の数」だけを見て通すと、壊れた音を「保存済み」と言って終えてしまう。</p>
+     */
+    @Test
+    @DisplayName("② 実体の大きさが記録と違う連番は欠落として返す（行がそろっていても通さない）")
+    void endRejectsChunkWhoseFileSizeDiffers() throws IOException {
+        byte[] content = bytes(1, 2, 3, 4);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+        // 実体だけ短くなっている（差し替え・途中で切れた）
+        ClassroomRecordingChunkEntity row = chunks.chunk(1).orElseThrow();
+        Files.write(storage.resolve(DIR, row.getFileName()), bytes(1, 2));
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("1");
+
+        /*
+         * **収尾の鍵も取らない**: 状態を収尾中にすると、画面は「終わりかけ」と見えて
+         * 送り直しもできなくなる。壊れた音を見つけた時点で断る（記録は RECORDING のまま）。
+         */
+        org.mockito.Mockito.verify(recordMapper, org.mockito.Mockito.never())
+                .claimFinalize(anyLong(), anyLong());
+    }
+
+    @Test
+    @DisplayName("② 実体が消えている連番も欠落として返す（行があっても音が無い）")
+    void endRejectsChunkWhoseFileIsGone() throws IOException {
+        byte[] content = bytes(5, 5, 5);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+        Files.delete(storage.resolve(DIR, chunks.chunk(1).orElseThrow().getFileName()));
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("1");
+    }
+
+    /**
+     * 画面の一覧と実際の保存が食い違うときは**両方**を欠落として返す。
+     *
+     * <p>「宣言したのに無い」（`2`）と「宣言していないのに在る」（`3`）は別の異常なので、
+     * どちらも黙って通さない（矛盾した一覧を受け付けない）。</p>
+     */
+    @Test
+    @DisplayName("② 宣言したのに無い連番と、宣言していないのに在る連番を、どちらも欠落として返す")
+    void endRejectsContradictoryManifest() {
+        byte[] content = bytes(7);
+        service.uploadChunk(student, RECORD_ID, 3, file(content), null, null, null);
+        // 画面は「1・2 を送った」と言っているが、保存されているのは 3 だけ
+        ClassroomModels.ChunkManifest manifest =
+                new ClassroomModels.ChunkManifest(2, 2, null, List.of(1, 2));
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID, false, manifest))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("1")
+                .hasMessageContaining("3");
+    }
+
+    /**
+     * 一覧の数と実際の分塊の数が食い違う（分塊を作った数と送れた数が混ざった）一覧は断る。
+     *
+     * <p>`totalCount` は**実際に送れた分塊の数**（分塊を作った数ではない）。食い違う一覧を
+     * そのまま受け取ると、最後の分塊が届いていないのに「そろっている」と見てしまう。</p>
+     */
+    @Test
+    @DisplayName("② 一覧の数が実際の分塊の数と食い違うときは断る（矛盾した一覧を受け付けない）")
+    void endRejectsCountThatDoesNotMatch() {
+        byte[] content = bytes(9);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+        // 「3 件送った」と言っているのに、実際は 1 件
+        ClassroomModels.ChunkManifest manifest =
+                new ClassroomModels.ChunkManifest(1, 3, null, List.of(1));
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID, false, manifest))
+                .isInstanceOf(ChunkChecklistException.class);
+    }
+
+    @Test
+    @DisplayName("② 取り込み音声（mp3）は分塊が無くても終了できる（今までどおり）")
+    void endAllowsImportedAudioWithoutChunks() {
+        ClassroomRecordEntity imported = recordingRecord();
+        imported.setAudioName("imported.mp3");
+        imported.setAudioMime("audio/mpeg");
+        when(recordMapper.findById(RECORD_ID)).thenReturn(imported);
+        when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
+        when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(), anyLong(),
+                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+
+        ClassroomModels.EndResult result = service.end(student, RECORD_ID);
+
+        assertThat(result.complete()).isTrue();
+    }
+
+    /**
+     * 一覧の 3 つの欄（`lastSeq` / `totalCount` / `uploadedSeqs`）が食い違うときは断る。
+     *
+     * <p>「3 件送った」と言いながら 1 件しか送れていない、といった一覧を受け取ると、
+     * 最後の分塊が届いていないのに「そろっている」と見てしまう。</p>
+     */
+    @Test
+    @DisplayName("② 一覧の欄が食い違う（lastSeq=2 なのに送れた連番が 1 つ）ときは断る")
+    void endRejectsInconsistentManifestFields() {
+        byte[] content = bytes(1, 1);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+        ClassroomModels.ChunkManifest broken =
+                new ClassroomModels.ChunkManifest(2, 1, null, List.of(1));
+
+        /*
+         * 断り方は**構造**で確かめる（`expectedChunks=0` = 一覧そのものを断った）。
+         * 例外の文面は実行環境の文字コードに左右されるので、判断には使わない。
+         */
+        ChunkChecklistException refusal = org.junit.jupiter.api.Assertions.assertThrows(
+                ChunkChecklistException.class, () -> service.end(student, RECORD_ID, false, broken));
+        assertThat(refusal.checklist().complete()).isFalse();
+        assertThat(refusal.checklist().expectedChunks()).isZero();
+        assertThat(refusal.checklist().reason()).isNotBlank();
+    }
+
+    /**
+     * 画面の一覧（送れた連番）と保存済みが**一致していれば**終了できる（正常な道）。
+     */
+    @Test
+    @DisplayName("② 一覧と保存済みが一致していれば終了できる")
+    void endAllowsWhenManifestMatches() throws IOException {
+        byte[] first = bytes(1, 1);
+        byte[] second = bytes(2, 2);
+        service.uploadChunk(student, RECORD_ID, 1, file(first), null, null, null);
+        service.uploadChunk(student, RECORD_ID, 2, file(second), null, null, null);
+        when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
+        when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(), anyLong(),
+                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+
+        ClassroomModels.EndResult result = service.end(student, RECORD_ID, false,
+                new ClassroomModels.ChunkManifest(2, 2, 40_000L, List.of(1, 2)));
+
+        assertThat(result.complete()).isTrue();
+        assertThat(result.missingSeqs()).isEmpty();
+    }
+
+    /* ---------------- ③ 結合の状態を業務の入口から読める ---------------- */
+
+    @Test
+    @DisplayName("③ 結合の状態を記録の詳細から読める（画面が「生成中／失敗」を出せる）")
+    void detailExposesAssemblyStatus() {
+        byte[] content = bytes(1, 2);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+
+        ClassroomModels.RecordDetail detail = service.detail(student, RECORD_ID);
+
+        // 分塊は保存できているが、まだ結合していない＝「音声は保存されている」
+        assertThat(detail.assembly().state()).isEqualTo(ClassroomAssembly.State.NONE.name());
+        assertThat(detail.assembly().storedChunks()).isEqualTo(1);
     }
 
     // ------------------------------------------------------------------ 資材

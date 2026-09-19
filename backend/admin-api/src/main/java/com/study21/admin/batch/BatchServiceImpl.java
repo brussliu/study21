@@ -65,15 +65,22 @@ public class BatchServiceImpl implements BatchService {
     private final Map<String, BatchTaskHandler> handlers;
     /** 実行前の設定検証の差し替え（AI 生図だけが使う。無ければ「いまの設定」を検証する）。 */
     private final List<BatchSettingsPreflight> settingsPreflights;
+    /**
+     * 有効／無効の切替を**同じトランザクション**で実行設定の変更として記録する
+     * （適用時刻＋計画バージョン。{@code ScheduledTriggerStore} とは別物）。
+     */
+    private final com.study21.admin.schedule.ScheduleTimingRecorder timingRecorder;
     private final ConcurrentHashMap<String, Boolean> runningGuard = new ConcurrentHashMap<>();
 
+    @org.springframework.beans.factory.annotation.Autowired
     public BatchServiceImpl(BatchTaskRegistry registry,
                             SettingsService settingsService,
                             BatchExecutionMapper executionMapper,
                             BatchControlMapper controlMapper,
                             AiCallLogMapper aiCallLogMapper,
                             List<BatchTaskHandler> taskHandlers,
-                            List<BatchSettingsPreflight> settingsPreflights) {
+                            List<BatchSettingsPreflight> settingsPreflights,
+                            com.study21.admin.schedule.ScheduleTimingRecorder timingRecorder) {
         this.registry = registry;
         this.settingsService = settingsService;
         this.executionMapper = executionMapper;
@@ -84,6 +91,19 @@ public class BatchServiceImpl implements BatchService {
                 : taskHandlers.stream().collect(Collectors.toMap(BatchTaskHandler::taskCode, Function.identity(),
                         (a, b) -> a));
         this.settingsPreflights = settingsPreflights == null ? List.of() : settingsPreflights;
+        this.timingRecorder = timingRecorder;
+    }
+
+    /** テスト用の入口（実行設定の記録を持たない構成）。 */
+    public BatchServiceImpl(BatchTaskRegistry registry,
+                            SettingsService settingsService,
+                            BatchExecutionMapper executionMapper,
+                            BatchControlMapper controlMapper,
+                            AiCallLogMapper aiCallLogMapper,
+                            List<BatchTaskHandler> taskHandlers,
+                            List<BatchSettingsPreflight> settingsPreflights) {
+        this(registry, settingsService, executionMapper, controlMapper, aiCallLogMapper,
+                taskHandlers, settingsPreflights, null);
     }
 
     @Override
@@ -214,6 +234,13 @@ public class BatchServiceImpl implements BatchService {
     public void markQueuedAsFailed(long executionId, String message) {
         executionMapper.markFinished(executionId, BatchExecutionStatus.FAILED.name(), message, message, 0L);
         log.error("Scheduled batch could not run. executionId={} message={}", executionId, message);
+    }
+
+    @Override
+    public void markQueuedAsSkipped(long executionId, String message) {
+        // 失敗ではない（実行しないと正しく判断した）。結果は SKIPPED とし、理由を残す
+        executionMapper.markFinished(executionId, BatchExecutionStatus.SKIPPED.name(), message, null, 0L);
+        log.warn("Scheduled batch was skipped before running. executionId={} message={}", executionId, message);
     }
 
     private Map<String, Object> failQueued(long executionId, String batchCode, String message, String errorDetail) {
@@ -607,6 +634,12 @@ public class BatchServiceImpl implements BatchService {
                 control == null ? null : control.getVersion(), null, operatorCode);
         if (updated == 0) {
             throw new ConflictException("他の管理者が先に更新しました。再読み込みしてください。");
+        }
+        // 有効／無効も実行設定の一部なので、**同じトランザクション**で適用時刻と計画バージョンを進める。
+        // 別々に書くと「有効になったのに適用時刻が古い」状態で過去の計画実行点を実行しかねない
+        // （スケジュール対象外のバッチ＝起動時バッチなどは記録しない）
+        if (timingRecorder != null) {
+            timingRecorder.recordTimingChange(List.of(batchCode));
         }
 
         Map<String, Object> result = new LinkedHashMap<>();

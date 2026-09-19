@@ -76,6 +76,8 @@ class ScheduleConfigServiceTest {
             Map<String, Boolean> enabled = new LinkedHashMap<>();
             /** 設定の適用時刻（DB に保存されている値の代役）。 */
             Map<String, LocalDateTime> effectiveFrom = new LinkedHashMap<>();
+            /** 計画バージョン（設定値の保存と同じトランザクションで進む版の代役）。 */
+            Map<String, Long> planVersions = new LinkedHashMap<>();
         }
 
         final Box box = new Box();
@@ -86,12 +88,14 @@ class ScheduleConfigServiceTest {
         volatile int[] intervalChoices;
         volatile String lastIntervalRead;
 
-        /** saveConfigEffectiveFrom で保存された値（DB へ書いた代役）。 */
-        final Map<String, LocalDateTime> savedEffectiveFrom = new LinkedHashMap<>();
-
-        @Override
-        public void saveConfigEffectiveFrom(String taskCode, LocalDateTime effectiveFrom) {
-            savedEffectiveFrom.put(taskCode, effectiveFrom);
+        /**
+         * **設定保存トランザクション**が一緒に書く値の代役（適用時刻＋計画バージョン）。
+         *
+         * <p>キャッシュの読み込み（{@code load}）は何も書かない。書くのは保存の側だけ。</p>
+         */
+        void recordTimingChange(String taskCode, LocalDateTime effectiveFrom) {
+            box.effectiveFrom.put(taskCode, effectiveFrom);
+            box.planVersions.merge(taskCode, 1L, Long::sum);
         }
 
         @Override
@@ -114,7 +118,8 @@ class ScheduleConfigServiceTest {
                 settings.put("STUDY_MONITOR_L02_INTERVAL_MINUTES", value);
                 lastIntervalRead = value;
             }
-            return new ScheduleSourceData(settings, box.enabled, new LinkedHashMap<>(box.effectiveFrom));
+            return new ScheduleSourceData(settings, box.enabled, new LinkedHashMap<>(box.effectiveFrom),
+                    new LinkedHashMap<>(box.planVersions));
         }
     }
 
@@ -256,14 +261,20 @@ class ScheduleConfigServiceTest {
         int loadsAfterStartup = loader.loads.get();
         assertThat(service.snapshot().statusOf("batR03")).isEqualTo(TaskConfigStatus.MISSING);
 
-        // 1 回目の托底はすぐ試す
-        assertThat(service.ensureTaskConfig("batR03").statusOf("batR03")).isEqualTo(TaskConfigStatus.MISSING);
+        // 起動時の読み込みでも「設定が無い」ことが分かっているので、すぐには読み直さない
+        assertThat(service.remainingFallbackBackoff("batR03")).isPresent();
+        service.ensureUsableConfig();
+        assertThat(loader.loads).hasValue(loadsAfterStartup);
+
+        // 退避が明けたら 1 回だけ試す
+        clock.advance(Duration.ofSeconds(31));
+        service.ensureUsableConfig();
+        assertThat(loader.loads).hasValue(loadsAfterStartup + 1);
+
+        // そのあとは再び退避中なので DB を引かない（30 秒ごとの検査で毎回引かない）
+        service.ensureUsableConfig();
         assertThat(loader.loads).hasValue(loadsAfterStartup + 1);
         assertThat(service.remainingFallbackBackoff("batR03")).isPresent();
-
-        // 2 回目以降は退避中なので DB を引かない（30 秒ごとの検査で毎回引かない）
-        assertThat(service.ensureTaskConfig("batR03").statusOf("batR03")).isEqualTo(TaskConfigStatus.MISSING);
-        assertThat(loader.loads).hasValue(loadsAfterStartup + 1);
 
         // 設定を保存すれば退避は消えて、すぐ反映される
         loader.box.settings.put("NET_CONTROL_END_TIME", "23:30");
@@ -272,6 +283,84 @@ class ScheduleConfigServiceTest {
         assertThat(service.remainingFallbackBackoff("batR03")).isEmpty();
         assertThat(service.snapshot().taskOf("batR03").orElseThrow().dailyTime())
                 .isEqualTo(java.time.LocalTime.of(23, 30));
+    }
+
+    @Test
+    @DisplayName("設定が無いままなら退避は 30→60→120→240→300 秒と伸びる（成功しても消えない）")
+    void missingConfigBackoffGrowsAndIsKeptAfterSuccessfulLoads() {
+        loader.box.settings.remove("NET_CONTROL_END_TIME");
+        service.loadOnStartup();   // 1 回目（起動時）
+        Duration[] expected = {Duration.ofSeconds(30), Duration.ofSeconds(60), Duration.ofSeconds(120),
+                Duration.ofSeconds(240), Duration.ofSeconds(300), Duration.ofSeconds(300)};
+        for (int attempt = 0; attempt < expected.length; attempt++) {
+            Duration wait = expected[attempt];
+            assertThat(service.remainingFallbackBackoff("batR03"))
+                    .as("attempt=%s", attempt + 1)
+                    .hasValueSatisfying(remaining ->
+                            assertThat(remaining).isBetween(wait.minusSeconds(1), wait));
+            clock.advance(wait);
+            int before = loader.loads.get();
+            service.ensureUsableConfig();   // DB は読めるが設定が無い → 退避を進める
+            assertThat(loader.loads.get()).as("attempt=%s", attempt + 1).isEqualTo(before + 1);
+        }
+        // 5 回を超えたら上限 300 秒で頭打ち（回数は増え続ける）
+        assertThat(service.report().taskStatus("batR03").fallbackFailures()).isGreaterThan(5);
+        assertThat(service.remainingFallbackBackoff("batR03")).hasValueSatisfying(remaining ->
+                assertThat(remaining).isBetween(Duration.ofSeconds(299), Duration.ofSeconds(300)));
+        // 画面には「動かない理由と次に確認する時刻」を出す
+        assertThat(service.report().taskStatus("batR03").fallbackMessage())
+                .contains("設定が無い").contains("回連続").contains("再確認");
+        assertThat(service.report().configMissingMessage()).contains("batR03");
+    }
+
+    @Test
+    @DisplayName("設定が無いタスクが複数あっても、托底の読み込みは 1 回にまとめる")
+    void fallbackLoadsOnceForSeveralMissingTasks() {
+        loader.box.settings.remove("NET_CONTROL_END_TIME");            // batR03
+        loader.box.settings.remove("STUDY_MONITOR_L02_INTERVAL_MINUTES");   // batL02
+        service.loadOnStartup();
+        int afterStartup = loader.loads.get();
+        assertThat(service.snapshot().statusOf("batR03")).isEqualTo(TaskConfigStatus.MISSING);
+        assertThat(service.snapshot().statusOf("batL02")).isEqualTo(TaskConfigStatus.MISSING);
+
+        clock.advance(Duration.ofSeconds(31));
+        service.ensureUsableConfig();   // 1 回の読み込みで**全タスクの状態**が更新される
+        assertThat(loader.loads).hasValue(afterStartup + 1);
+        assertThat(service.snapshot().statusOf("batR04")).isEqualTo(TaskConfigStatus.LOADED);
+        // 両方とも退避が進む（次は 60 秒）
+        assertThat(service.remainingFallbackBackoff("batR03")).hasValueSatisfying(remaining ->
+                assertThat(remaining).isBetween(Duration.ofSeconds(59), Duration.ofSeconds(60)));
+        assertThat(service.remainingFallbackBackoff("batL02")).hasValueSatisfying(remaining ->
+                assertThat(remaining).isBetween(Duration.ofSeconds(59), Duration.ofSeconds(60)));
+
+        // 片方だけ直ったら、直った方の退避だけ消える
+        loader.box.settings.put("NET_CONTROL_END_TIME", "23:30");
+        service.refresh("設定保存");
+        assertThat(service.snapshot().statusOf("batR03")).isEqualTo(TaskConfigStatus.LOADED);
+        assertThat(service.remainingFallbackBackoff("batR03")).isEmpty();
+        assertThat(service.remainingFallbackBackoff("batL02")).isPresent();
+    }
+
+    @Test
+    @DisplayName("DB を読めないときの退避と、設定が無いときの退避は別物（片方で他方を消さない）")
+    void readFailureBackoffIsSeparateFromMissingConfig() {
+        loader.box.settings.remove("NET_CONTROL_END_TIME");
+        service.loadOnStartup();   // batR03 が「設定なし」で記録される
+        assertThat(service.report().taskStatus("batR03").fallbackFailures()).isEqualTo(1);
+
+        // DB が読めない → 全体の退避（30 秒）。タスクごとの回数は動かない
+        loader.failure = new ScheduleConfigLoader.ScheduleConfigLoadException("接続できません");
+        service.refresh("失敗");
+        assertThat(service.report().taskStatus("batR03").fallbackFailures()).isEqualTo(1);
+        assertThat(service.remainingBackoff()).isPresent();
+        assertThat(service.remainingFallbackBackoff("batR03")).isPresent();
+
+        // DB が読めるようになったら、全体の退避だけ消える（設定が無いタスクの回数は残る）
+        loader.failure = null;
+        clock.advance(Duration.ofSeconds(31));
+        service.refresh("復帰");
+        assertThat(service.remainingBackoff()).isEmpty();
+        assertThat(service.report().taskStatus("batR03").fallbackFailures()).isEqualTo(2);
     }
 
     @Test
@@ -342,9 +431,11 @@ class ScheduleConfigServiceTest {
         // 起動時（＝まだ変更していない設定）は制限なし
         assertThat(service.snapshot().taskOf("batR03").orElseThrow().effectiveFrom()).isNull();
 
-        // 22:00 に「停止 23:30 → 21:00」へ変更した
+        // 22:00 に「停止 23:30 → 21:00」へ変更した。適用時刻と計画バージョンは
+        // **設定値の保存と同じトランザクション**で書かれている（ここではその代役を置く）
         clock.advance(Duration.ofHours(22));
         loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        loader.recordTimingChange("batR03", LocalDateTime.of(2026, 9, 19, 22, 0));
         assertThat(service.refresh("設定保存").published()).isTrue();
 
         TaskSchedule schedule = service.snapshot().taskOf("batR03").orElseThrow();
@@ -357,8 +448,26 @@ class ScheduleConfigServiceTest {
         assertThat(schedule.nextRunnablePointAfter(LocalDateTime.of(2026, 9, 19, 22, 0)))
                 .isEqualTo(LocalDateTime.of(2026, 9, 20, 21, 0));
         assertThat(service.report().taskStatus("batR03").nextRunLabel()).isEqualTo("2026-09-20 21:00");
-        // 適用時刻は DB に保存される（再起動でも引き継ぐ）
-        assertThat(loader.savedEffectiveFrom).containsKey("batR03");
+    }
+
+    @Test
+    @DisplayName("キャッシュの読み込みは**書かない**（適用時刻は保存トランザクションだけが書く）")
+    void loadingTheConfigNeverWritesTheEffectiveTime() {
+        service.loadOnStartup();
+        clock.advance(Duration.ofHours(22));
+        // 保存経路を通さずに設定値だけが変わった（＝アプリ以外の経路で書き換えられた）
+        loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        assertThat(service.refresh("外部変更").published()).isTrue();
+
+        // DB には書いていない（読み込みで補って書かない）。メモリだけ「いまから」になる
+        assertThat(loader.box.effectiveFrom).doesNotContainKey("batR03");
+        assertThat(loader.box.planVersions).doesNotContainKey("batR03");
+        TaskSchedule schedule = service.snapshot().taskOf("batR03").orElseThrow();
+        // 時計を 22 時間進めた時点（2026-09-20 07:00 JST）が「いまから」になる
+        LocalDateTime nowLocal = LocalDateTime.of(2026, 9, 20, 7, 0);
+        assertThat(schedule.effectiveFrom()).isEqualTo(nowLocal);
+        // 直近の 21:00（前日）は「変わったと気づいた時刻」より前 → 実行しない（安全側）
+        assertThat(schedule.previousRunnablePointAtOrBefore(nowLocal)).isEmpty();
     }
 
     @Test
@@ -367,11 +476,11 @@ class ScheduleConfigServiceTest {
         service.loadOnStartup();
         clock.advance(Duration.ofHours(22));
         loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        LocalDateTime saved = LocalDateTime.of(2026, 9, 19, 22, 0);
+        loader.recordTimingChange("batR03", saved);
         service.refresh("設定保存");
-        LocalDateTime saved = loader.savedEffectiveFrom.get("batR03");
 
         // 再起動: 新しいサービス（メモリは空）が DB の適用時刻を読む
-        loader.box.effectiveFrom.put("batR03", saved);
         ScheduleConfigService restarted = new ScheduleConfigService(catalog, loader, clock);
         restarted.loadOnStartup();
 
@@ -392,6 +501,7 @@ class ScheduleConfigServiceTest {
         service.loadOnStartup();
         clock.advance(Duration.ofHours(22));
         loader.box.settings.put("NET_CONTROL_END_TIME", "21:00");
+        loader.recordTimingChange("batR03", LocalDateTime.of(2026, 9, 19, 22, 0));
         service.refresh("設定保存");
         LocalDateTime first = service.snapshot().taskOf("batR03").orElseThrow().effectiveFrom();
 

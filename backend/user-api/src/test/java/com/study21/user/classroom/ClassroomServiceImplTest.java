@@ -39,6 +39,10 @@ import static org.mockito.Mockito.when;
 @ExtendWith(MockitoExtension.class)
 class ClassroomServiceImplTest {
 
+    /** 実体を置く一時的な置き場（テストごとに消える）。 */
+    @org.junit.jupiter.api.io.TempDir
+    java.nio.file.Path stubFiles;
+
     private static final long RECORD_ID = 10L;
     private static final long ACCOUNT_ID = 2L;
 
@@ -85,7 +89,7 @@ class ClassroomServiceImplTest {
         stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
 
@@ -105,7 +109,7 @@ class ClassroomServiceImplTest {
         stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(3);
         doAnswer(invocation -> {
@@ -134,11 +138,13 @@ class ClassroomServiceImplTest {
         when(settings.load()).thenReturn(snapshot);
         // 分塊は 1 から連続している（分塊の確認で断らないように）
         storedChunks(1);
-        when(recordMapper.updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt())).thenReturn(0);
+        // **収尾の鍵を取れない**＝別の要求が先に収尾を始めている（二重の終了を防ぐ）
+        when(recordMapper.claimFinalize(eq(RECORD_ID), eq(ACCOUNT_ID))).thenReturn(0);
 
         assertThat(org.junit.jupiter.api.Assertions.assertThrows(
                 com.study21.common.core.exception.ConflictException.class,
                 () -> service.end(student, RECORD_ID))).isNotNull();
+        // ノート行も作らない（終わりかけの状態で最終まとめを固定しない）
         verify(noteMapper, never()).insert(any());
     }
 
@@ -174,7 +180,7 @@ class ClassroomServiceImplTest {
 
         assertThat(cause.getMessage()).contains("収尾").contains("マイク").contains("収尾がまだです");
         // **記録は終わらせない**（終わらせると、やり直しの収尾を受け付けられなくなる）
-        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).claimFinalize(anyLong(), anyLong());
         verify(noteMapper, never()).insert(any());
     }
 
@@ -197,7 +203,7 @@ class ClassroomServiceImplTest {
                         () -> service.end(student, RECORD_ID));
 
         assertThat(cause.getMessage()).contains("分塊").contains("そろっていません");
-        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).claimFinalize(anyLong(), anyLong());
     }
 
     /**
@@ -221,7 +227,7 @@ class ClassroomServiceImplTest {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(4);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         // 分塊は 1 から連続している（分塊の確認で断らないように）
         stubContinuousChunks();
@@ -260,7 +266,7 @@ class ClassroomServiceImplTest {
         when(recordMapper.findById(RECORD_ID)).thenReturn(imported);
         when(settings.load()).thenReturn(snapshot);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(5);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         doAnswer(invocation -> {
             ((ClassroomNoteEntity) invocation.getArgument(0)).setNoteId(55L);
@@ -437,7 +443,7 @@ class ClassroomServiceImplTest {
         when(settings.load()).thenReturn(snapshot);
         when(settings.noteEnabled(snapshot)).thenReturn(false);
         when(settings.retentionDays(snapshot)).thenReturn(30);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), eq(30), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
 
         ClassroomModels.EndResult result = service.end(student, RECORD_ID);
@@ -1073,6 +1079,29 @@ class ClassroomServiceImplTest {
             rows.add(row);
         }
         when(chunkMapper.findByRecord(RECORD_ID)).thenReturn(rows);
+        for (ClassroomRecordingChunkEntity row : rows) {
+            writeStubFile(row);
+        }
+    }
+
+    /**
+     * 行が指す**実体**をテスト用の置き場に作る。
+     *
+     * <p>終了の確認は「行がそろっているか」だけでなく**実体の存在と大きさ**まで見るので、
+     * テストでも本物のファイルを置く（置かないと「実体が無い」として断られる）。</p>
+     */
+    private void writeStubFile(ClassroomRecordingChunkEntity row) {
+        java.nio.file.Path path = storage.resolve(row.getStorageDir(), row.getFileName());
+        if (path == null) {
+            return;
+        }
+        try {
+            java.nio.file.Files.createDirectories(path.getParent());
+            java.nio.file.Files.write(path, new byte[row.getByteSize() == null
+                    ? 1 : (int) (long) row.getByteSize()]);
+        } catch (java.io.IOException cause) {
+            throw new IllegalStateException(cause);
+        }
     }
 
     /**
@@ -1095,7 +1124,7 @@ class ClassroomServiceImplTest {
                 .hasMessageContaining("2");
 
         // 記録は終わらせない（受け付けられる状態のまま＝送り直せる）
-        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).claimFinalize(anyLong(), anyLong());
         assertThat(chunkRows).hasSize(2);
     }
 
@@ -1108,7 +1137,7 @@ class ClassroomServiceImplTest {
         storedChunks(1, 2);
 
         assertThatThrownBy(() -> service.end(student, RECORD_ID, false,
-                new ClassroomModels.ChunkManifest(3, 3, null)))
+                new ClassroomModels.ChunkManifest(3, 3, null, null)))
                 .isInstanceOf(ChunkChecklistException.class)
                 .hasMessageContaining("3");
     }
@@ -1118,7 +1147,7 @@ class ClassroomServiceImplTest {
     void endAllowsWhenChunksAreContinuous() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
         storedChunks(1, 2);
@@ -1140,7 +1169,7 @@ class ClassroomServiceImplTest {
     void endAllowsExplicitIncompleteEnd() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.updateEnded(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), eq(1)))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
         storedChunks(1, 3);
@@ -1155,26 +1184,54 @@ class ClassroomServiceImplTest {
     }
 
     /**
-     * 確認したあとに**未調整のアップロード**が入っていないことを、書き換えの直前にもう一度見る
-     * （見た目は「連続している」でも、確認と書き換えのあいだに別の要求が分塊を足せる）。
+     * **アップロードと終了の同時実行**は「状態の鍵」で防ぐ。
+     *
+     * <p>確認を 2 回繰り返すのは排他ではない（その間にも書き込みが入る）。収尾は
+     * `状態 = RECORDING → TRANSCRIBING` を 1 文で行って**鍵を取る**ので、同時に 2 本来ても
+     * 勝つのは 1 つだけ。負けた側は 409 で断り、画面は状態を読み直す。</p>
      */
     @Test
-    @DisplayName("③ 確認のあとに分塊が増えていたら、終了せずにもう一度やり直させる")
-    void endRefusesWhenChunksChangedAfterCheck() {
+    @DisplayName("③ アップロードと終了が同時でも、勝つのは 1 つだけ（鍵を取れなければ断る）")
+    void endIsExclusiveWithUploads() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        ClassroomRecordingChunkEntity first = storedChunkRow(1, new byte[]{1});
-        ClassroomRecordingChunkEntity second = storedChunkRow(2, new byte[]{2});
-        // 1 回目の照会は「1 だけ」、書き換え直前の 2 回目は「1 と 2」を返す（別の要求が足した）
+        storedChunks(1);
+        // 別の要求が先に鍵を取った
+        when(recordMapper.claimFinalize(eq(RECORD_ID), eq(ACCOUNT_ID))).thenReturn(0);
+
+        assertThatThrownBy(() -> service.end(student, RECORD_ID))
+                .isInstanceOf(ChunkChecklistException.class)
+                .hasMessageContaining("すでに終了処理に入っています");
+
+        // 記録は終わらせない・最終まとめも作らない
+        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(noteMapper, never()).insert(any());
+    }
+
+    /**
+     * 鍵を取った**あとに**分塊が増えていたら（状態が排他なので通常は起きない）、完了させずに断る。
+     */
+    @Test
+    @DisplayName("③ 鍵を取ったあとに分塊が増えていたら、完了させずにもう一度やり直させる")
+    void endRefusesWhenChunksChangedAfterClaim() {
+        when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
+        when(settings.load()).thenReturn(snapshot);
+        storedChunks(1);
+        /*
+         * 鍵を取る前は 1 件、取ったあとは 2 件（別の要求が足した）。
+         * `checkChunks` と「鍵の前後の数」で同じ照会を使うので、順番に 2 つの答えを返す。
+         */
+        ClassroomRecordingChunkEntity extra = storedChunkRow(2, new byte[]{2});
         when(chunkMapper.findByRecord(RECORD_ID)).thenReturn(
-                new java.util.ArrayList<>(java.util.List.of(first)),
-                new java.util.ArrayList<>(java.util.List.of(first, second)));
+                new java.util.ArrayList<>(java.util.List.of(chunkRows.get(1))),
+                new java.util.ArrayList<>(java.util.List.of(chunkRows.get(1))),
+                new java.util.ArrayList<>(java.util.List.of(chunkRows.get(1), extra)));
 
         assertThatThrownBy(() -> service.end(student, RECORD_ID))
                 .isInstanceOf(ChunkChecklistException.class)
                 .hasMessageContaining("もう一度");
 
-        verify(recordMapper, never()).updateEnded(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
     }
 
     /**
@@ -1189,10 +1246,22 @@ class ClassroomServiceImplTest {
                         invocation.getArgument(0),
                         "chunk-" + invocation.getArgument(1) + "-"
                                 + String.format("%06d", (Integer) invocation.getArgument(2)) + "-test.webm"));
+        java.nio.file.Path stubRoot = stubFiles;
         lenient().when(storage.resolve(any(), any()))
-                .thenAnswer(invocation -> java.nio.file.Paths.get("/tmp/classroom-test",
-                        String.valueOf(invocation.getArgument(0)), String.valueOf(invocation.getArgument(1))));
-        lenient().when(storage.prepareRecordingDirectory(any())).thenReturn(true);
+                .thenAnswer(invocation -> stubRoot
+                        .resolve(String.valueOf((Object) invocation.getArgument(0)))
+                        .resolve(String.valueOf((Object) invocation.getArgument(1))));
+        lenient().when(storage.prepareRecordingDirectory(org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(true);
+        /*
+         * 収尾は「鍵を取る（claimFinalize）→ 完了（markFinalized）」の 2 段。
+         * 既定は成功にしておく（失敗の経路はそれぞれのテストで上書きする）。
+         */
+        lenient().when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
+        lenient().when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(), anyLong(),
+                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+        lenient().when(chunkMapper.countByRecord(anyLong())).thenReturn(0);
     }
 
     /** 分塊の書き込み先（テストの下見用。名前は {@code stubChunkUpload} の決め方と同じ形）。 */

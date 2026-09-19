@@ -144,7 +144,10 @@ function mockApi(options: MockOptions = {}): { calls: Call[] } {
       const scripted = options.endResponses?.[endCalls - 1]
       if (scripted !== undefined) {
         return new Response(JSON.stringify({
-          success: false, code: 'CONFLICT', message: String(scripted.message ?? '欠けています'), data: null
+          success: false, code: 'CONFLICT',
+          message: String(scripted.message ?? '欠けています'),
+          // **構造化した一覧**（画面はこの値で判断する。文面では判断しない）
+          data: scripted.data ?? null
         }), { status: Number(scripted.status ?? 409), headers: { 'Content-Type': 'application/json' } })
       }
       return ok({
@@ -247,7 +250,15 @@ describe('授業録音：停止 → 保存の完了 → 終了の判断', () => 
   it('明示の「不完全なまま終了」は利用者が押したときだけ送る', async () => {
     stubRecorder()
     const { calls } = mockApi({
-      endResponses: [{ status: 409, message: '欠けている連番: [2]' }],
+      endResponses: [{
+        status: 409,
+        message: '録音の音声（分塊）がそろっていません。',
+        // 文面ではなく**この構造**で判断する
+        data: {
+          complete: false, missingSeqs: [2], storedChunks: 1, expectedChunks: 2,
+          reason: '分塊が 1 件足りません（連番 [2]）。'
+        }
+      }],
       chunkList: {
         items: [], chunkCount: 1, maxSeq: 1, nextSeq: 2, totalBytes: 100, recordedSeconds: 1,
         finalizeCheck: {
@@ -269,6 +280,15 @@ describe('授業録音：停止 → 保存の完了 → 終了の判断', () => 
     const incomplete = wrapper.get('[data-cr-finish-incomplete]')
     expect(incomplete.text()).toContain('不完全')
     await incomplete.trigger('click')
+    await flushPromises()
+
+    // **確認の 1 段**を挟む（押し間違いで音を失わない）＋ 失う範囲を出す
+    const confirm = wrapper.get('[data-cr-incomplete-confirm]')
+    expect(confirm.text()).toContain('2')
+    // 確認するまでは送らない
+    expect(calls.filter((call) => call.url.includes('/end'))).toHaveLength(1)
+
+    await wrapper.get('[data-cr-incomplete-ok]').trigger('click')
     await flushPromises()
 
     const endCalls = calls.filter((call) => call.url.includes('/end'))

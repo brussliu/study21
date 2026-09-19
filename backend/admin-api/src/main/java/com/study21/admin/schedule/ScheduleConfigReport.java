@@ -16,6 +16,8 @@ import java.util.Map;
  * @param lastRefreshError 最後の反映失敗の理由（成功なら null）
  * @param nextRetryAt      次の自動再試行の予定時刻（待避中でなければ null）
  * @param suppressedCount  同じ失敗を繰り返してログを抑止した回数
+ * @param configMissingMessage 設定が無い・不正で自動実行できないタスクの案内（無ければ null）。
+ *                         次にいつ確認するかを含む（退避で待っている理由が画面で分かるように）
  * @param tasks            タスクごとの状態
  */
 public record ScheduleConfigReport(
@@ -27,6 +29,7 @@ public record ScheduleConfigReport(
         String lastRefreshError,
         Instant nextRetryAt,
         long suppressedCount,
+        String configMissingMessage,
         List<TaskStatus> tasks) {
 
     /**
@@ -45,6 +48,11 @@ public record ScheduleConfigReport(
      * @param nextRunLabel    次の計画実行時刻の表示（「2026-09-20 06:30」など。無いときは理由）
      * @param configEffectiveFrom いまの設定が効き始めた時刻（未変更なら null）。
      *                        この時刻以前の計画実行点は実行しない（画面で理由が分かるように出す）
+     * @param fallbackFailures 設定が無い・不正が続いた回数（托底の退避の段階。使える状態なら 0）
+     * @param nextFallbackCheckAt 次に托底で設定を読み直す時刻（退避中でなければ null）
+     * @param fallbackMessage 動かない理由と次にいつ確認するか（使える状態なら null）
+     * @param planVersion 実行設定の**計画バージョン**（設定値の保存と同じトランザクションで進む版）。
+     *                    再起動しても同じ値が読める（画面で「いま効いている設定の版」が分かる）
      */
     public record TaskStatus(
             String taskCode,
@@ -58,7 +66,11 @@ public record ScheduleConfigReport(
             List<String> examplePoints,
             LocalDateTime nextRunAt,
             String nextRunLabel,
-            String configEffectiveFrom) {
+            String configEffectiveFrom,
+            int fallbackFailures,
+            Instant nextFallbackCheckAt,
+            String fallbackMessage,
+            long planVersion) {
     }
 
     /** 画面に出す「保存済み・実行設定への反映待ち」の案内（そのまま出してよい日本語）。 */
@@ -68,6 +80,11 @@ public record ScheduleConfigReport(
         }
         String reason = lastRefreshError == null || lastRefreshError.isBlank() ? "原因不明" : lastRefreshError;
         return "保存済み・実行設定への反映待ち（" + reason + "）。自動で再試行します。";
+    }
+
+    /** 設定が無い・不正で自動実行できないタスクがあるか。 */
+    public boolean configMissing() {
+        return configMissingMessage != null && !configMissingMessage.isBlank();
     }
 
     /** タスクコードで引く（見つからなければ null）。 */
@@ -80,6 +97,7 @@ public record ScheduleConfigReport(
         Map<String, Long> counts = tasks.stream()
                 .collect(java.util.stream.Collectors.groupingBy(TaskStatus::statusLabel, java.util.LinkedHashMap::new,
                         java.util.stream.Collectors.counting()));
-        return "version=" + activeVersion + " pending=" + pendingRefresh + " tasks=" + counts;
+        return "version=" + activeVersion + " pending=" + pendingRefresh
+                + (configMissing() ? " configMissing=true" : "") + " tasks=" + counts;
     }
 }

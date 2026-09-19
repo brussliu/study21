@@ -80,6 +80,8 @@ public class BatchScheduleController {
         payload.put("lastRefreshAt", report.lastRefreshAt());
         payload.put("lastRefreshError", report.lastRefreshError());
         payload.put("nextRetryAt", report.nextRetryAt());
+        payload.put("configMissing", report.configMissing());
+        payload.put("configMissingMessage", report.configMissingMessage());
         payload.put("checkIntervalSeconds", 30);
         payload.put("runningWorkers", executor.activeCount());
         payload.put("queuedWorkers", executor.queuedCount());
@@ -97,6 +99,10 @@ public class BatchScheduleController {
             row.put("nextRunAt", task.nextRunAt());
             row.put("nextRunLabel", task.nextRunLabel());
             row.put("configEffectiveFrom", task.configEffectiveFrom());
+            row.put("planVersion", task.planVersion());
+            row.put("fallbackFailures", task.fallbackFailures());
+            row.put("nextFallbackCheckAt", task.nextFallbackCheckAt());
+            row.put("fallbackMessage", task.fallbackMessage());
             row.put("lastPlannedAt", triggerStore.lastClaimedAt(task.taskCode()));
             return row;
         }).toList());

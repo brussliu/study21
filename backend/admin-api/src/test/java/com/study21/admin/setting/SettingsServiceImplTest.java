@@ -160,6 +160,66 @@ class SettingsServiceImplTest {
     }
 
     @Test
+    void saveHookIsCalledWithOnlyTheChangedKeysBeforeTheTransactionEnds() {
+        when(catalogMapper.findByPageAndKeys(eq("NET_CONTROL"), anyList()))
+                .thenReturn(List.of(catalog("NET_CONTROL_END_TIME", "TIME", null)));
+        SettingValueEntity existing = new SettingValueEntity();
+        existing.setPageCode("NET_CONTROL");
+        existing.setSettingKey("NET_CONTROL_END_TIME");
+        existing.setSettingValue("23:30");
+        when(valueMapper.findGlobalByKeys(eq("NET_CONTROL"), anyList())).thenReturn(List.of(existing));
+
+        java.util.List<SettingSaveTransactionHook.SettingSaveEvent> events = new java.util.ArrayList<>();
+        SettingsServiceImpl withHook = new SettingsServiceImpl(catalogMapper, valueMapper, NO_VALIDATORS,
+                List.of(events::add));
+
+        withHook.saveGlobalSettingFields("tester", Map.of("netControlEndTime", "21:00"));
+
+        // 保存トランザクションの中で、**変わった設定**だけが渡る（実行スケジュールの適用時刻を書く側が使う）
+        assertEquals(1, events.size());
+        assertEquals("tester", events.get(0).operator());
+        assertEquals(Map.of("NET_CONTROL", Map.of("NET_CONTROL_END_TIME", "21:00")),
+                events.get(0).changedByPage());
+    }
+
+    @Test
+    void saveHookIsNotCalledWhenNothingChanged() {
+        when(catalogMapper.findByPageAndKeys(eq("NET_CONTROL"), anyList()))
+                .thenReturn(List.of(catalog("NET_CONTROL_END_TIME", "TIME", null)));
+        SettingValueEntity existing = new SettingValueEntity();
+        existing.setPageCode("NET_CONTROL");
+        existing.setSettingKey("NET_CONTROL_END_TIME");
+        existing.setSettingValue("23:30");
+        when(valueMapper.findGlobalByKeys(eq("NET_CONTROL"), anyList())).thenReturn(List.of(existing));
+
+        java.util.List<SettingSaveTransactionHook.SettingSaveEvent> events = new java.util.ArrayList<>();
+        SettingsServiceImpl withHook = new SettingsServiceImpl(catalogMapper, valueMapper, NO_VALIDATORS,
+                List.of(events::add));
+
+        withHook.saveGlobalSettingFields("tester", Map.of("netControlEndTime", "23:30"));
+
+        // 同じ値を保存し直しただけ → 適用時刻は動かさない（過去の補償を止めない）
+        assertEquals(1, events.size());
+        assertTrue(events.get(0).changedByPage().isEmpty());
+    }
+
+    @Test
+    void saveHookFailureRollsBackTheSave() {
+        when(catalogMapper.findByPageAndKeys(eq("NET_CONTROL"), anyList()))
+                .thenReturn(List.of(catalog("NET_CONTROL_END_TIME", "TIME", null)));
+        when(valueMapper.findGlobalByKeys(eq("NET_CONTROL"), anyList())).thenReturn(List.of());
+        SettingsServiceImpl withHook = new SettingsServiceImpl(catalogMapper, valueMapper, NO_VALIDATORS,
+                List.of(event -> {
+                    throw new IllegalStateException("適用時刻を書けません");
+                }));
+
+        // フックの例外はそのまま外へ出る（＝@Transactional がロールバックする。片方だけ残さない）
+        IllegalStateException thrown = assertThrows(IllegalStateException.class,
+                () -> withHook.saveGlobalSettingFields("tester", Map.of("netControlEndTime", "21:00")));
+        assertEquals("適用時刻を書けません", thrown.getMessage());
+    }
+
+    @Test
     void domainValidatorIsNotCalledForBlankValues() {
         java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
         SettingsServiceImpl withValidator = new SettingsServiceImpl(catalogMapper, valueMapper,

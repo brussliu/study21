@@ -55,12 +55,16 @@ class BatchScheduleControllerTest {
     private ScheduleConfigReport report(boolean pending, String error) {
         ScheduleConfigReport.TaskStatus batR03 = new ScheduleConfigReport.TaskStatus(
                 "batR03", "LOADED", "有効", true, "毎日 23:30", null, null, "23:30",
-                List.of("23:30"), LocalDateTime.of(2026, 9, 19, 23, 30), "2026-09-19 23:30", null);
+                List.of("23:30"), LocalDateTime.of(2026, 9, 19, 23, 30), "2026-09-19 23:30", null,
+                0, null, null, 4L);
         ScheduleConfigReport.TaskStatus batL02 = new ScheduleConfigReport.TaskStatus(
                 "batL02", "INVALID", "設定不正", false, "設定不正", null, null, null,
-                List.of(), null, "設定不正", null);
+                List.of(), null, "設定不正", null,
+                3, Instant.parse("2026-09-19T14:31:00Z"), "設定が不正なため自動実行しません（3 回連続）。", 0L);
         return new ScheduleConfigReport("Asia/Tokyo", 4L, Instant.parse("2026-09-19T14:00:00Z"),
-                pending, Instant.parse("2026-09-19T14:30:00Z"), error, null, 0L, List.of(batR03, batL02));
+                pending, Instant.parse("2026-09-19T14:30:00Z"), error, null, 0L,
+                "実行設定が無い・不正なため自動実行しないバッチがあります（batL02）。",
+                List.of(batR03, batL02));
     }
 
     @Test

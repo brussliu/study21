@@ -540,8 +540,15 @@ async function loadChunkState(): Promise<boolean> {
       clearChunkManifest()
     } else {
       const saved = loadChunkManifest(id)
-      // 一覧を残していない（別の端末・保存できない環境）ときは、保存済みの連番から作る
-      chunkManifest.value = saved ?? { lastSeq: chunkSeq, totalCount: chunkSeq }
+      /*
+       * 一覧を残していない（別の端末・保存できない環境）ときは、**サーバーに保存済みの連番**から作る。
+       * これは「送れた」ことは確かなので、録れた数・送れた数のどちらもその範囲にする。
+       */
+      chunkManifest.value = saved ?? {
+        expectedLastSeq: chunkSeq, expectedCount: chunkSeq,
+        uploadedSeqs: Array.from({ length: chunkSeq }, (_, index) => index + 1),
+        lastSeq: chunkSeq, totalCount: chunkSeq
+      }
     }
     return true
   } catch (caught) {
@@ -569,6 +576,13 @@ function sendChunk(blob: Blob, sttPcm: Blob | null = null): void {
   const seq = ++chunkSeq
   // この分塊が録音のどこかを、**統一の時間軸**から取る（サーバーはこの値で時系列を並べる）
   const offsets = nextChunkOffsets()
+  /*
+   * **分塊を作った時点で「録れた」ことを記録する**（送信の成否とは別）。
+   *
+   * <p>送信が成功したときにだけ数えると、最後の分塊の送信が失敗した回に
+   * **録れているのに一覧から抜ける**（サーバーは取りこぼしを見つけられない）。</p>
+   */
+  rememberRecordedChunk(seq, offsets.endSeconds)
   uploadChain = uploadChain.then(() => uploadOne(id, { seq, blob, sttPcm, offsets, attempts: 0 }))
 }
 
@@ -587,7 +601,7 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     // 送れたら待ち行列から外す
     pendingChunks.value = pendingChunks.value.filter((item) => item.seq !== chunk.seq)
     // **送れた分塊**を一覧に数える（停止のあとにサーバーへ渡す。最後の分塊の取りこぼしを見つける）
-    rememberSentChunk(chunk.seq, chunk.offsets.endSeconds)
+    rememberUploadedChunk(chunk.seq)
     schedulePendingRetry()
     const runPath = response.data.runPath
     if (response.data.triggered && runPath !== null && runPath !== '') {
@@ -599,10 +613,15 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     }
   } catch (caught) {
     const reason = messageOf(caught, '音声を送信できませんでした。')
-    // 4xx は内容の問題なので何度送っても通らない（待ち行列には入れず、理由を出すだけ）
+    /*
+     * 4xx は内容の問題なので何度送っても通らない。ただし**黙って捨てない**:
+     * 「もう直らない分塊」として一覧に残し、画面は失う音声として出す
+     * （利用者が確認してから不完全なまま終われるようにする）。
+     */
     const status = caught instanceof ApiError ? caught.status : undefined
     if (status !== undefined && status >= 400 && status < 500) {
       syncError.value = reason
+      markChunkUnrecoverable(chunk.seq)
       return
     }
     const existing = pendingChunks.value.find((item) => item.seq === chunk.seq)
@@ -979,21 +998,75 @@ function loadChunkManifest(id: number): ClassroomChunkManifest | null {
     if (raw === null) return null
     const parsed = JSON.parse(raw) as Partial<ClassroomChunkManifest>
     if (typeof parsed.lastSeq !== 'number' || typeof parsed.totalCount !== 'number') return null
-    return { lastSeq: parsed.lastSeq, totalCount: parsed.totalCount, endSample: parsed.endSample }
+    const uploadedSeqs = Array.isArray(parsed.uploadedSeqs)
+      ? parsed.uploadedSeqs.filter((value): value is number => typeof value === 'number')
+      : []
+    return {
+      // 古い形（録れた数を持たない）は、送れた数で代用する（読み戻せるように）
+      expectedLastSeq: typeof parsed.expectedLastSeq === 'number'
+        ? parsed.expectedLastSeq : parsed.lastSeq,
+      expectedCount: typeof parsed.expectedCount === 'number'
+        ? parsed.expectedCount : parsed.totalCount,
+      uploadedSeqs: uploadedSeqs.length > 0 ? uploadedSeqs
+        : Array.from({ length: parsed.totalCount }, (_, index) => index + 1),
+      lastSeq: parsed.lastSeq,
+      totalCount: parsed.totalCount,
+      endSample: parsed.endSample,
+      unrecoverableSeqs: Array.isArray(parsed.unrecoverableSeqs)
+        ? parsed.unrecoverableSeqs.filter((value): value is number => typeof value === 'number')
+        : []
+    }
   } catch {
     return null
   }
 }
 
-/** 分塊を 1 つ送った（送った数と最後の連番を覚える）。 */
-function rememberSentChunk(seq: number, recordedSeconds: number | null): void {
-  const count = (chunkManifest.value?.totalCount ?? 0) + 1
-  chunkManifest.value = {
-    lastSeq: Math.max(seq, chunkManifest.value?.lastSeq ?? 0),
-    totalCount: count,
-    // 最後の分塊が終わる位置（録音回放の時間軸）。分塊の経過秒と同じ基準
-    endSample: recordedSeconds === null ? undefined : Math.round(recordedSeconds * TIMELINE_SAMPLE_RATE)
+/** いまの一覧（無ければ空の一覧から始める）。 */
+function currentManifest(): ClassroomChunkManifest {
+  return chunkManifest.value ?? {
+    expectedLastSeq: 0, expectedCount: 0, uploadedSeqs: [], lastSeq: 0, totalCount: 0
   }
+}
+
+/**
+ * **分塊が録れた**ことを記録する（分塊を作った時点。送信の成否とは別）。
+ *
+ * <p>「録れた数」と「送れた数」を分けて持つのが要点: 最後の分塊の送信が失敗しても、
+ * 録れた事実は残るのでサーバーが**取りこぼしを見つけられる**。</p>
+ */
+function rememberRecordedChunk(seq: number, recordedSeconds: number | null): void {
+  const manifest = currentManifest()
+  chunkManifest.value = {
+    ...manifest,
+    expectedLastSeq: Math.max(seq, manifest.expectedLastSeq),
+    expectedCount: Math.max(manifest.expectedCount + 1, seq),
+    // 最後に録れた分塊が終わる位置（録音回放の時間軸）。分塊の経過秒と同じ基準
+    endSample: recordedSeconds === null ? manifest.endSample
+      : Math.round(recordedSeconds * TIMELINE_SAMPLE_RATE)
+  }
+  saveChunkManifest()
+}
+
+/** **送信が成功した**分塊を記録する（送れた連番そのものを持つ）。 */
+function rememberUploadedChunk(seq: number): void {
+  const manifest = currentManifest()
+  if (manifest.uploadedSeqs.includes(seq)) return
+  const uploaded = [...manifest.uploadedSeqs, seq].sort((left, right) => left - right)
+  chunkManifest.value = {
+    ...manifest,
+    uploadedSeqs: uploaded,
+    lastSeq: uploaded[uploaded.length - 1] ?? 0,
+    totalCount: uploaded.length
+  }
+  saveChunkManifest()
+}
+
+/** もう送り直しても直らない分塊（4xx）を記録する（黙って捨てない）。 */
+function markChunkUnrecoverable(seq: number): void {
+  const manifest = currentManifest()
+  const unrecoverable = [...(manifest.unrecoverableSeqs ?? [])]
+  if (!unrecoverable.includes(seq)) unrecoverable.push(seq)
+  chunkManifest.value = { ...manifest, unrecoverableSeqs: unrecoverable.sort((a, b) => a - b) }
   saveChunkManifest()
 }
 
@@ -1820,9 +1893,7 @@ function requestFinalize(kind: FinalizeKind, force = false): void {
  * <p>欠けている分塊があるときだけ出す入口。押したときだけサーバーへ `force` を送る
  * （既定は断るので、黙って音を失わない）。</p>
  */
-function finishIncomplete(): void {
-  requestFinalize('finish', true)
-}
+
 
 /** いま「不完全なまま終了」を出すべきか（欠けている分塊が分かっているときだけ）。 */
 const canFinishIncomplete = computed(() => (
@@ -1830,6 +1901,38 @@ const canFinishIncomplete = computed(() => (
   && finalizeCheck.value !== null
   && finalizeCheck.value.complete === false
 ))
+
+/** 直前に後端が返した「足りない連番」（文面ではなく**構造化された値**から作る）。 */
+const lastRefusalSeqs = ref('')
+
+/**
+ * いま失うことになる音声（**利用者に確認してもらう内容**）。
+ *
+ * <p>足りない連番と、送り直しても直らない分塊（4xx）をまとめて出す。空なら「失うものは無い」。</p>
+ */
+const incompleteImpact = computed(() => {
+  const parts: string[] = []
+  if (lastRefusalSeqs.value !== '') parts.push(lastRefusalSeqs.value)
+  const unrecoverable = chunkManifest.value?.unrecoverableSeqs ?? []
+  if (unrecoverable.length > 0) parts.push(`保存できなかった連番: ${unrecoverable.join('、')}`)
+  const missing = finalizeCheck.value?.missingSeqs ?? []
+  if (missing.length > 0) parts.push(`足りない連番: ${missing.join('、')}`)
+  return parts.join(' / ')
+})
+
+/** 「不完全なまま終了」を押したときの確認（押し間違いで音を失わない）。 */
+const confirmIncomplete = ref(false)
+
+/** 【不完全なまま終了】→ 影響を確かめてから（利用者の明示）実行する。 */
+function askFinishIncomplete(): void {
+  confirmIncomplete.value = true
+}
+
+/** 確認したうえで不完全なまま終える。 */
+function confirmFinishIncomplete(): void {
+  confirmIncomplete.value = false
+  requestFinalize('finish', true)
+}
 
 /**
  * 収尾の本体（**「録音を停止」と「授業を終了」で同じ 1 つ**の処理。冪等）。
@@ -2121,6 +2224,19 @@ function nowClock(): string {
   return formatElapsed(elapsedSeconds.value)
 }
 
+/**
+ * 画面を離れようとしている（保存がまだ済んでいない）。
+ *
+ * <p>**站内**の移動（一覧へ戻る・メニュー・ブラウザの戻る）は `beforeunload` では止められないので、
+ * ルートのガードからここを立てて、確認の 1 段を出す。</p>
+ */
+const leaveRequest = ref<null | {
+  /** 待ってから移動する（この約束を解決する）。 */
+  resolve: (allowed: boolean) => void
+  /** いまの状態の説明（利用者に何が残っているかを伝える）。 */
+  detail: string
+}>(null)
+
 /** 長い案内（詳細情報へ回す。主画面には出さない）。 */
 const deepNotice = ref('')
 
@@ -2201,6 +2317,21 @@ async function endRecord(id: number, force: boolean): Promise<EndOutcome> {
     }
     return { kind: 'ended', result: response.data }
   } catch (caught) {
+    /*
+     * **構造化された理由を先に読む**（日本語の文面では判断しない）。
+     *
+     * <p>後端は「音声がそろっていない」ときに 409 + `data`（一覧）を返す。ここから
+     * **足りない連番・実体が無い連番・一覧に無い連番**を読み取って画面に残す
+     * （利用者はその分塊だけ送り直せる）。文面に依存すると、文言を変えた瞬間に
+     * 「不完全なまま終了」が出なくなる。</p>
+     */
+    const refusal = refusalFrom(caught)
+    if (refusal !== null) {
+      finalizeCheck.value = refusal
+      if (refusal.seqHint !== '') lastRefusalSeqs.value = refusal.seqHint
+      stopFinalize(refusal.message)
+      return { kind: 'failed' }
+    }
     // すでに終わっている（別のタブで終了した・二度押し・再読み込みのあと）ときは、
     // サーバーは 409（録音中ではありません）を返す。**エラーにせず詳細へ進む**
     if (await alreadyEnded(id)) {
@@ -2208,18 +2339,44 @@ async function endRecord(id: number, force: boolean): Promise<EndOutcome> {
       toast.info(finishNotice.value)
       return { kind: 'already' }
     }
-    /*
-     * サーバーが「分塊がそろっていない」と断ったら、**欠けている連番**を画面に残す
-     * （利用者はその分塊だけ送り直せる）。それ以外の失敗は今までどおり理由を出す。
-     */
-    const refusal = messageOf(caught, '授業を終了できませんでした。')
-    if (refusal.includes('分塊') || refusal.includes('連番')) {
-      stopFinalize(`${refusal} 音声の一部を失うことを確認したうえで終える場合は`
-        + '【不完全なまま終了】を押してください。')
-      return { kind: 'failed' }
-    }
-    stopFinalize(refusal)
+    stopFinalize(messageOf(caught, '授業を終了できませんでした。'))
     return { kind: 'failed' }
+  }
+}
+
+/**
+ * 後端が返した**構造化された理由**（409 + 一覧）を読む。
+ *
+ * <p>読めなければ null（＝別の失敗。文面では判断しない）。</p>
+ */
+function refusalFrom(caught: unknown): {
+  complete: boolean
+  missingSeqs: number[]
+  storedChunks: number
+  expectedChunks: number
+  reason: string | null
+  /** 画面に出す「足りない／失う連番」。 */
+  seqHint: string
+  /** 画面に出す理由（日本語。後端の文面をそのまま使う）。 */
+  message: string
+} | null {
+  if (!(caught instanceof ApiError)) return null
+  const data = caught.data as Partial<ClassroomFinalizeCheck> | null | undefined
+  if (data === null || data === undefined || typeof data !== 'object') return null
+  const missing = Array.isArray(data.missingSeqs)
+    ? data.missingSeqs.filter((value): value is number => typeof value === 'number')
+    : []
+  if (missing.length === 0 && data.complete !== false) return null
+  const seqHint = missing.length === 0 ? '' : `足りない連番: ${missing.join('、')}`
+  return {
+    complete: data.complete === true,
+    missingSeqs: missing,
+    storedChunks: typeof data.storedChunks === 'number' ? data.storedChunks : 0,
+    expectedChunks: typeof data.expectedChunks === 'number' ? data.expectedChunks : 0,
+    reason: typeof data.reason === 'string' ? data.reason : null,
+    seqHint,
+    message: `${caught.message} 音声の一部を失うことを確認したうえで終える場合は`
+      + '【不完全なまま終了】を押してください。'
   }
 }
 
@@ -2327,7 +2484,102 @@ function onBeforeUnload(event: BeforeUnloadEvent): void {
   event.returnValue = ''
 }
 
+/**
+ * **画面を離れてよいか**（站内の移動を含めて守る）。
+ *
+ * <p>見るのは「未保存の音声が残っていないか」:</p>
+ * <ol>
+ *   <li>録音中・収尾中・送り残しがある</li>
+ *   <li>書き起こしの収尾（`/finish`）がまだ済んでいない</li>
+ * </ol>
+ *
+ * <p>済んでいれば確認を出さない（**保存が終わったあとの正常な遷移で毎回止めない**）。</p>
+ */
+function needsLeaveConfirmation(): boolean {
+  if (recording.value || finishing.value) return true
+  if (pendingChunks.value.length > 0) return true
+  return !sttFinalized
+}
+
+/** いま残っているものの説明（確認の 1 段に出す）。 */
+function leaveDetail(): string {
+  const parts: string[] = []
+  if (recording.value) parts.push('録音中です')
+  if (pendingChunks.value.length > 0) parts.push(`送れていない音声が ${pendingChunks.value.length} 件あります`)
+  if (finishing.value) parts.push('音声の保存と書き起こしの仕上げが途中です')
+  if (!sttFinalized && !finishing.value && !recording.value) parts.push('書き起こしの仕上げが済んでいません')
+  return parts.join('。')
+}
+
+/**
+ * 移動を止めて確認する（許可されたら true）。
+ *
+ * <p>ルートのガードから呼ぶ。出した確認の答えを受け取るまで移動しない。</p>
+ */
+function askLeave(): Promise<boolean> {
+  if (!needsLeaveConfirmation()) return Promise.resolve(true)
+  if (leaveRequest.value !== null) {
+    // すでに確認中（連打・戻るの連続）: 前の答えを待たずに止める
+    return Promise.resolve(false)
+  }
+  return new Promise<boolean>((resolve) => {
+    leaveRequest.value = { resolve, detail: leaveDetail() }
+  })
+}
+
+/** 【保存が終わるのを待って移動】: 収尾を済ませてから移動する。 */
+async function leaveAfterSaving(): Promise<void> {
+  const request = leaveRequest.value
+  if (request === null) return
+  leaveRequest.value = null
+  toast.info('音声の保存と書き起こしの仕上げを待ってから移動します。')
+  // 収尾（停止 → 送り切り → 書き起こしの確定）を済ませてから許可する
+  requestFinalize('stop')
+  await finalizeSettled()
+  request.resolve(true)
+}
+
+/** 【保存せずに移動】: 未送信の音声を捨てて移動する（利用者が明示したときだけ）。 */
+function leaveWithoutSaving(): void {
+  const request = leaveRequest.value
+  if (request === null) return
+  leaveRequest.value = null
+  request.resolve(true)
+}
+
+/** 【この画面に残る】。 */
+function stayOnPage(): void {
+  const request = leaveRequest.value
+  if (request === null) return
+  leaveRequest.value = null
+  request.resolve(false)
+}
+
+/** 走っている収尾が済むまで待つ（走っていなければすぐ返る）。 */
+async function finalizeSettled(): Promise<void> {
+  // 収尾は 1 つだけ走る（`finalizeRunning`）ので、終わるまで短く待つ
+  for (let attempt = 0; attempt < 600 && finalizeRunning; attempt += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 100))
+  }
+}
+
+/**
+ * **站内（アプリの中）の移動**も守る。
+ *
+ * <p>`beforeunload` はブラウザのタブを閉じるときや再読み込みでしか動かず、**一覧へ戻る・
+ * メニュー・ブラウザの戻る**は止められない。ここではルーターの移動そのものを止める。
+ * この画面が生きているあいだだけ効く（離れたあとは外す）。</p>
+ */
+let stillMounted = true
+const removeLeaveGuard = router.beforeEach((to, from) => {
+  if (!stillMounted || from.path === to.path) return true
+  return askLeave()
+})
+
 onBeforeUnmount(() => {
+  // この画面が生きているあいだだけ守る（離れたあとに他の移動を止めない）
+  stillMounted = false
+  removeLeaveGuard()
   // 続きから録れるように、時間軸の位置と送った分塊の一覧を残してから片付ける
   saveTimelineState()
   window.removeEventListener('beforeunload', onBeforeUnload)
@@ -2469,6 +2721,13 @@ onBeforeUnmount(() => {
           <div><dt>言語モード</dt><dd data-cr-live-language-mode>{{ languageMode }}</dd></div>
           <div><dt>前置詞</dt><dd data-cr-live-preset>{{ preset }}</dd></div>
           <div><dt>保存した分塊</dt><dd>{{ finalizeCheck?.storedChunks ?? 0 }} 件</dd></div>
+          <!-- 録れた数と送れた数は**別**（送れなかった最後の分塊を取りこぼさないために分ける） -->
+          <div>
+            <dt>録れた／送れた分塊</dt>
+            <dd data-cr-manifest-counts>
+              {{ chunkManifest?.expectedCount ?? 0 }} 件 / {{ chunkManifest?.totalCount ?? 0 }} 件
+            </dd>
+          </div>
           <div v-if="finalizeCheck !== null && finalizeCheck.missingSeqs.length > 0">
             <dt>足りない連番</dt><dd data-cr-details-missing>{{ finalizeCheck.missingSeqs.join(', ') }}</dd>
           </div>
@@ -2657,6 +2916,67 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
+      <!--
+        **画面を離れる確認**（站内の移動も守る）。未保存の音声が残っているときだけ出す。
+        移行できる道は 3 つ:「保存が終わるのを待つ」「保存せずに移動」「この画面に残る」。
+      -->
+      <div v-if="leaveRequest !== null" class="cr-confirm" data-cr-leave-confirm>
+        <p class="cr-confirm__title">まだ保存が終わっていません。このまま移動しますか？</p>
+        <p class="cr-confirm__impact" data-cr-leave-detail>{{ leaveRequest.detail }}</p>
+        <p class="cr-confirm__note">
+          移動すると、送れていない音声は失われます（保存が済んだところまでは残ります）。
+        </p>
+        <div class="cr-confirm__actions">
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-leave-stay
+            @click="stayOnPage"
+          >
+            この画面に残る
+          </button>
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-leave-wait
+            @click="leaveAfterSaving"
+          >
+            保存が終わるのを待って移動
+          </button>
+          <button
+            type="button" class="btn btn--danger btn--sm" data-cr-leave-now
+            @click="leaveWithoutSaving"
+          >
+            保存せずに移動
+          </button>
+        </div>
+      </div>
+
+      <!--
+        **不完全なまま終える確認**（利用者が影響を確かめてから押す）。
+        押し間違いで音を失わないように、確認の 1 段を挟む。
+      -->
+      <div v-if="confirmIncomplete" class="cr-confirm" data-cr-incomplete-confirm>
+        <p class="cr-confirm__title">音声の一部を失ったまま授業を終えますか？</p>
+        <p class="cr-confirm__impact" data-cr-incomplete-impact>
+          {{ incompleteImpact === '' ? '失う音声はありません。' : incompleteImpact }}
+        </p>
+        <p class="cr-confirm__note">
+          録音した音のうち、上の連番の区間は再生できません（書き起こしにも入りません）。
+          残りの音と書き起こしは保存されます。
+        </p>
+        <div class="cr-confirm__actions">
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-incomplete-cancel
+            @click="confirmIncomplete = false"
+          >
+            やめる
+          </button>
+          <button
+            type="button" class="btn btn--danger btn--sm" data-cr-incomplete-ok
+            :disabled="finishing" @click="confirmFinishIncomplete"
+          >
+            失うことを確認して終了
+          </button>
+        </div>
+      </div>
+
       <!-- 録音開始・停止 ／ 授業を終了 -->
       <div class="cr-live__foot">
         <button
@@ -2682,7 +3002,7 @@ onBeforeUnmount(() => {
         -->
         <button
           v-if="canFinishIncomplete" type="button" class="btn btn--ghost btn--sm"
-          data-cr-finish-incomplete @click="finishIncomplete"
+          data-cr-finish-incomplete @click="askFinishIncomplete"
         >
           不完全なまま終了（音声の一部を失います）
         </button>
