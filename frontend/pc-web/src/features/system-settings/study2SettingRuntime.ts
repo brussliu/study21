@@ -4,6 +4,7 @@
 // Study2 の最新 setting.js（2026-08-26）を移行した暫定ランタイム。
 // 画面構造は Vue が管理し、設定項目の定義・描画・操作はこのランタイムが担当する。
 import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './aiSettingsLayout';
+import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSET_RULES, scheduleOffsetProblem } from '@/features/batch/batchSchedule';
 (function() {
   'use strict';
 
@@ -134,16 +135,33 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
       tabField(f('intensiveQuestionUserPrompt','User Prompt','batC18','textarea',null,'{{article_json}}、{{question_groups_json}}、{{question_figures_json}}を置換します。'),'User Prompt')
     ]},
     { id: 'study_monitor', label: '学習状況モニター', icon: 'fa-video', description: '動画の取込時間帯、スナップショット、およびAI分析条件を設定します。', sections: [
-      { id:'bat-l02', title:'batL02（動画取込・スナップショット）', description:'監視カメラの動画を取り込み、指定した間隔でスナップショットを切り出す条件を設定します。', icon:'fa-video', tabs:['基本設定','カメラ基本情報'], ioNotice:{icon:'fa-video',input:'監視カメラ動画',output:'スナップショット画像'}, fieldKeys:['monitorVideoSourceDirectory','monitorSnapshotOutputDirectory','monitorVideoProcessingStartTime','monitorVideoProcessingEndTime','monitorSnapshotIntervalSeconds','monitorCameraLocation','monitorCameraContext'] },
-      { id:'bat-l03', title:'batL03（学習状況AI分析）', description:'スナップショットをAIで分析し、学習状態を判定します。', icon:'fa-brain', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-brain',input:'スナップショット画像',output:'学習状態（JSON）'}, fieldKeys:['monitorFirstAiProvider','monitorAiBatchLimit','monitorAiThreads','monitorAiTimeoutSeconds','monitorAiImageResolution','monitorFirstSystemPrompt','monitorFirstUserPrompt'] }
+      { id:'bat-l02', title:'batL02（動画取込・スナップショット）', description:'監視カメラの動画を取り込み、指定した間隔でスナップショットを切り出す条件を設定します。', icon:'fa-video', tabs:['基本設定','カメラ基本情報'], ioNotice:{icon:'fa-video',input:'監視カメラ動画',output:'スナップショット画像'}, fieldKeys:['monitorVideoSourceDirectory','monitorSnapshotOutputDirectory','monitorVideoProcessingStartTime','monitorVideoProcessingEndTime','monitorSnapshotIntervalSeconds','monitorCameraLocation','monitorCameraContext','scheduleNoticeL02','monitorL02IntervalMinutes','monitorL02OffsetMinutes'] },
+      { id:'bat-l03', title:'batL03（学習状況AI分析）', description:'スナップショットをAIで分析し、学習状態を判定します。', icon:'fa-brain', tabs:['基本設定','System Prompt','User Prompt'], ioNotice:{icon:'fa-brain',input:'スナップショット画像',output:'学習状態（JSON）'}, fieldKeys:['monitorL03IntervalMinutes','monitorL03OffsetMinutes','scheduleNoticeL03','monitorFirstAiProvider','monitorAiBatchLimit','monitorAiThreads','monitorAiTimeoutSeconds','monitorAiImageResolution','monitorFirstSystemPrompt','monitorFirstUserPrompt'] }
     ], fields: [
       tabField(f('monitorVideoSourceDirectory','動画ソースフォルダ','基本設定','text',null,'batL02 が再帰的に動画ファイルを検索するフォルダです。サーバー上の絶対パスを指定してください。'),'基本設定'),
       tabField(f('monitorSnapshotOutputDirectory','スナップショット保存フォルダ','基本設定','text',null,'batL02 が切り出した画像を保存するサーバー上の絶対パスです。動画ソースと同じマウント配下を推奨します。'),'基本設定'),
-      tabField(f('monitorVideoProcessingStartTime','動画処理開始時刻','基本設定','time',null,'この時刻以降に撮影開始した動画だけを処理します。'),'基本設定'),
-      tabField(f('monitorVideoProcessingEndTime','動画処理終了時刻','基本設定','time',null,'この時刻までに撮影開始した動画だけを処理します。'),'基本設定'),
-      rangeField(tabField(f('monitorSnapshotIntervalSeconds','スナップショット間隔（秒）','基本設定','range',null,'batL02 が動画から画像を切り出す間隔です（10〜600 秒、10 秒刻み）。', 10, 600),'基本設定'),10,'秒',''),
+      /*
+       * 学習状況モニターの 3 つの「時間」は**別の概念**なので、必ず区別して書く（利用者の指示）。
+       *   1. 実行間隔（monitorL02IntervalMinutes）… batL02 という**バッチをいつ動かすか**
+       *   2. 動画処理時間帯（monitorVideoProcessing*Time）… **どの撮影時刻の動画を取り込むか**
+       *   3. スナップショット間隔（monitorSnapshotIntervalSeconds）… 動画から**何秒ごとに画像を切るか**
+       * ここを混同させると「5 分ごとに切図される」等の誤解になるため、欄も説明も分けて置く。
+       */
+      tabField(f('monitorVideoProcessingStartTime','動画処理時間帯（開始）','基本設定','time',null,'この時刻以降に**撮影開始した動画**だけを取り込みます（batL02 の実行間隔ではありません）。'),'基本設定'),
+      tabField(f('monitorVideoProcessingEndTime','動画処理時間帯（終了）','基本設定','time',null,'この時刻までに**撮影開始した動画**だけを取り込みます（batL02 の実行間隔ではありません）。'),'基本設定'),
+      rangeField(tabField(f('monitorSnapshotIntervalSeconds','スナップショット間隔（秒）','基本設定','range',null,'動画から画像を切り出す間隔です（10〜600 秒、10 秒刻み）。**バッチの実行間隔ではありません**。', 10, 600),'基本設定'),10,'秒',''),
       tabField(f('monitorCameraLocation','設置場所','カメラ基本情報','text',null,'例：自習室の学習机正面。唯一のカメラの設置場所を管理します（AIには渡しません）。'),'カメラ基本情報'),
       tabField(f('monitorCameraContext','撮影範囲・補足','カメラ基本情報','textarea',null,'例：机、椅子、PC画面、ノートが映る。カメラの管理情報として保存します（AIには渡しません）。'),'カメラ基本情報'),
+      // batL02 の**実行設定**（バッチをいつ動かすか。2019-09 に統合スケジューラへ移した）
+      scheduleNoticeField('scheduleNoticeL02','batL02 の実行設定',
+        '「実行間隔」「ずらし」は **batL02（バッチ）をいつ動かすか**です。上の「動画処理時間帯」は**どの撮影時刻の動画を取り込むか**、「スナップショット間隔」は動画から**何秒ごとに画像を切るか**で、それぞれ別の設定です。'),
+      intervalRadioField(f('monitorL02IntervalMinutes','実行間隔（バッチを動かす間隔）','基本設定','select',intervalChoices(),'batL02 を実行する間隔です。毎時「ずらし + n × 実行間隔」分に実行します。動画を取り込む時間帯や、画像を切る間隔ではありません。')),
+      offsetRadioField(f('monitorL02OffsetMinutes','ずらし（毎時の何分に実行するか）','基本設定','select',[],'毎時の「ずらし + n × 実行間隔」分に実行します（0〜実行間隔-1 分。実行間隔 5 分なら 0〜4 分の 5 択）。')),
+      // batL03 の**実行設定**（batL02 と同じ規則。AI 分析の条件とは別の概念）
+      scheduleNoticeField('scheduleNoticeL03','batL03 の実行設定',
+        '「実行間隔」「ずらし」は **batL03（バッチ）をいつ動かすか**です。下の「1回のAI分析枚数」や「スレッド数」は 1 回の分析で扱う量で、実行する間隔ではありません。'),
+      intervalRadioField(f('monitorL03IntervalMinutes','実行間隔（バッチを動かす間隔）','基本設定','select',intervalChoices(),'batL03 を実行する間隔です。毎時「ずらし + n × 実行間隔」分に実行します。AI 分析 1 回あたりの枚数（下の項目）ではありません。')),
+      offsetRadioField(f('monitorL03OffsetMinutes','ずらし（毎時の何分に実行するか）','基本設定','select',[],'毎時の「ずらし + n × 実行間隔」分に実行します（0〜実行間隔-1 分。実行間隔 5 分なら 0〜4 分の 5 択）。')),
       fullField(tabField(f('monitorFirstAiProvider','使用モデル','基本設定','ai-model-dropdown',null,'学習状態の判定に使用するモデルです。通常は Qwen3-VL-Flash を選択します。'),'基本設定')),
       rangeField(tabField(f('monitorAiBatchLimit','1回のAI分析枚数','基本設定','range',null,'batL03 を手動実行したときに分析する最大画像数です。', 10, 100),'基本設定'),1,'枚',''),
       rangeField(tabField(f('monitorAiThreads','スレッド数','基本設定','range',null,'batL03 が同時にAI分析する画像数です。APIの同時実行制限に合わせて設定してください。',1,10),'基本設定'),1,'',''),
@@ -151,6 +169,19 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
       tabField(f('monitorAiImageResolution','AI送信画像解像度','基本設定','select',['3840×2160','2560×1440','1920×1080','1280×720'],'元のスナップショットは変更せず、AIへ送信する画像のみ縮小します。'),'基本設定'),
       tabField(f('monitorFirstSystemPrompt','System Prompt','System Prompt','textarea',null,'画面内容を優先して、6種類の状態と confidence / reason をJSONで返します。'),'System Prompt'),
       tabField(f('monitorFirstUserPrompt','User Prompt','User Prompt','textarea',null,'画像左上の撮影日時を確認するよう指示し、画像だけを渡します。'),'User Prompt')
+    ]},
+    /*
+     * ネットワーク制御。2.0 は batR03（インターネット利用終了 23:30）と
+     * batR04（利用開始 06:30）の実行時刻がコードと通知文に固定だった。2.1 は設定で変えられる
+     * （スケジューラがこの 2 つのキーを読んで計画実行点を決める）。
+     * **有効／無効のスイッチはここに置かない**（唯一の正は BAT_バッチコントロール情報 で、
+     * 切り替える入口はバッチ一覧のスイッチ。設定画面に 2 つ目のスイッチを作らない）。
+     */
+    { id: 'network_control', label: 'ネットワーク制御', icon: 'fa-network-wired', description: 'インターネット利用の開始／終了時刻を設定します。実行するのはバッチ管理の batR04（利用開始）と batR03（利用終了）です。有効／無効はバッチ一覧のスイッチで切り替えます。', sections: [
+      { id:'net-times', title:'batR04 / batR03（定時実行）', description:'端末のネットワーク制御を切り替える 2 つのバッチの実行時刻です。', icon:'fa-clock', tabs:['基本設定'], fieldKeys:['netControlStartTime','netControlEndTime'] }
+    ], fields: [
+      tabField(f('netControlStartTime','インターネット利用開始時刻','基本設定','time',null,'この時刻に batR04 が実行され、端末を通常モード（T）へ戻します。既定は 06:30 です。実行の有効／無効はバッチ一覧のスイッチで切り替えます。'),'基本設定'),
+      tabField(f('netControlEndTime','インターネット利用終了時刻','基本設定','time',null,'この時刻に batR03 が実行され、端末を停止モード（S）へ切り替えます。既定は 23:30 です。実行の有効／無効はバッチ一覧のスイッチで切り替えます。'),'基本設定')
     ]},
     { id: 'daily_report', label: '学習日報', icon: 'fa-clipboard-list', description: '学習日報の通知（ホーム画面のリマインダーと、提出時に LINE へ送る内容）を設定します。', fields: [
       f('dailyReportReminderEnabled','未記入リマインダー','ホーム画面通知','select',[{value:'true',label:'有効'},{value:'false',label:'無効'}],'有効の場合、当日の学習日報がまだ保存されていないとホーム画面に案内を表示します。'),
@@ -488,6 +519,60 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
   function fullField(field) { field.full = true; return field; }
   function rangeField(field, step, suffix, storageSuffix) { field.step = step || 1; field.suffix = suffix || ''; field.storageSuffix = storageSuffix || ''; return field; }
   function _toggleField(field) { field.trueValue = 'true'; field.falseValue = 'false'; return field; }
+  /*
+   * 「実行設定」（バッチをいつ動かすか）の欄。
+   *
+   * 実行間隔とずらしは**概念が違う**ので、ずらしは選べる値を実行間隔に追随させる
+   * （範囲は 0〜実行間隔-1 分。実行間隔 5 分なら 0〜4 分の 5 択）。
+   * 候補はバックエンドの ScheduleRuleCatalog / TaskSchedule と同じ規則
+   * （ずれると保存が 400 になり、スケジュールも組めない）。
+   * 保存の前にも collectValues() の値で範囲を確かめる（saveSettings）。
+   */
+  function intervalRadioField(field) {
+    // ラジオの候補を押した時点で「ずらし」の候補を組み替える（bindEvents の change）
+    field.scheduleInterval = true;
+    return field;
+  }
+  function offsetRadioField(field) {
+    // 候補（0〜実行間隔-1）は**保存値が読めてから**renderField / syncOffsetField が組む
+    // （ここは定義を書く場所なので currentSettings を読めない）
+    field.scheduleOffset = true;
+    return field;
+  }
+  /** ずらしの欄のキーから、対になる実行間隔のキーを引く（規則は batchSchedule.ts が唯一の定義）。 */
+  function intervalKeyOf(offsetKey) {
+    const rule = SCHEDULE_OFFSET_RULES.find(function(item) { return item.offsetKey === offsetKey; });
+    return rule ? rule.intervalKey : '';
+  }
+  /** 実行間隔の欄のキーから、対になるずらしのキーを引く。 */
+  function offsetKeyOf(intervalKey) {
+    const rule = SCHEDULE_OFFSET_RULES.find(function(item) { return item.intervalKey === intervalKey; });
+    return rule ? rule.offsetKey : '';
+  }
+  /**
+   * 実行間隔（分）に対するずらしの候補。
+   *
+   * 保存されている値が範囲外（例: 実行間隔を 5 分へ変えたが、ずらしに 9 分が残っている）のときは、
+   * **その値を先頭に「現在の値（範囲外）」として残す**。消してしまうと選択が外れて空で保存され、
+   * 何が保存されていたのか分からなくなるため（保存前の検証で弾いて選び直させる）。
+   */
+  function offsetOptionsFor(intervalMinutes, currentValue) {
+    const options = Array.from({ length: offsetMaxMinutes(intervalMinutes) + 1 }, function(_, minutes) {
+      return { value: String(minutes), label: minutes + ' 分' };
+    });
+    const current = String(currentValue == null ? '' : currentValue).trim();
+    if (current !== '' && !options.some(function(option) { return option.value === current; })) {
+      options.unshift({ value: current, label: current + ' 分（現在の値・範囲外）' });
+    }
+    return options;
+  }
+  /** 読み取り専用の説明（実行間隔・動画処理時間帯・スナップショット間隔を混同させないための注記）。 */
+  function scheduleNoticeField(key, label, help) {
+    const field = f(key, label, '基本設定', 'notice', null, help);
+    field.noticeOnly = true;
+    field.full = true;
+    return field;
+  }
   function aiModelDropdownField(key, group, help, includeBigModel) {
     const field = f(key,'使用モデル',group,'ai-model-dropdown',null,help);
     field.includeBigModel = Boolean(includeBigModel);
@@ -583,6 +668,7 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
 
   function renderPage() {
     const categories = visibleCategories();
+    renderScheduleSection();
     byId('settingCategoryNav').innerHTML = normalizeIcons(categories.map(function(category, index) {
       // external の分類（AI生図 / AI授業記録）は項目をこのランタイムが持たないので件数は出さない
       const count = category.external ? '' : '<small>' + category.fields.length + '</small>';
@@ -592,6 +678,24 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
       return '<article class="setting-panel" data-panel="' + category.id + '"' + (index ? ' hidden' : '') + '><header class="setting-panel-head"><h3>' + escapeHtml(category.label) + '</h3><p>' + escapeHtml(category.description) + '</p></header>' + renderCategoryBody(category) + '</article>';
     }).join(''));
     applyValues(currentSettings);
+  }
+
+  /**
+   * 実行スケジュール（読み取り専用）のマウント点を、設定カテゴリの**上**に 1 つだけ置く。
+   *
+   * 中身は Vue コンポーネント（features/batch/BatchSchedulePanel.vue）が Teleport で入れる。
+   * ここが描くのは空のマウント点だけ（`data-schedule-slot`）。
+   * カテゴリの内部に置くと「どのカテゴリの設定か」に見えてしまうため、外（ワークスペースの前）に置く。
+   * renderPage() は何度でも呼ばれる（再読込・保存後）ので、2 つ作らないようにする。
+   */
+  function renderScheduleSection() {
+    if (byId('settingScheduleSlot')) return;
+    const host = document.createElement('div');
+    host.id = 'settingScheduleSlot';
+    host.dataset.scheduleSlot = 'batch-schedule';
+    const workspace = document.querySelector('.setting-workspace');
+    if (workspace && workspace.parentNode) workspace.parentNode.insertBefore(host, workspace);
+    else byId('settingPanels').parentNode.insertBefore(host, byId('settingPanels'));
   }
 
   function renderCategoryBody(category) {
@@ -698,11 +802,27 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
   }
 
   function renderField(field) {
+    /*
+     * 読み取り専用の説明（実行間隔・動画処理時間帯・スナップショット間隔の混同を防ぐ注記）。
+     * 入力欄も値も持たないので、collectValues() にも載らない（キーが未定義キーとして 400 にならない）。
+     */
+    if (field.noticeOnly) {
+      return '<div class="setting-field full setting-schedule-notice" data-schedule-notice="' + escapeHtml(field.key) + '">' +
+        '<strong><i class="fas fa-clock"></i> ' + escapeHtml(field.label) + '</strong>' +
+        (field.help ? '<p>' + escapeHtml(field.help) + '</p>' : '') + '</div>';
+    }
     const value = currentSettings[field.key] == null ? '' : currentSettings[field.key];
     let control;
     if (field.type === 'select' || field.type === 'ai-model-select') {
-      const options = field.type === 'ai-model-select' ? aiModelOptions(field.includeBigModel) : field.options.map(function(option) { return typeof option === 'object' ? option : { value: option, label: option }; });
-      control = '<div class="setting-radio-group' + (field.disabled ? ' is-disabled' : '') + '" id="setting_' + field.key + '" role="radiogroup" aria-labelledby="' + groupCaptionId(field) + '">' + options.map(function(option) {
+      // ずらしの欄: 候補は 0〜実行間隔-1 分（実行間隔は保存値から読む）
+      const options = field.scheduleOffset
+        ? offsetOptionsFor(currentSettings[intervalKeyOf(field.key)], value)
+        : (field.type === 'ai-model-select' ? aiModelOptions(field.includeBigModel) : field.options.map(function(option) { return typeof option === 'object' ? option : { value: option, label: option }; }));
+      // 実行設定の「実行間隔」は、選び直したときに「ずらし」の候補（0〜間隔-1）を組み替える
+      const scheduleAttrs = field.scheduleInterval
+        ? ' data-schedule-interval="true" data-schedule-offset-key="' + escapeHtml(offsetKeyOf(field.key)) + '"'
+        : '';
+      control = '<div class="setting-radio-group' + (field.disabled ? ' is-disabled' : '') + '" id="setting_' + field.key + '" role="radiogroup" aria-labelledby="' + groupCaptionId(field) + '"' + scheduleAttrs + '>' + options.map(function(option) {
         return '<label class="setting-radio-option"><input type="radio" name="setting_' + field.key + '" value="' + escapeHtml(option.value) + '"' + (field.disabled ? ' disabled' : '') + '> <span>' + escapeHtml(option.label) + '</span></label>';
       }).join('') + '</div>';
     } else if (field.type === 'dropdown' || field.type === 'ai-model-dropdown') {
@@ -829,10 +949,21 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
 
   function saveSettings() {
     const button = byId('settingSaveBtn');
+    const values = collectValues();
+    /*
+     * 実行設定（ずらし）は保存の前に画面で弾く。範囲外の値は DB の INT（0..59）は通っても
+     * スケジューラが「設定不正」として**自動実行を止める**ので、送る前に気付かせる。
+     * （実行間隔・ずらしの規則は features/batch/batchSchedule.ts が唯一の定義）
+     */
+    const problem = scheduleOffsetProblem(values);
+    if (problem) {
+      showToast(problem);
+      return;
+    }
     button.disabled = true;
     setButtonContent(button, '<i class="fas fa-circle-notch fa-spin"></i> 保存中');
-    postJson('/api/admin/setting/saveSettings', { userId:'setting.jsp', settings:collectValues() }).then(function(data) {
-      currentSettings = data.settings || collectValues();
+    postJson('/api/admin/setting/saveSettings', { userId:'setting.jsp', settings:values }).then(function(data) {
+      currentSettings = data.settings || values;
       applyValues(currentSettings);
       showToast(data.message || '設定を保存しました。');
     }).catch(function(error) { showToast(error.message || '設定の保存に失敗しました。'); }).finally(function() { button.disabled=false; setButtonContent(button, '<i class="fas fa-save"></i> 設定を保存'); });
@@ -875,6 +1006,39 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
   }
 
   function showToast(message) { const toast=byId('settingToast'); window.clearTimeout(toastTimer); toast.textContent=message; toast.classList.add('show'); toastTimer=window.setTimeout(function(){toast.classList.remove('show');},2800); }
+
+  /**
+   * ずらしの候補を実行間隔に追随させる（0〜実行間隔-1 分）。
+   *
+   * 実行間隔を 60 → 5 分へ変えたときなど、いま選ばれているずらしが範囲外になったら
+   * 選択を外して注意を出す（範囲外の値をそのまま保存させない）。
+   * 引数は実行間隔のラジオを包む div（`[data-schedule-interval]`）。
+   */
+  function syncOffsetField(intervalGroup) {
+    const offsetKey = intervalGroup.dataset.scheduleOffsetKey || '';
+    if (!offsetKey) return;
+    const group = byId('setting_' + offsetKey);
+    if (!group) return;
+    const radio = intervalGroup.querySelector('input[type="radio"]:checked');
+    const rawInterval = radio ? radio.value : '';
+    const interval = parseIntervalMinutes(rawInterval);
+    const max = offsetMaxMinutes(rawInterval);
+    const current = String(currentSettings[offsetKey] == null ? '' : currentSettings[offsetKey]);
+    const parsed = Number.parseInt(current, 10);
+    const inRange = Number.isFinite(parsed) && parsed >= 0 && parsed <= max;
+    // 画面を触った以上、これから保存する値は選択中のものとして扱う（保存前の検証と同じ値になる）
+    if (!inRange) currentSettings[offsetKey] = '';
+    group.innerHTML = offsetOptionsFor(rawInterval, inRange ? current : '').map(function(option) {
+      return '<label class="setting-radio-option"><input type="radio" name="setting_' + offsetKey + '" value="' + escapeHtml(option.value) + '"> <span>' + escapeHtml(option.label) + '</span></label>';
+    }).join('');
+    if (inRange) {
+      const selected = group.querySelector('input[value="' + current + '"]');
+      if (selected) selected.checked = true;
+    } else {
+      showToast('ずらしを 0〜' + max + ' 分に選び直してください（実行間隔 ' + interval + ' 分）。');
+    }
+  }
+
   function bindEvents() {
     byId('settingCategoryNav').addEventListener('click', function(event) { const button=event.target.closest('[data-category]'); if (button) activateCategory(button.dataset.category); });
     byId('settingPanels').addEventListener('click', function(event) {
@@ -888,6 +1052,10 @@ import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './a
     });
     byId('settingPanels').addEventListener('change', function(event) {
       if (event.target && ['setting_essayOcrAiProvider','setting_intensiveOcrAiProvider'].includes(event.target.name)) updateOcrPromptStates();
+      // 実行設定: 実行間隔を選び直したら、ずらしの候補（0〜実行間隔-1）を組み替える
+      // （data-schedule-interval はラジオを包む div に付くので、closest で拾う）
+      const intervalGroup = event.target && event.target.closest ? event.target.closest('[data-schedule-interval]') : null;
+      if (intervalGroup) syncOffsetField(intervalGroup);
     });
     byId('settingPanels').addEventListener('input', function(event) {
       if (event.target && event.target.type === 'range') updateRangeControl(event.target);

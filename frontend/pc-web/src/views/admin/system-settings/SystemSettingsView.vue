@@ -3,6 +3,7 @@ import { onMounted } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import GeometryAiSettingsSection from '@/views/admin/system-settings/GeometryAiSettingsSection.vue'
 import ClassroomAiSettingsSection from '@/views/admin/system-settings/ClassroomAiSettingsSection.vue'
+import BatchSchedulePanel from '@/features/batch/BatchSchedulePanel.vue'
 import '@/features/system-settings/system-settings.css'
 import '@/features/system-settings/study2SettingRuntime'
 
@@ -39,6 +40,14 @@ onMounted(() => {
         <AppIcon name="check" />
         設定を保存
       </button>
+    </div>
+
+    <!-- 実行スケジュール（読み取り専用）。**設定カテゴリの上**に置く（どのカテゴリの設定にも
+         見えないように）。読み取りと【設定を再読み込み】だけを持つ（Cron は編集させない）。
+         マウント点の id（#settingScheduleSlot）は E2E と設定ランタイムの目印で、
+         ランタイム側は同じ id が在れば作り直さない。 -->
+    <div id="settingScheduleSlot" data-schedule-slot="batch-schedule">
+      <BatchSchedulePanel />
     </div>
 
     <section class="setting-workspace card">

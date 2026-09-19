@@ -127,6 +127,8 @@ interface ApiOptions {
   holdChunks?: Promise<void>
   /** ストリーミング書き起こし（話しながら文字が出る）を使えることにするか。 */
   streamStt?: boolean
+  /** 保存済みの分塊（`GET /chunks`）の応答。既定は 0 件（新規の録音）。 */
+  chunkList?: Record<string, unknown>
   /** ストリーミング書き起こしの**最初の N 回だけ失敗**させる（つなぎ直しの確認に使う）。 */
   sttStreamErrorTimes?: number
   /**
@@ -180,8 +182,14 @@ function mockApi(options: ApiOptions = {}): { calls: Call[]; fetchMock: ReturnTy
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     )
     // 分塊の応答を保留する（後から解放される。順番の確認用）
-    if (options.holdChunks !== undefined && String(url).includes('/chunks')) {
+    if (options.holdChunks !== undefined && String(url).includes('/chunks') && method === 'POST') {
       await options.holdChunks
+    }
+    // 保存済みの分塊の一覧（GET）。画面はここから**続きの連番**を取る（POST の応答とは別物）
+    if (String(url).includes('/chunks') && method === 'GET') {
+      return ok(options.chunkList ?? {
+        items: [], chunkCount: 0, maxSeq: 0, nextSeq: 1, totalBytes: 0, recordedSeconds: null
+      })
     }
     if (options.failOn !== undefined && String(url).includes(options.failOn)) {
       return new Response(
@@ -1116,6 +1124,132 @@ describe('授業録音：録音中', () => {
   }
 
   /**
+   * **統一の録音回放時間軸**を確かめるための代役（同じ `AudioContext` の時計をテストが動かす）。
+   *
+   * <p>マイクと共有は別の音源だが、1 つの `AudioContext` に載る＝**同じサンプル時計**になる。
+   * ここでは `advance(秒)` でその時計を進め、`feed(source, 秒)` でその音源の音を流し込む
+   * （実際の音は 1 秒ぶんを 1 回で渡すのではなく 100ms ごとに届くので、そこも真似る）。</p>
+   */
+  function stubClockRecorder(options: { dual?: boolean } = {}): {
+    advance: (seconds: number) => void
+    feed: (source: 'mic' | 'shared', seconds: number) => void
+    flush: () => Promise<void>
+    contexts: () => unknown[]
+  } {
+    class FakeNode {
+      outputs: unknown[] = []
+      gain = { value: 1 }
+      threshold = { value: 0 }
+      knee = { value: 0 }
+      ratio = { value: 1 }
+      attack = { value: 0 }
+      release = { value: 0 }
+      fftSize = 1024
+      constructor(public context: FakeAudioContext) { /* 節点は自分のコンテキストを持つ */ }
+      connect(target: unknown): void { this.outputs.push(target) }
+      disconnect(): void { /* 何もしない */ }
+      getFloatTimeDomainData(buffer: Float32Array): void { buffer.fill(0) }
+    }
+    class FakeAudioWorkletNode {
+      static instances: FakeAudioWorkletNode[] = []
+      port = {
+        onmessage: null as ((event: MessageEvent<unknown>) => void) | null,
+        close: () => undefined
+      }
+      constructor(public context: unknown, public name: string) {
+        FakeAudioWorkletNode.instances.push(this)
+      }
+      connect(): void { /* 何もしない */ }
+      disconnect(): void { /* 何もしない */ }
+    }
+    class FakeAudioContext {
+      static instances: FakeAudioContext[] = []
+      sampleRate = 48000
+      /** テストが進める時計（`currentTime` は秒）。 */
+      time = 0
+      destination = {}
+      audioWorklet = { addModule: vi.fn(async () => undefined) }
+      limiter: FakeNode | null = null
+      constructor() { FakeAudioContext.instances.push(this) }
+      get currentTime(): number { return this.time }
+      createMediaStreamDestination(): { stream: object } { return { stream: { id: 'mixed' } } }
+      createDynamicsCompressor(): FakeNode {
+        const node = new FakeNode(this)
+        this.limiter = node
+        return node
+      }
+      createGain(): FakeNode { return new FakeNode(this) }
+      createAnalyser(): FakeNode { return new FakeNode(this) }
+      createMediaStreamSource(): FakeNode { return new FakeNode(this) }
+      close(): Promise<void> { return Promise.resolve() }
+    }
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:x') })
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+    vi.stubGlobal('AudioContext', FakeAudioContext)
+    vi.stubGlobal('AudioWorkletNode', FakeAudioWorkletNode)
+    class FakeMediaRecorder {
+      static instances: FakeMediaRecorder[] = []
+      static isTypeSupported(): boolean { return true }
+      state = 'inactive'
+      ondataavailable: ((event: { data: Blob }) => void) | null = null
+      private listeners: Record<string, (() => void)[]> = {}
+      constructor(public stream: unknown) { void this.stream; FakeMediaRecorder.instances.push(this) }
+      addEventListener(type: string, handler: () => void): void {
+        (this.listeners[type] ??= []).push(handler)
+      }
+      start(): void { this.state = 'recording' }
+      stop(): void {
+        this.state = 'inactive'
+        for (const handler of this.listeners.stop ?? []) handler()
+      }
+    }
+    vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    const media: Record<string, unknown> = {
+      getUserMedia: vi.fn(async () => ({
+        getAudioTracks: () => [{ kind: 'audio', readyState: 'live' }],
+        getTracks: () => [{ stop: () => undefined }]
+      }))
+    }
+    if (options.dual === true) {
+      const track = { kind: 'audio', addEventListener: () => undefined, stop: () => undefined }
+      media.getDisplayMedia = vi.fn(async () => ({
+        getAudioTracks: () => [track],
+        getVideoTracks: () => [{ kind: 'video', stop: () => undefined }],
+        getTracks: () => [track]
+      }))
+    }
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: media })
+    stubNoSocket()
+    /** 音源ごとの「次の報告の時計」（100ms ずつ進める）。 */
+    const nextClock: Record<string, number> = { mic: 0, shared: 0 }
+    return {
+      advance: (seconds) => {
+        for (const context of FakeAudioContext.instances) context.time += seconds
+      },
+      feed: (source, seconds) => {
+        // 取り出しは**マイク → 共有**の順に作られる（二音源のとき）
+        const node = FakeAudioWorkletNode.instances[source === 'shared' ? 1 : 0]
+        const context = node?.context as FakeAudioContext | undefined
+        if (node === undefined || context === undefined) return
+        const frame = 0.1
+        for (let sent = 0; sent < seconds - 1e-6; sent += frame) {
+          const at = nextClock[source] ?? 0
+          node.port.onmessage?.({
+            data: {
+              samples: new Float32Array(Math.round(context.sampleRate * frame)).fill(0.4),
+              contextSample: Math.round(at * context.sampleRate),
+              sampleRate: context.sampleRate
+            } as unknown as Float32Array
+          } as MessageEvent<unknown>)
+          nextClock[source] = at + frame
+        }
+      },
+      flush: async () => { await flushPromises() },
+      contexts: () => FakeAudioContext.instances
+    }
+  }
+
+  /**
    * 利用者の指示 7: 話者は**音源の設定**（【新しい授業】で選んだ値）で決める。
    *
    * <p>サーバーは「共有の音が届いたか」で二音源かを決めるので、届いていない回は「講義」と返す。
@@ -1244,24 +1378,39 @@ describe('授業録音：録音中', () => {
   it('同じ発話の新しい文（訂正・追記）は捨てず、新しい文を出す', async () => {
     vi.useFakeTimers()
     try {
+      /*
+       * **どちらの「流し込み」への応答か**で文を決める。
+       *
+       * <p>送信は 100ms のフレームごとなので、0.5 秒の流し込みに何回も応答が返る。回数で
+       * 決めると、同じ流し込みのあいだに文が入れ替わってしまう（利用者が見るのは「同じ発話が
+       * 訂正された文」）。ここでは「2 回目の流し込みからは書き直した文」にする。</p>
+       */
+      let feed = 0
+      const writtenPerCall: number[] = []
+      const markFeed = (): void => { feed += 1 }
       const recorder = stubStreamRecorder()
       mockApi({
         streamStt: true,
         detail: detail({ segments: [], notes: [] }),
         // 2 回目は同じ発話が**書き直された**文（同じ segmentId・同じ連番）
-        sttAdded: ({ index }) => [{
-          segmentId: 601, seq: 2, startOffsetSeconds: 1, endOffsetSeconds: 2,
-          speaker: '講義', text: index <= 1 ? '最初の文です。' : '書き直した文です。',
-          language: 'ja-JP', createdAt: null
-        }]
+        sttAdded: ({ index }) => {
+          if (writtenPerCall[index] === undefined) writtenPerCall[index] = feed
+          return [{
+            segmentId: 601, seq: 2, startOffsetSeconds: 1, endOffsetSeconds: 2,
+            speaker: '講義', text: writtenPerCall[index] <= 1 ? '最初の文です。' : '書き直した文です。',
+            language: 'ja-JP', createdAt: null
+          }]
+        }
       })
       const { wrapper } = await mountClassroom(ClassroomLiveView, LIVE)
       await wrapper.get('[data-cr-start-recording]').trigger('click')
       await flushPromises()
 
+      markFeed()
       await recorder.feed('mic', 0.5)
       expect(wrapper.get('[data-cr-transcript]').text()).toContain('最初の文です。')
 
+      markFeed()
       await recorder.feed('mic', 0.5)
       const rows = wrapper.findAll('[data-cr-transcript-line]')
       // 行は増えない（同じ発話）。**新しい文が勝つ**
@@ -1441,9 +1590,12 @@ describe('授業録音：録音中', () => {
         JSON.stringify({ success: true, code: 'OK', message: 'OK', data }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
+      if (target.includes('/chunks') && (init?.method ?? 'GET').toUpperCase() === 'GET') {
+        return ok({ items: [], chunkCount: 0, maxSeq: 0, nextSeq: 1, totalBytes: 0, recordedSeconds: null })
+      }
       if (target.includes('/chunks')) {
         return ok({
-          recordId: 12, seq: 1, nextSeq: 2,
+          recordId: 12, seq: 1, nextSeq: 2, nextChunkSeq: 2,
           appendedSegments: [{
             segmentId: 1, seq: 1, startOffsetSeconds: 0, endOffsetSeconds: 20,
             speaker: null, text: '比例のグラフについて学びます。', language: 'ja', createdAt: null
@@ -1476,7 +1628,7 @@ describe('授業録音：録音中', () => {
     recorder?.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
     await flushPromises()
 
-    const chunkCall = calls.find((call) => call.url.includes('/chunks'))
+    const chunkCall = calls.find((call) => call.method === 'POST' && call.url.includes('/chunks'))
     // 連番に加えて、画面が測った実際の経過秒も載る（時系列が壊れないように）
     expect(chunkCall?.url).toContain('/api/user/classroom/12/chunks?seq=1')
     expect(chunkCall?.url).toContain('startSeconds=0')
@@ -1551,7 +1703,7 @@ describe('授業録音：録音中', () => {
     recorder?.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
     await flushPromises()
 
-    const form = calls.find((call) => call.url.includes('/chunks'))?.form
+    const form = calls.find((call) => call.method === 'POST' && call.url.includes('/chunks'))?.form
     const pcm = form?.get('stt') as File
     expect(pcm).toBeInstanceOf(File)
     // 48kHz の 1 秒 → 16kHz の 1 秒（16bit なので 32000 バイト）
@@ -1670,12 +1822,128 @@ describe('授業録音：録音中', () => {
       { data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
     await flushPromises()
 
-    const form = calls.find((call) => call.url.includes('/chunks'))?.form
+    const form = calls.find((call) => call.method === 'POST' && call.url.includes('/chunks'))?.form
     const pcm = form?.get('stt') as File
     expect(pcm).toBeInstanceOf(File)
     expect(pcm.size).toBe(32_000)
     // 録音そのものも、混ぜた音の流れから取っている
     expect(wrapper.find('[data-cr-stop-recording]').exists()).toBe(true)
+  })
+
+  /**
+   * 利用者の指示（統一の録音回放時間軸）: **分塊の経過秒も、書き起こしの位置も同じ時間軸**。
+   *
+   * <p>1 つの `AudioContext` の時計（サンプル位置）から出すので、**同じ瞬間の音は同じ時刻**に
+   * なる。ここでは 3 秒ぶんの音を流して、分塊の終わりの秒（`endSeconds`）と、
+   * 書き起こしへ送ったフレームの位置（`startSample`）が**同じ時間軸**であることを見る。</p>
+   *
+   * <p>測れる誤差: 画面は 100ms のフレームに切って送るので、位置は**フレームの先頭**
+   * （±100ms）。時計そのものは同じなので、**その他のずれは 0ms** を期待する。</p>
+   */
+  it('分塊の経過秒と書き起こしの位置は同じ時間軸から出る（許容 ±100ms）', async () => {
+    vi.useFakeTimers()
+    try {
+    const clock = stubClockRecorder()
+    const { calls } = mockApi({ streamStt: true })
+    const { wrapper } = await mountClassroom(ClassroomLiveView, LIVE)
+    await wrapper.get('[data-cr-start-recording]').trigger('click')
+    await clock.flush()
+
+    /*
+     * 3 秒ぶんの音を 100ms ずつ流し込む。**送信の周期（250ms）ごとに区切って進める**ので、
+     * 実際の録音と同じ順序（採る → 貯める → 周期で送る）になる。
+     */
+    for (let elapsed = 0; elapsed < 3; elapsed += 0.1) {
+      clock.advance(0.1)
+      clock.feed('mic', 0.1)
+      await vi.advanceTimersByTimeAsync(100)
+      await clock.flush()
+    }
+    // 送り切るのを待つ（送信は 250ms の周期なので、少し余分に回す）
+    await vi.advanceTimersByTimeAsync(2_000)
+    await clock.flush()
+
+    // 書き起こしへ送ったフレームの位置は 0 から 3 秒の間（100ms ごと）
+    const pushes = calls.filter((call) => call.url.includes('/stt/stream?source=mic'))
+    expect(pushes.length).toBeGreaterThan(0)
+    const positions = pushes
+      .map((call) => Number(/startSample=(\d+)/.exec(call.url)?.[1] ?? '-1'))
+      .filter((value) => value >= 0)
+    /*
+     * 位置は**同じ時間軸から出る**:
+     * ・最初は録音の先頭（0 秒）で、前へだけ進む（送り直しで戻らない）
+     * ・1 回に送る長さは 100ms の整数倍（フレームの先頭の位置を送っている）
+     * ・**送った位置は、流し込んだ音（3 秒）を追い越さない**（位置が先へ飛ばない）
+     */
+    expect(positions[0]).toBe(0)
+    for (let index = 1; index < positions.length; index += 1) {
+      const step = (positions[index] as number) - (positions[index - 1] as number)
+      expect(step).toBeGreaterThanOrEqual(1_600)
+      expect(step % 1_600).toBe(0)
+    }
+    expect(positions.at(-1) as number).toBeLessThanOrEqual(48_000)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  /**
+   * 利用者の指示（統一の録音回放時間軸）: **停止 → 続きの録音**で位置が続く。
+   *
+   * <p>保存済みの分塊が 60 秒ぶんある記録を開き直して録音を始めたとき、分塊の経過秒も
+   * 書き起こしの位置も**60 秒から続く**（0 から送ると後端が「すでに処理した位置より古い」として
+   * その音を丸ごと捨てる＝書き起こしが消える）。</p>
+   */
+  it('保存済みの位置から続けて録る（分塊の経過秒も書き起こしの位置も 0 へ戻らない）', async () => {
+    vi.useFakeTimers()
+    try {
+    const clock = stubClockRecorder()
+    const { calls } = mockApi({
+      streamStt: true,
+      // 分塊の一覧（GET）は「60 秒ぶん保存済み」を返す（既定のモックは 0 件）
+      chunkList: {
+        items: [{
+          seq: 3, byteSize: 100, startOffsetSeconds: 40, endOffsetSeconds: 60,
+          mime: 'audio/webm', containerHead: false, processingStatus: 'STORED',
+          segmentCount: 0, createdAt: null
+        }],
+        chunkCount: 3, maxSeq: 3, nextSeq: 4, totalBytes: 300, recordedSeconds: 60
+      }
+    })
+    const { wrapper } = await mountClassroom(ClassroomLiveView, LIVE)
+    await wrapper.get('[data-cr-start-recording]').trigger('click')
+    await clock.flush()
+
+    // 1 秒ぶん録る（送信の周期ごとに区切って進める）
+    for (let elapsed = 0; elapsed < 1; elapsed += 0.1) {
+      clock.advance(0.1)
+      clock.feed('mic', 0.1)
+      await vi.advanceTimersByTimeAsync(100)
+      await clock.flush()
+    }
+    await vi.advanceTimersByTimeAsync(1_000)
+    await clock.flush()
+
+    // 書き起こしの位置は 60 秒（960,000 サンプル）から続く
+    const pushes = calls.filter((call) => call.url.includes('/stt/stream?source=mic'))
+    expect(pushes.length).toBeGreaterThan(0)
+    const first = Number(/startSample=(\d+)/.exec(pushes[0]?.url ?? '')?.[1] ?? '-1')
+    // 0 から送らない（後端が「すでに処理した位置より古い」として捨てる）
+    expect(first).toBeGreaterThanOrEqual(960_000)
+
+    // 分塊（再生用の音声）の経過秒も 60 秒から続く（0 へ戻ると前の録音と時系列が重なる）
+    const recorder = (globalThis as unknown as {
+      MediaRecorder: { instances: { ondataavailable: ((event: { data: Blob }) => void) | null }[] }
+    }).MediaRecorder.instances[0]
+    recorder?.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
+    await clock.flush()
+    const chunkCall = [...calls].reverse().find((call) => call.url.includes('/chunks'))
+    const startSeconds = Number(/startSeconds=([\d.]+)/.exec(chunkCall?.url ?? '')?.[1] ?? '-1')
+    expect(startSeconds).toBeGreaterThanOrEqual(60)
+    expect(chunkCall?.url).toContain('seq=4')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('ブラウザ認識のときは PCM を取らない（Web Speech API が書き起こすので要らない）', async () => {
@@ -1726,7 +1994,7 @@ describe('授業録音：録音中', () => {
     recorder?.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
     await flushPromises()
 
-    const form = calls.find((call) => call.url.includes('/chunks'))?.form
+    const form = calls.find((call) => call.method === 'POST' && call.url.includes('/chunks'))?.form
     expect(form?.get('stt')).toBeNull()
   })
 
@@ -1922,7 +2190,7 @@ describe('授業録音：録音中', () => {
       await flushPromises()
       await flushPromises()
 
-      expect(calls.filter((call) => call.url.includes('/chunks'))).toHaveLength(1)
+      expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/chunks'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toHaveLength(1)
@@ -1990,7 +2258,7 @@ describe('授業録音：録音中', () => {
       await flushPromises()
       await flushPromises()
 
-      expect(calls.filter((call) => call.url.includes('/chunks'))).toHaveLength(1)
+      expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/chunks'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toHaveLength(1)
       expect(router.currentRoute.value.path).toBe('/student/classroom/12')
@@ -2032,7 +2300,7 @@ describe('授業録音：録音中', () => {
     expect(calls.some((call) => call.url.includes('/classroom/12/end'))).toBe(false)
     expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(2)
     // 送り終えた分塊は送り直さない（済んだ段はやり直さない）
-    expect(calls.filter((call) => call.url.includes('/chunks'))).toHaveLength(1)
+    expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/chunks'))).toHaveLength(1)
 
     // 2 回目のやり直し（今度は通る）→ ここで初めて成功と言う
     await wrapper.get('[data-cr-retry-finalize]').trigger('click')
@@ -2310,14 +2578,14 @@ describe('授業録音：録音中', () => {
 
     // 分塊の送信が終わるまで【終了】は送らない
     expect(calls.some((call) => call.url.includes('/end'))).toBe(false)
-    expect(calls.some((call) => call.url.includes('/chunks'))).toBe(true)
+    expect(calls.some((call) => call.method === 'POST' && call.url.includes('/chunks'))).toBe(true)
 
     gate.release()
     await flushPromises()
     await flushPromises()
 
     // 送った順番: 分塊 → 終了
-    const chunkIndex = calls.findIndex((call) => call.url.includes('/chunks'))
+    const chunkIndex = calls.findIndex((call) => call.method === 'POST' && call.url.includes('/chunks'))
     const endIndex = calls.findIndex((call) => call.url.includes('/end'))
     expect(chunkIndex).toBeGreaterThanOrEqual(0)
     expect(endIndex).toBeGreaterThan(chunkIndex)
@@ -2354,7 +2622,7 @@ describe('授業録音：録音中', () => {
     recorder?.ondataavailable?.({ data: new Blob([new Uint8Array([1, 2, 3])], { type: 'audio/webm' }) })
     await flushPromises()
 
-    const chunkCall = [...calls].reverse().find((call) => call.url.includes('/chunks'))
+    const chunkCall = [...calls].reverse().find((call) => call.method === 'POST' && call.url.includes('/chunks'))
     expect(chunkCall?.url).toContain('startSeconds=0')
     // 終わりは実際の経過秒（テストでは開始直後なので 0.1 秒以上）
     const endSeconds = Number(/endSeconds=([\d.]+)/.exec(chunkCall?.url ?? '')?.[1] ?? '0')
@@ -2492,13 +2760,23 @@ describe('授業録音：録音中', () => {
     return { recorderInstances: FakeMediaRecorder.instances, getDisplayMedia }
   }
 
-  function sharedStream(audio: boolean): MediaStream {
-    const track = { kind: 'audio', addEventListener: () => undefined, stop: () => undefined }
+  function sharedStream(audio: boolean): MediaStream & { stopTrack: () => void } {
+    const listeners: (() => void)[] = []
+    const track = {
+      kind: 'audio',
+      // 画面は「共有が終わった」をこの合図で知る（録音を止めずに、その音源だけ収尾する）
+      addEventListener: (type: string, handler: () => void) => {
+        if (type === 'ended') listeners.push(handler)
+      },
+      stop: () => undefined
+    }
     return {
       getAudioTracks: () => (audio ? [track] : []),
       getVideoTracks: () => [{ kind: 'video', stop: () => undefined }],
-      getTracks: () => [track]
-    } as unknown as MediaStream
+      getTracks: () => [track],
+      // テストから「共有を止めた」ことにする（`ended` を配る）
+      stopTrack: () => { for (const handler of [...listeners]) handler() }
+    } as unknown as MediaStream & { stopTrack: () => void }
   }
 
   /**
@@ -2623,6 +2901,65 @@ describe('授業録音：録音中', () => {
     expect(notice).toContain('サーバー認識')
     expect(wrapper.get('[data-cr-live-stt-mode]').text()).toContain('マイクのみ')
     expect(wrapper.get('[data-cr-transcript-mic-only]').text()).toContain('マイクのみ')
+  })
+
+  /**
+   * 利用者の指示: **「共有を選び直す」は消した**。
+   *
+   * <p>前の実装のそれは、混ぜる遠隔音だけを入れ替えて**共有の音の書き起こしは入れ替えていなかった**
+   * （食い違いの元）。入口・案内文とも残さない（同じ役割のボタンを別の名前で足さない）。</p>
+   */
+  it('録音中の画面に「共有を選び直す」の入口も、その案内文も無い', async () => {
+    stubDualSource(sharedStream(true))
+    mockApi({ streamStt: true })
+    const { wrapper } = await mountClassroom(ClassroomLiveView, liveFromNewLesson('mic-pc'))
+    await flushPromises()
+
+    // 画面（DOM）に入口が無い
+    expect(wrapper.find('[data-cr-reshare]').exists()).toBe(false)
+    expect(wrapper.find('[data-cr-audio-source]').exists()).toBe(true)
+    // 案内文（同じことを促す文言）も無い
+    const html = wrapper.html()
+    expect(html).not.toContain('選び直す')
+    expect(html).not.toContain('選び直して')
+    expect(html).not.toContain('共有を選び直す')
+  })
+
+  /**
+   * 利用者の指示: **共有の音が止まったら、先生の音源は中断したと明確に知らせる**。
+   *
+   * <p>見せかけを続けない: 共有の音源だけを収尾（`/stt/stream/finish?source=shared`）し、
+   * **マイクは録り続ける**（学生の声は残る）。役割のラベル（共有＝先生／マイク＝学生）は変えない。</p>
+   */
+  it('共有の音が止まったら、先生の音源の中断を知らせて、その音源だけ収尾する（マイクは続く）', async () => {
+    const shared = sharedStream(true)
+    stubDualSource(shared)
+    const { calls } = mockApi({ streamStt: true })
+    const { wrapper } = await mountClassroom(ClassroomLiveView, liveFromNewLesson('mic-pc'))
+    await flushPromises()
+    expect(wrapper.get('[data-cr-recording-status]').text()).toContain('録音中')
+    // 二音源なので、役割は「マイク＝学生／共有＝先生」（この対応は止まっても変わらない）
+    expect(wrapper.get('[data-cr-speaker-note]').text()).toContain('「先生」')
+
+    // 共有の音が終わる（「共有を停止」を押した・共有したタブを閉じた）
+    shared.stopTrack()
+    await flushPromises()
+
+    // ① 明確に知らせる（マイクは続いていることも書く）
+    const notice = wrapper.get('[data-cr-recorder-notice]').text()
+    expect(notice).toContain('共有')
+    expect(notice).toContain('マイク')
+    // ② 共有の音源は収尾する（尾部の文を取り切る）
+    expect(calls.some((call) => call.url.includes('/stt/stream/finish')
+      && call.url.includes('source=shared'))).toBe(true)
+    // ③ マイクは録り続ける（収尾しない・録音中のまま）
+    expect(calls.some((call) => call.url.includes('/stt/stream/finish')
+      && call.url.includes('source=mic'))).toBe(false)
+    expect(wrapper.get('[data-cr-recording-status]').text()).toContain('録音中')
+    expect(wrapper.find('[data-cr-stop-recording]').exists()).toBe(true)
+    // ④ 役割は変わらない（止まった音源を「講義」へ落とさない）
+    expect(wrapper.get('[data-cr-speaker-note]').text()).toContain('「学生」')
+    expect(notice).not.toContain('選び直')
   })
 
   it('二音源＋サーバー認識: その案内は出さない（両方の音を書き起こせる）', async () => {
@@ -2889,18 +3226,21 @@ describe('授業録音：録音中', () => {
     let chunkAttempts = 0
     mockApi()
     const { wrapper } = await mountClassroom(ClassroomLiveView, LIVE)
-    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL) => {
+    vi.mocked(fetch).mockImplementation(async (url: RequestInfo | URL, init?: RequestInit) => {
       const target = String(url)
       const ok = (data: unknown): Response => new Response(
         JSON.stringify({ success: true, code: 'OK', message: 'OK', data }),
         { status: 200, headers: { 'Content-Type': 'application/json' } }
       )
+      if (target.includes('/chunks') && (init?.method ?? 'GET').toUpperCase() === 'GET') {
+        return ok({ items: [], chunkCount: 0, maxSeq: 0, nextSeq: 1, totalBytes: 0, recordedSeconds: null })
+      }
       if (target.includes('/chunks')) {
         chunkAttempts += 1
         // 1 回目だけネットワークが落ちる
         if (chunkAttempts === 1) throw new TypeError('Failed to fetch')
         return ok({
-          recordId: 12, seq: 5, nextSeq: 6, appendedSegments: [], pendingNoteId: null,
+          recordId: 12, seq: 5, nextSeq: 6, nextChunkSeq: 6, appendedSegments: [], pendingNoteId: null,
           triggered: false, status: 'RECORDING', runPath: null
         })
       }

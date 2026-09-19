@@ -96,9 +96,14 @@ export class PcmChunkBuffer {
     this.length += samples.length
   }
 
-  /** 貯めたサンプル数。 */
+  /** 貯めたサンプル数（入力レート）。 */
   get sampleCount(): number {
     return this.length
+  }
+
+  /** 貯めたサンプル数を**録音の時間軸**（{@link TIMELINE_SAMPLE_RATE}）の長さへ直す。 */
+  timelineSamples(inputRate: number = PCM_CHUNK_SAMPLE_RATE): number {
+    return timelineSamplesOf(this.length, inputRate)
   }
 
   /** 貯めた分を 16kHz の 16bit PCM にして返す（返したら空になる）。 */
@@ -199,7 +204,19 @@ class Study21PcmCapture extends AudioWorkletProcessor {
   process (inputs) {
     const input = inputs[0]
     if (input && input[0]) {
-      this.port.postMessage(input[0].slice(0))
+      /*
+       * **この回の音の位置**（\`AudioContext\` の時計のサンプル数）を一緒に送る。
+       *
+       * <p>画面側で測ると、報告が届くまでの遅れが音源ごとに違うぶんだけ位置がずれる
+       * （マイクと共有で数百ミリ秒ずれ、同じ瞬間の発言が別の時刻になる）。ここは
+       * **同じコンテキストに載っているどの取り出しでも同じ時計**なので、この値を使えば
+       * 音源が違っても位置がそろう。</p>
+       */
+      this.port.postMessage({
+        samples: input[0].slice(0),
+        contextSample: currentFrame,
+        sampleRate: sampleRate
+      })
     }
     return true
   }
@@ -209,3 +226,46 @@ registerProcessor('study21-pcm-capture', Study21PcmCapture)
 
 /** AudioWorklet のモジュール名（この名前で registerProcessor している）。 */
 export const PCM_CAPTURE_PROCESSOR = 'study21-pcm-capture'
+
+/** AudioWorklet から届く 1 回ぶん（音と、その音が始まる時計の位置）。 */
+export interface PcmCaptureMessage {
+  /** 取り出したサンプル（入力レート）。 */
+  samples: Float32Array
+  /** この回の先頭のコンテキストの時計（サンプル数）。分からなければ undefined。 */
+  contextSample?: number
+  /** コンテキストのサンプリング周波数（分からなければ画面が持っている値を使う）。 */
+  sampleRate?: number
+}
+
+/**
+ * `AudioWorklet` からの報告を {@link PcmCaptureMessage} にそろえる。
+ *
+ * <p>古い実装（`Float32Array` をそのまま送る）でも動くようにしておく: そのときは時計が
+ * 分からないので `contextSample` は undefined になり、画面が**受け取った時刻**で代用する。</p>
+ */
+export function toPcmCaptureMessage(data: unknown): PcmCaptureMessage | null {
+  if (data instanceof Float32Array) return { samples: data }
+  if (data === null || typeof data !== 'object') return null
+  const message = data as { samples?: unknown; contextSample?: unknown; sampleRate?: unknown }
+  if (!(message.samples instanceof Float32Array)) return null
+  return {
+    samples: message.samples,
+    contextSample: typeof message.contextSample === 'number' && Number.isFinite(message.contextSample)
+      ? message.contextSample : undefined,
+    sampleRate: typeof message.sampleRate === 'number' && message.sampleRate > 0
+      ? message.sampleRate : undefined
+  }
+}
+
+/**
+ * いまのコンテキストの時計（サンプル数）。
+ *
+ * <p>取り出しの報告が届くまでの遅れを埋めるのに使う（報告に時計が載っていないとき）。
+ * 同じコンテキストなら**どの音源でも同じ値**になるので、音源をまたいだ位置合わせができる。</p>
+ */
+export function contextSampleOf(context: Pick<BaseAudioContext, 'currentTime' | 'sampleRate'>): number {
+  const seconds = Number.isFinite(context.currentTime) && context.currentTime > 0 ? context.currentTime : 0
+  const rate = Number.isFinite(context.sampleRate) && context.sampleRate > 0
+    ? context.sampleRate : PCM_CHUNK_SAMPLE_RATE
+  return Math.floor(seconds * rate)
+}

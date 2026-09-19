@@ -70,6 +70,126 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * 実行スケジュール（読み取り専用。設定画面の最上部とバッチ一覧の注意表示）
+ * 設定画面のカテゴリの上に置くので、外側の余白は設定画面側（system-settings.css）が持つ。
+ * ------------------------------------------------------------------------- */
+.batch-schedule__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.batch-schedule__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-lg);
+}
+
+.batch-schedule__notice {
+  margin: var(--sp-2) 0 0;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+.batch-schedule__loading {
+  margin: var(--sp-3) 0 0;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.batch-schedule__meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--sp-2) var(--sp-4);
+  margin: var(--sp-3) 0 0;
+}
+
+.batch-schedule__meta > div {
+  display: flex;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+
+.batch-schedule__meta dt {
+  flex: 0 0 6.5rem;
+  color: var(--text-muted);
+}
+
+.batch-schedule__meta dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* 反映待ち（保存済みだが実行設定へ未反映）。理由と再試行を行内で折り返して見せる。 */
+.batch-schedule__pending {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+}
+
+.batch-schedule__reason {
+  display: block;
+  margin-top: 2px;
+  font-size: var(--fs-xs);
+}
+
+.batch-schedule__result {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  font-size: var(--fs-sm);
+}
+
+.batch-schedule__result--failed {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.batch-schedule__table {
+  margin-top: var(--sp-3);
+}
+
+/* 実行時間の例は 1 日の分（毎時 5 分間隔なら 12 点）なので、1 行で切らず折り返す。 */
+.batch-schedule__table td:last-child {
+  max-width: 22rem;
+  overflow-wrap: anywhere;
+}
+
+/* バッチ一覧の「実行タイミング」「次回実行」。実際のタイミング（describe）と次回の時刻。 */
+.batch-page__schedule {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+}
+
+.batch-page__next-run {
+  white-space: nowrap;
+}
+
+/* 反映待ちの控えめな注意表示（バッチ一覧）。 */
+.batch-page__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  font-size: var(--fs-sm);
+}
+
+/* ---------------------------------------------------------------------------
  * AI呼出履歴の詳細（プロンプト・レスポンスの本文）
  * 本文は最大 200KB 超になるため、モーダル内でスクロールさせて画面を壊さない。
  * ------------------------------------------------------------------------- */

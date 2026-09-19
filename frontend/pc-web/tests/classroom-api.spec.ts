@@ -5,6 +5,7 @@ import {
   createClassroomRecord,
   deleteClassroomRecord,
   endClassroomRecord,
+  fetchClassroomChunks,
   fetchClassroomOptions,
   fetchClassroomPresets,
   fetchClassroomRecord,
@@ -174,6 +175,41 @@ describe('授業録音 API: user-api（/api/user/classroom）', () => {
       url: '/api/user/classroom/12/segments?afterSeq=7',
       method: 'GET'
     })
+  })
+
+  it('分塊（音声）の一覧は afterSeq つきで GET する（続きの連番と録音の位置を取る）', async () => {
+    fetchMock.mockImplementation(async () => ok({
+      items: [{ seq: 1, byteSize: 3, startOffsetSeconds: 0, endOffsetSeconds: 20, mime: 'audio/webm',
+        containerHead: true, processingStatus: 'TRANSCRIBED', segmentCount: 1, createdAt: null }],
+      chunkCount: 1, maxSeq: 1, nextSeq: 2, totalBytes: 3, recordedSeconds: 20
+    }))
+
+    const response = await fetchClassroomChunks(12)
+    expect(recorded(fetchMock).at(-1)).toMatchObject({
+      url: '/api/user/classroom/12/chunks?afterSeq=0',
+      method: 'GET'
+    })
+    // 画面はこの nextSeq をそのまま次の分塊の連番にする（転写の連番から作らない）
+    expect(response.data.nextSeq).toBe(2)
+    expect(response.data.recordedSeconds).toBe(20)
+
+    await fetchClassroomChunks(12, 5)
+    expect(recorded(fetchMock).at(-1)).toMatchObject({
+      url: '/api/user/classroom/12/chunks?afterSeq=5',
+      method: 'GET'
+    })
+  })
+
+  it('分塊アップロードの応答は、書き起こしの連番と分塊の連番を別々に返す', async () => {
+    fetchMock.mockImplementation(async () => ok({
+      recordId: 12, seq: 3, nextSeq: 4, nextChunkSeq: 9, appendedSegments: [],
+      pendingNoteId: null, triggered: false, status: 'RECORDING', runPath: null
+    }))
+
+    const response = await uploadClassroomChunk(12, 3, new Blob([new Uint8Array([1])], { type: 'audio/webm' }))
+
+    expect(response.data.nextSeq).toBe(4)
+    expect(response.data.nextChunkSeq).toBe(9)
   })
 
   it('詳細は GET /api/user/classroom/{id}（一覧は status/page/size をクエリに載せる）', async () => {

@@ -105,6 +105,85 @@ export interface BatchActiveResult {
   message: string
 }
 
+/* ---------------------------------------------------------------------------
+ * 実行スケジュール（2.1 で 4 タスクを 1 つのスケジューラへ統一したもの）
+ * ------------------------------------------------------------------------- */
+
+/**
+ * タスクごとの**設定の状態**（`TaskConfigStatus` と対応）。
+ *
+ * `MISSING` / `INVALID` のタスクは自動実行しない（コードに隠れた既定値で走らせない）。
+ */
+export type BatchScheduleConfigStatus = 'NOT_LOADED' | 'LOADED' | 'MISSING' | 'INVALID'
+
+/** 実行スケジュールの対象 1 タスク（batR03 / batR04 / batL02 / batL03）。 */
+export interface BatchScheduleTask {
+  taskCode: string
+  /** 設定の状態（未読込 / 有効 / 未設定 / 設定不正）。 */
+  status: BatchScheduleConfigStatus
+  /** 画面に出す日本語（未読込 / 有効 / 未設定 / 設定不正）。 */
+  statusLabel: string
+  /**
+   * 有効か（`BAT_バッチコントロール情報` の値。**有効／無効の唯一の正**）。
+   * 設定が無いときは null。画面から切り替えるのはバッチ一覧のスイッチだけ。
+   */
+  enabled: boolean | null
+  /** 実行タイミングの説明（例: 「毎日 23:30」「毎時 01/06/…/56 分（5 分間隔・ずらし 1 分）」）。 */
+  describe: string
+  /** INTERVAL（循環）の実行間隔（分）。DAILY（定時）は null。 */
+  intervalMinutes: number | null
+  /** INTERVAL のずらし（分）。DAILY は null。 */
+  offsetMinutes: number | null
+  /** DAILY の実行時刻（HH:mm）。INTERVAL は null。 */
+  dailyTime: string | null
+  /** 1 日の実行時刻の例（画面表示用。INTERVAL は 24 時間分）。 */
+  examplePoints: string[]
+  /** 次の計画実行時刻（設定が無い・不正なときは null）。 */
+  nextRunAt: string | null
+  /** 次の計画実行時刻の表示（例「2026-09-20 06:30」。無いときは理由）。 */
+  nextRunLabel: string
+  /** この画面が最後に計画実行点を確保した時刻（未実行は null）。 */
+  lastPlannedAt: string | null
+}
+
+/** いまメモリで効いている実行スケジュール（DB は読まない）。 */
+export interface BatchScheduleResult {
+  /** スケジュールの時計（常に Asia/Tokyo）。 */
+  zone: string
+  /** いま効いている設定の版（0 = 未読込）。 */
+  version: number
+  /** その版を DB から読んだ実時刻。 */
+  loadedAt: string | null
+  /** DB は保存済みだが、メモリへの反映がまだ成功していないか。 */
+  pendingRefresh: boolean
+  /** 「保存済み・実行設定への反映待ち（理由）。自動で再試行します。」（無いときは null）。 */
+  pendingMessage: string | null
+  /** 最後に反映を試した時刻。 */
+  lastRefreshAt: string | null
+  /** 最後の反映失敗の理由（成功なら null）。 */
+  lastRefreshError: string | null
+  /** 次の自動再試行の予定時刻（待避中でなければ null）。 */
+  nextRetryAt: string | null
+  /** スケジューラが設定を確認する間隔（秒）。 */
+  checkIntervalSeconds: number
+  /** 実行中の本数。 */
+  runningWorkers: number
+  /** 実行待ちの本数。 */
+  queuedWorkers: number
+  /** 対象 4 タスク。 */
+  tasks: BatchScheduleTask[]
+}
+
+/** 【設定を再読み込み】（管理者）の結果。再読み込み後も応答の形は同じ。 */
+export interface BatchScheduleReloadResult extends BatchScheduleResult {
+  /** メモリへの反映に成功したか。 */
+  refreshPublished: boolean
+  /** 反映に失敗した理由（成功なら null）。 */
+  refreshError: string | null
+  /** 結果の日本語（失敗しても「前の設定のまま動きます」を返す）。 */
+  message: string
+}
+
 const http = new HttpClient({ baseUrl: '/api/admin/batch' })
 
 /** バッチ一覧（有効／無効・最新実行・設定充足状態）。 */
@@ -124,6 +203,26 @@ export function updateBatchActive(
   operator?: string
 ): Promise<ApiResponse<BatchActiveResult>> {
   return http.post<BatchActiveResult>(`/tasks/${batchCode}/active`, { body: { active, operator } })
+}
+
+/**
+ * いま効いている実行スケジュール（時計・版・タスクごとの実行タイミングと次回実行時刻）。
+ *
+ * **メモリの設定を返す**（DB を読み直さない）。保存（設定画面）と有効／無効の切替は
+ * 自動で反映されるので、DB を直接触ったときだけ【設定を再読み込み】を使う。
+ */
+export function fetchBatchSchedule(): Promise<ApiResponse<BatchScheduleResult>> {
+  return http.get<BatchScheduleResult>('/schedule')
+}
+
+/**
+ * 設定を DB から読み直してメモリに反映する（管理者の再読み込み）。
+ *
+ * 反映に失敗しても 200 で返り、`refreshPublished=false` と理由が入る
+ * （保存は済んでいるので DB は巻き戻さない。前の有効な設定のまま動く）。
+ */
+export function reloadBatchSchedule(): Promise<ApiResponse<BatchScheduleReloadResult>> {
+  return http.post<BatchScheduleReloadResult>('/schedule/reload', { body: {} })
 }
 
 /** 実行履歴（新しい順・ページング）。 */

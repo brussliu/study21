@@ -70,6 +70,44 @@ function executionRow(overrides: Partial<BatchExecutionRow> = {}): BatchExecutio
 
 type Call = { url: string; method: string; body: Record<string, unknown> | null }
 
+/** 実行スケジュール（GET /api/admin/batch/schedule）の既定＝対象タスクなし。 */
+function emptySchedule(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    zone: 'Asia/Tokyo',
+    version: 0,
+    loadedAt: null,
+    pendingRefresh: false,
+    pendingMessage: null,
+    lastRefreshAt: null,
+    lastRefreshError: null,
+    nextRetryAt: null,
+    checkIntervalSeconds: 30,
+    runningWorkers: 0,
+    queuedWorkers: 0,
+    tasks: [],
+    ...overrides
+  }
+}
+
+/** スケジュールの 1 タスク（設定に基づく実行タイミングと次回実行時刻）。 */
+function scheduleTask(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    taskCode: 'batR03',
+    status: 'LOADED',
+    statusLabel: '有効',
+    enabled: true,
+    describe: '毎日 23:30',
+    intervalMinutes: null,
+    offsetMinutes: null,
+    dailyTime: '23:30',
+    examplePoints: ['23:30'],
+    nextRunAt: '2026-09-19T23:30:00',
+    nextRunLabel: '2026-09-19 23:30',
+    lastPlannedAt: null,
+    ...overrides
+  }
+}
+
 function recorded(fetchMock: ReturnType<typeof vi.fn>): Call[] {
   return fetchMock.mock.calls.map((call) => {
     const init = (call[1] ?? {}) as RequestInit
@@ -96,6 +134,7 @@ async function setup(options: {
   executions?: BatchExecutionRow[]
   total?: number
   rerunResult?: Record<string, unknown>
+  schedule?: Record<string, unknown> | null
   handlers?: (url: string, method: string) => Response | null
 } = {}) {
   const pinia = createPinia()
@@ -149,6 +188,14 @@ async function setup(options: {
     }
     if (String(url).includes('/api/admin/batch/executions')) {
       return ok({ items: executions, totalElements: total, page: 1, size: 15, totalPages: Math.max(1, Math.ceil(total / 15)) })
+    }
+    /*
+     * 実行スケジュール（GET /api/admin/batch/schedule）。既定は**空**にして、
+     * 一覧が定義のタイミング（timingLabel）へ戻る動きを今までどおり固定する
+     * （設定に基づくタイミングを見るテストは schedule を渡す）。
+     */
+    if (String(url).includes('/api/admin/batch/schedule')) {
+      return ok(options.schedule ?? emptySchedule())
     }
     return ok({ rows: tasks, totalCount: tasks.length, startupTargets: options.startupTargets ?? ['batS01'] })
   })
@@ -292,4 +339,110 @@ describe('バッチ一覧（バッチ管理＞バッチ一覧）', () => {
     expect(toastMessages().join(' ')).toContain('プロキシサーバーの起動に失敗しました。')
   })
 
+})
+
+/**
+ * 実行タイミングと次回実行（2.1 の統合スケジューラ）。
+ *
+ * 2.0 は種別 R が「定時」としか出ず、何時に動くのか分からなかった。2.1 は実行時刻・実行間隔が
+ * 設定で変わるので、一覧は `GET /api/admin/batch/schedule` を 1 回読んで
+ * **設定に基づく実際のタイミング**（describe）と**次回実行時刻**（nextRunLabel）を出す。
+ * スケジュールが取れないタスクは定義のタイミング（timingLabel）へ戻す。
+ */
+describe('バッチ一覧：実行タイミングと次回実行', () => {
+  it('設定に基づく実行タイミングと次回実行時刻を出す', async () => {
+    const { wrapper, fetchMock } = await setup({
+      tasks: [
+        taskRow({ taskCode: 'batR03', taskType: 'R', description: 'インターネット利用終了処理', pageCode: 'NET_CONTROL' }),
+        taskRow({ taskCode: 'batL02', taskType: 'L', description: '学習モニター動画取込・スナップショット切出', pageCode: 'STUDY_MONITOR' })
+      ],
+      schedule: emptySchedule({
+        version: 7,
+        tasks: [
+          scheduleTask(),
+          scheduleTask({
+            taskCode: 'batL02',
+            describe: '毎時 01/06/…/56 分（5 分間隔・ずらし 1 分）',
+            intervalMinutes: 5,
+            offsetMinutes: 1,
+            dailyTime: null,
+            examplePoints: ['00:01', '00:06'],
+            nextRunAt: '2026-09-19T12:36:00',
+            nextRunLabel: '2026-09-19 12:36'
+          })
+        ]
+      })
+    })
+
+    // スケジュールは 1 回だけ読む
+    const calls = recorded(fetchMock).filter((entry) => entry.url.endsWith('/api/admin/batch/schedule'))
+    expect(calls.length).toBe(1)
+
+    const daily = wrapper.get('tbody tr[data-batch-code="batR03"]')
+    // 種別は「R（定時）」だが、**実行タイミングの列には実際の時刻**が出る
+    expect(daily.text()).toContain('R（定時）')
+    expect(daily.text()).toContain('毎日 23:30')
+    expect(daily.text()).toContain('2026-09-19 23:30')
+
+    const interval = wrapper.get('tbody tr[data-batch-code="batL02"]')
+    expect(interval.text()).toContain('毎時 01/06/…/56 分（5 分間隔・ずらし 1 分）')
+    expect(interval.text()).toContain('ずらし 1 分')
+    expect(interval.text()).toContain('2026-09-19 12:36')
+  })
+
+  it('スケジュールを取れないタスクは定義のタイミングのままにする', async () => {
+    const { wrapper } = await setup({
+      tasks: [taskRow({ taskCode: 'batS01' })],
+      schedule: emptySchedule()
+    })
+
+    const row = wrapper.get('tbody tr[data-batch-code="batS01"]')
+    expect(row.text()).toContain('起動時＋再実行')
+    // 次回実行は分からないので「—」（バッチコード/種別/説明/有効/実行タイミング/次回実行/…）
+    expect(row.findAll('td')[5].text()).toBe('—')
+  })
+
+  it('反映待ちのときは控えめな注意表示を出す', async () => {
+    const { wrapper } = await setup({
+      schedule: emptySchedule({
+        pendingRefresh: true,
+        pendingMessage: '保存済み・実行設定への反映待ち（ずらしが範囲外です）。自動で再試行します。'
+      })
+    })
+
+    const notice = wrapper.get('[data-testid="batch-pending"]')
+    expect(notice.text()).toContain('保存済み・実行設定への反映待ち（ずらしが範囲外です）。自動で再試行します。')
+  })
+
+  it('反映待ちが無ければ注意表示を出さない', async () => {
+    const { wrapper } = await setup()
+
+    expect(wrapper.find('[data-testid="batch-pending"]').exists()).toBe(false)
+  })
+
+  it('スケジュール API が落ちても一覧は出す（定義のタイミングへ戻す）', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (String(url).includes('/api/admin/batch/schedule')) {
+        return new Response(JSON.stringify({ success: false, code: 'ERROR', message: '取得できませんでした。', data: null }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      }
+      if (String(url).includes('/api/admin/batch/executions')) {
+        return ok({ items: [], totalElements: 0, page: 1, size: 15, totalPages: 1 })
+      }
+      void method
+      return ok({ rows: [taskRow({ taskCode: 'batR03', taskType: 'R' })], totalCount: 1, startupTargets: [] })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(BatchListView, { global: { plugins: [pinia] } })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('.alert--danger').exists()).toBe(false)
+    expect(wrapper.get('tbody tr[data-batch-code="batR03"]').text()).toContain('定時')
+  })
 })

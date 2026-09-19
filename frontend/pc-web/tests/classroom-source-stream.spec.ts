@@ -313,8 +313,13 @@ describe('授業録音：常時接続（WebSocket）での送信', () => {
       const second = FakeSocket.instances[1]
       second?.open()
       await vi.advanceTimersByTimeAsync(50)
-      expect(second?.texts()[0]).toContain('"type":"resume"')
-      expect(second?.texts()[0]).toContain('"from":4')
+      /*
+       * **`resume` は送らない**（後端は番号から「その音源へ送ったサンプル数」を計算して
+       * 時間軸の下端にする。番号も位置も録音全体で通しなので、続きの録音で送ると
+       * 続きの音が全部「古い」と見られて捨てられる）。位置はフレームの見出しで毎回送る。
+       */
+      expect(second?.texts().some((text) => text.includes('"type":"resume"'))).toBe(false)
+      expect(second?.texts()[0]).toContain('"type":"frame"')
       stream.closeSocket()
     } finally {
       vi.useRealTimers()
@@ -504,8 +509,8 @@ describe('授業録音：フレームの番号と絶対位置（録音の時間�
       const second = FakeSocket.instances[1]
       second?.open()
       await vi.advanceTimersByTimeAsync(50)
-      // 後端を再起動しても位置が変わらないように、続きの番号で `resume` を送る
-      expect(second?.texts()[0]).toBe('{"type":"resume","from":4}')
+      // `resume` は送らない（位置はフレームの見出しで毎回送るので、後端は番号から計算しない）
+      expect(second?.texts().some((text) => text.includes('"type":"resume"'))).toBe(false)
       // 確認できていない 4・5 を、番号も位置も続きから送り直す
       expect(frameHeaders(second).map((header) => header.no)).toEqual([4, 5])
       expect(frameHeaders(second).map((header) => header.startSample)).toEqual([4_800, 6_400])
@@ -850,7 +855,7 @@ describe('授業録音：失敗の見分けと、常時接続からの退避', (
       const second = FakeSocket.instances[1]
       second?.open()
       await vi.advanceTimersByTimeAsync(50)
-      expect(second?.texts()[0]).toBe('{"type":"resume","from":1}')
+      expect(second?.texts().some((text) => text.includes('"type":"resume"'))).toBe(false)
       expect(frameHeaders(second).map((header) => header.no)).toEqual([1, 2, 3, 4, 5])
 
       // エラーなしの `processedFrames` だけが位置を進める
@@ -860,7 +865,7 @@ describe('授業録音：失敗の見分けと、常時接続からの退避', (
       const third = FakeSocket.instances[2]
       third?.open()
       await vi.advanceTimersByTimeAsync(50)
-      expect(third?.texts()[0]).toBe('{"type":"resume","from":4}')
+      expect(third?.texts().some((text) => text.includes('"type":"resume"'))).toBe(false)
       expect(frameHeaders(third).map((header) => header.no)).toEqual([4, 5])
       stream.closeSocket()
     } finally {

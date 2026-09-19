@@ -39,6 +39,7 @@ import {
   fromSupplementRows,
   modeDefinition,
   modeLabel,
+  outputTypeDescription,
   outputTypeLabel,
   supplementFieldsFor,
   toSupplementPayload,
@@ -231,6 +232,8 @@ const asksOutputType = computed(() => modeDefinitionOfNow.value.asksOutputType)
 const effectiveOutputType = computed<FigureOutputType>(() =>
   asksOutputType.value ? outputType.value : 'GRAPH'
 )
+/** 選んでいる種類の説明（**1 つだけ**を節の下に出す）。 */
+const outputTypeDescriptionOfNow = computed(() => outputTypeDescription(effectiveOutputType.value))
 /** その種類で使う補充項目（単純な項目が先）。 */
 const supplementFields = computed(() => supplementFieldsFor(mode.value, effectiveOutputType.value))
 /** 単純な項目と上級の項目。 */
@@ -922,119 +925,156 @@ onMounted(async () => {
             1 回の送信で実行するのは、選んだ 1 つの処理だけです。
           </p>
 
-          <fieldset class="gm-ai-fieldset">
-            <legend class="field__label">作図方法（必須）</legend>
-            <div class="gm-ai-modes" data-gm-ai-modes>
-              <label
-                v-for="definition in MODE_DEFINITIONS" :key="definition.mode" class="gm-ai-mode"
-                :class="{ 'is-active': mode === definition.mode }" :data-gm-ai-mode-option="definition.mode"
-              >
-                <input v-model="mode" type="radio" name="gm-ai-mode" :value="definition.mode">
-                <span class="gm-ai-mode__body">
-                  <span class="gm-ai-mode__head">
-                    <span class="gm-ai-mode__badge">{{ definition.mode }}</span>
-                    <span class="gm-ai-mode__label">{{ definition.label }}</span>
-                  </span>
-                  <span class="gm-ai-mode__help">{{ definition.description }}</span>
-                </span>
-              </label>
-            </div>
-          </fieldset>
-
-          <!-- 作成する図の種類（A・C・D は必須。B は GRAPH 固定なので出さない） -->
-          <fieldset v-if="asksOutputType" class="gm-ai-fieldset" data-gm-ai-output-type>
-            <legend class="field__label">作成する図の種類（必須）</legend>
+          <!-- 作図方法（A〜D）はタブ。中身はラジオなのでキーボードでも選べる -->
+          <div
+            class="gm-ai-mode-tabs" data-gm-ai-modes data-gm-ai-mode-tabs
+            role="radiogroup" aria-label="作図方法（必須）"
+          >
             <label
-              v-for="option in OUTPUT_TYPE_OPTIONS" :key="option.value" class="gm-ai-radio"
-              :data-gm-ai-output-type-option="option.value"
+              v-for="definition in MODE_DEFINITIONS" :key="definition.mode" class="gm-ai-mode"
+              :class="{ 'is-active': mode === definition.mode }" :data-gm-ai-mode-option="definition.mode"
             >
-              <input
-                v-model="outputType" type="radio" name="gm-ai-output-type" :value="option.value"
-              >
-              <span class="gm-ai-radio__body">
-                <span class="gm-ai-radio__label">{{ option.label }}</span>
-                <span class="gm-ai-radio__help">{{ option.description }}</span>
-              </span>
+              <input v-model="mode" type="radio" name="gm-ai-mode" :value="definition.mode">
+              <span class="gm-ai-mode__badge">{{ definition.mode }}</span>
+              <span class="gm-ai-mode__label">{{ definition.label }}</span>
             </label>
-            <p class="gm-hint" data-gm-ai-output-type-help>
-              指定した種類に合わない内容だったときは、勝手に種類を変えずに確認を求めます。
-            </p>
-          </fieldset>
-          <p v-else class="gm-ai-fixed-type" data-gm-ai-output-type-fixed>
+          </div>
+          <!-- 説明は**選んでいる方法の 1 つだけ**を出す（4 枚分を常に並べない） -->
+          <p class="gm-ai-mode-summary" data-gm-ai-mode-summary>
             <AppIcon name="info" size="sm" />
-            <span>「数式からグラフを作成」は<strong>関数・方程式のグラフ</strong>に固定です（種類は選べません）。</span>
+            <span>
+              <strong>{{ mode }}: {{ modeDefinitionOfNow.label }}</strong>
+              {{ modeDefinitionOfNow.description }}
+            </span>
           </p>
 
-          <!-- モードごとの補充（単純な項目が先・上級は畳む） -->
-          <div class="gm-ai-form">
-            <div v-for="field in simpleFields" :key="field.key" class="gm-form__row">
-              <span class="field__label">{{ field.label }}</span>
-              <div v-if="field.type === 'radio'" class="gm-ai-radio-group">
+          <!-- ① 作成する図の種類（A・C・D は必須。B は GRAPH 固定なので選ばせない） -->
+          <fieldset class="gm-ai-section" data-gm-ai-section="output-type">
+            <legend class="gm-ai-section__head">
+              <span class="gm-ai-section__no">1</span>
+              <span class="gm-ai-section__title" data-gm-ai-section-title>作成する図の種類</span>
+              <span class="gm-ai-section__tag gm-ai-section__tag--required" data-gm-ai-section-tag>必須</span>
+            </legend>
+            <!-- 選ばせるのは A・C・D だけ（B は GRAPH 固定）。フックは選択 UI に付ける -->
+            <template v-if="asksOutputType">
+              <div class="gm-ai-choices" data-gm-ai-output-type>
                 <label
-                  v-for="option in field.options ?? []" :key="option.value" class="gm-ai-radio gm-ai-radio--inline"
-                  :data-gm-ai-supplement-option="`${field.key}:${option.value}`"
+                  v-for="option in OUTPUT_TYPE_OPTIONS" :key="option.value" class="gm-ai-choice"
+                  :class="{ 'is-active': outputType === option.value }"
+                  :data-gm-ai-output-type-option="option.value"
                 >
-                  <input v-model="supplements[field.key]" type="radio" :name="`gm-ai-${field.key}`" :value="option.value">
-                  <span class="gm-ai-radio__body"><span class="gm-ai-radio__label">{{ option.label }}</span></span>
+                  <input v-model="outputType" type="radio" name="gm-ai-output-type" :value="option.value">
+                  <span class="gm-ai-choice__label">{{ option.label }}</span>
                 </label>
               </div>
-              <input
-                v-else-if="field.type === 'text'" v-model="supplements[field.key]" class="input" type="text"
-                :data-gm-ai-supplement="field.key"
-              >
-              <textarea
-                v-else v-model="supplements[field.key]" class="input" rows="2"
-                :data-gm-ai-supplement="field.key"
-              ></textarea>
-              <p v-if="field.help !== undefined" class="gm-hint">{{ field.help }}</p>
-            </div>
+              <!-- 説明も選んでいる 1 つだけ -->
+              <p class="gm-ai-section__note" data-gm-ai-output-type-help>
+                {{ outputTypeDescriptionOfNow }}
+                <span class="gm-ai-section__sub">
+                  指定した種類に合わない内容だったときは、勝手に種類を変えずに確認を求めます。
+                </span>
+              </p>
+            </template>
+            <p v-else class="gm-ai-fixed-type" data-gm-ai-output-type-fixed>
+              <AppIcon name="info" size="sm" />
+              <span>「数式からグラフを作成」は<strong>関数・方程式のグラフ</strong>に固定です（種類は選べません）。</span>
+            </p>
+            <p v-if="!asksOutputType" class="gm-hint" data-gm-ai-output-type-help>
+              画像に書かれた式・方程式から、関数や方程式のグラフを作ります。
+            </p>
+          </fieldset>
 
-            <!-- 上級の項目（必要な人だけ開く） -->
-            <div v-if="advancedFields.length > 0" class="gm-ai-advanced" data-gm-ai-advanced>
-              <button
-                type="button" class="gm-ai-advanced__toggle" data-gm-ai-advanced-toggle
-                :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen"
-              >
-                <AppIcon :name="advancedOpen ? 'chevron-down' : 'chevron-right'" size="sm" />
-                上級の指定（{{ advancedFields.length }} 件・任意）
-              </button>
-              <div v-if="advancedOpen" class="gm-ai-advanced__body">
-                <div v-for="field in advancedFields" :key="field.key" class="gm-form__row">
-                  <span class="field__label">{{ field.label }}</span>
-                  <input
-                    v-if="field.type === 'text'" v-model="supplements[field.key]" class="input" type="text"
-                    :data-gm-ai-supplement="field.key"
+          <!-- ② この方法の指定（任意。当てはまる項目だけを出す） -->
+          <section class="gm-ai-section" data-gm-ai-section="method">
+            <header class="gm-ai-section__head">
+              <span class="gm-ai-section__no">2</span>
+              <span class="gm-ai-section__title" data-gm-ai-section-title>この方法の指定</span>
+              <span class="gm-ai-section__tag" data-gm-ai-section-tag>任意</span>
+            </header>
+            <p class="gm-ai-section__note gm-ai-section__note--lead">
+              {{ modeDefinitionOfNow.label }}で読み取るときの指定です。空欄は既定の動きになります。
+            </p>
+            <div class="gm-ai-form">
+              <div v-for="field in simpleFields" :key="field.key" class="gm-form__row gm-ai-row">
+                <span class="field__label">{{ field.label }}</span>
+                <div v-if="field.type === 'radio'" class="gm-ai-radio-group">
+                  <label
+                    v-for="option in field.options ?? []" :key="option.value" class="gm-ai-radio gm-ai-radio--inline"
+                    :class="{ 'is-active': supplements[field.key] === option.value }"
+                    :data-gm-ai-supplement-option="`${field.key}:${option.value}`"
                   >
-                  <textarea
-                    v-else v-model="supplements[field.key]" class="input" rows="2"
-                    :data-gm-ai-supplement="field.key"
-                  ></textarea>
-                  <p v-if="field.help !== undefined" class="gm-hint">{{ field.help }}</p>
+                    <input v-model="supplements[field.key]" type="radio" :name="`gm-ai-${field.key}`" :value="option.value">
+                    <span class="gm-ai-radio__body"><span class="gm-ai-radio__label">{{ option.label }}</span></span>
+                  </label>
+                </div>
+                <input
+                  v-else-if="field.type === 'text'" v-model="supplements[field.key]" class="input" type="text"
+                  :data-gm-ai-supplement="field.key"
+                >
+                <textarea
+                  v-else v-model="supplements[field.key]" class="input" rows="2"
+                  :data-gm-ai-supplement="field.key"
+                ></textarea>
+                <p v-if="field.help !== undefined" class="gm-hint">{{ field.help }}</p>
+              </div>
+
+              <!-- 上級の項目（必要な人だけ開く） -->
+              <div v-if="advancedFields.length > 0" class="gm-ai-advanced" data-gm-ai-advanced>
+                <button
+                  type="button" class="gm-ai-advanced__toggle" data-gm-ai-advanced-toggle
+                  :aria-expanded="advancedOpen" @click="advancedOpen = !advancedOpen"
+                >
+                  <AppIcon :name="advancedOpen ? 'chevron-down' : 'chevron-right'" size="sm" />
+                  上級の指定（{{ advancedFields.length }} 件・任意）
+                </button>
+                <div v-if="advancedOpen" class="gm-ai-advanced__body">
+                  <div v-for="field in advancedFields" :key="field.key" class="gm-form__row">
+                    <span class="field__label">{{ field.label }}</span>
+                    <input
+                      v-if="field.type === 'text'" v-model="supplements[field.key]" class="input" type="text"
+                      :data-gm-ai-supplement="field.key"
+                    >
+                    <textarea
+                      v-else v-model="supplements[field.key]" class="input" rows="2"
+                      :data-gm-ai-supplement="field.key"
+                    ></textarea>
+                    <p v-if="field.help !== undefined" class="gm-hint">{{ field.help }}</p>
+                  </div>
                 </div>
               </div>
             </div>
+          </section>
 
-            <div class="gm-form__row">
-              <label class="field__label" for="gm-ai-note">補足要求（任意）</label>
-              <textarea
-                id="gm-ai-note" v-model="note" class="input" rows="3" :maxlength="NOTE_MAX"
-                placeholder="例: 点の名前は A・B・C のままにしてください。"
-                data-gm-ai-note
-              ></textarea>
-              <p class="gm-hint">
-                {{ NOTE_MAX }} 文字まで。すべてを埋める必要はありません（空欄は既定の動きになります）。
-              </p>
-            </div>
+          <!-- ③ すべての方法に共通（任意） -->
+          <section class="gm-ai-section" data-gm-ai-section="common">
+            <header class="gm-ai-section__head">
+              <span class="gm-ai-section__no">3</span>
+              <span class="gm-ai-section__title" data-gm-ai-section-title>すべての方法に共通</span>
+              <span class="gm-ai-section__tag" data-gm-ai-section-tag>任意</span>
+            </header>
+            <div class="gm-ai-form">
+              <div class="gm-form__row">
+                <label class="field__label" for="gm-ai-note">補足要求</label>
+                <textarea
+                  id="gm-ai-note" v-model="note" class="input" rows="3" :maxlength="NOTE_MAX"
+                  placeholder="例: 点の名前は A・B・C のままにしてください。"
+                  data-gm-ai-note
+                ></textarea>
+                <p class="gm-hint">
+                  {{ NOTE_MAX }} 文字まで。すべてを埋める必要はありません（空欄は既定の動きになります）。
+                </p>
+              </div>
 
-            <div class="gm-form__row">
-              <span class="field__label">元の名前とラベル</span>
-              <label class="gm-ai-check" data-gm-ai-keep-labels>
-                <input v-model="keepLabels" type="checkbox">
-                <span>元の名前・ラベルをそのまま残す（既定）</span>
-              </label>
-              <p class="gm-hint">外すと、分かりやすい名前に変えてよいことになります。</p>
+              <div class="gm-form__row">
+                <span class="field__label">元の名前とラベル</span>
+                <label class="gm-ai-check" data-gm-ai-keep-labels>
+                  <input v-model="keepLabels" type="checkbox">
+                  <span>元の名前・ラベルをそのまま残す（既定）</span>
+                </label>
+                <p class="gm-hint">外すと、分かりやすい名前に変えてよいことになります。</p>
+              </div>
             </div>
-          </div>
+          </section>
         </section>
 
         <!-- 4. 内容を確認して送信 -->

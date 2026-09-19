@@ -304,12 +304,57 @@ export interface ClassroomRecordPage {
 export interface ClassroomChunkResult {
   recordId: number
   seq: number
+  /**
+   * 次に取りに行く**書き起こし**（セグメント）の連番。
+   *
+   * **分塊の連番ではない**: 転写は文ごと、分塊は音の塊ごとで数が違う。
+   * 次の分塊の連番は `nextChunkSeq`（分塊表）を使う。
+   */
   nextSeq: number
+  /**
+   * 次に送る**分塊**の連番（分塊表の最大連番 + 1。0 件なら 1）。
+   *
+   * 開き直したときの続きの番号はこれを使う（転写の連番から作ると、
+   * 文の数と分塊の数が違う回に番号がずれる）。
+   */
+  nextChunkSeq: number
   appendedSegments: ClassroomSegment[]
   pendingNoteId: number | null
   triggered: boolean
   status: ClassroomStatus
   runPath: string | null
+}
+
+/** 保存済みの分塊 1 つ（録音の位置と処理状態）。 */
+export interface ClassroomRecordingChunk {
+  seq: number
+  byteSize: number
+  startOffsetSeconds: number | null
+  endOffsetSeconds: number | null
+  mime: string | null
+  /** この分塊が新しいコンテナ（`MediaRecorder` の作り直し）の先頭か。 */
+  containerHead: boolean
+  /** `STORED`（音声だけ）/ `TRANSCRIBED`（書き起こし済み）/ `SKIPPED`（書き起こしを省略）。 */
+  processingStatus: string
+  segmentCount: number
+  createdAt: string | null
+}
+
+/**
+ * 保存済みの分塊の一覧（`GET /classroom/{id}/chunks`）。
+ *
+ * 画面は**開き直したときの続きの連番**（`nextSeq`）と、録音の位置
+ * （`recordedSeconds`。経過時間の続き）をここから取る。
+ */
+export interface ClassroomRecordingChunkList {
+  items: ClassroomRecordingChunk[]
+  chunkCount: number
+  maxSeq: number
+  /** 次に送る分塊の連番（1 から） */
+  nextSeq: number
+  totalBytes: number
+  /** 保存済みの分塊が示す録音の位置（秒）。0 件なら null */
+  recordedSeconds: number | null
 }
 
 /**
@@ -583,6 +628,19 @@ export function fetchClassroomSegments(
   recordId: number, afterSeq = 0
 ): Promise<ApiResponse<ClassroomSegmentList>> {
   return http.get<ClassroomSegmentList>(`${BASE}/${recordId}/segments`, { params: { afterSeq } })
+}
+
+/**
+ * 保存済みの**分塊**（音声）を取る（`GET /classroom/{id}/chunks`）。
+ *
+ * 画面は「次に送る分塊の連番」（`nextSeq`）と、録音の位置（`recordedSeconds`）をここから取る。
+ * **転写セグメントの連番からは作らない**（文の数と分塊の数は違う。以前はそれを混ぜていて、
+ * 転写が分塊より多く出た回に分塊が「重複」として捨てられていた）。
+ */
+export function fetchClassroomChunks(
+  recordId: number, afterSeq = 0
+): Promise<ApiResponse<ClassroomRecordingChunkList>> {
+  return http.get<ClassroomRecordingChunkList>(`${BASE}/${recordId}/chunks`, { params: { afterSeq } })
 }
 
 /** 1 件の詳細（状態・転写全文・ノート一覧・前置詞・最終まとめ）。 */

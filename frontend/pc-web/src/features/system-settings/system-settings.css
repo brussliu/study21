@@ -556,6 +556,19 @@ textarea.setting-control { min-height: 150px; padding: 10px 12px; resize: vertic
   }
 }
 .setting-help { margin: 5px 0 0; color: #8b9aaa; font-size: 10px; line-height: 1.45; }
+
+/* ============================================================================
+   バッチの実行設定（2026-09-19）
+   ============================================================================
+   実行設定の注記（実行間隔 / 動画処理時間帯 / スナップショット間隔を混同させないための
+   読み取り専用の説明）。入力欄ではないので、周囲の入力欄と見分けが付くよう淡い面で 1 行を占める。 */
+.setting-schedule-notice { grid-column: 1 / -1; padding: 10px 12px; border: 1px solid var(--setting-line); border-left: 3px solid var(--setting-green); border-radius: 8px; background: var(--color-surface-alt); }
+.setting-schedule-notice strong { display: block; color: var(--setting-ink); font-size: 12px; }
+.setting-schedule-notice p { margin: 5px 0 0; color: var(--setting-muted); font-size: 11px; line-height: 1.5; }
+
+/* 実行スケジュール（読み取り専用）のマウント点。設定カテゴリの**上**に 1 つだけ置く
+   （中身は features/batch/BatchSchedulePanel.vue が Teleport で入れる）。 */
+#settingScheduleSlot:not(:empty) { margin-bottom: 16px; }
 .setting-api-test-row { display: flex; align-items: center; gap: 9px; margin-top: 8px; }
 .setting-api-test { min-height: 30px; padding: 0 11px; border: 1px solid #b9d1df; border-radius: 7px; background: #f4f9fb; color: #31718a; font-size: 11px; font-weight: 700; cursor: pointer; }
 .setting-api-test:hover:not(:disabled) { border-color: var(--setting-green); background: #eaf7f2; color: var(--setting-green); }

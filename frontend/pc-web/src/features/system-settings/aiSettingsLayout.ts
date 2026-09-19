@@ -64,8 +64,24 @@ const USER_PROMPT_KEYS = new Set([
   'geometryAiDTaskTemplate'
 ])
 
+/**
+ * バッチの**実行設定**（バッチをいつ動かすか）のキー。
+ *
+ * `monitorL02IntervalMinutes` は `/Timeout$/` に、`monitorL02OffsetMinutes` は `/Provider$/` に
+ * たまたま一致してしまうため、ここで先に除く（そのままだと「その他」TAB へ入り、
+ * 実行間隔が AI の通信条件として並んでしまう）。実行設定は AI の設定ではない。
+ */
+const SCHEDULE_SETTING_KEYS = new Set([
+  'monitorL02IntervalMinutes',
+  'monitorL02OffsetMinutes',
+  'monitorL03IntervalMinutes',
+  'monitorL03OffsetMinutes'
+])
+
 /** AI 呼び出しに関する設定（＝基本設定へ入るキー）。 */
 function isBasicAiKey(key: string): boolean {
+  // 実行設定（間隔・ずらし）は AI の設定ではないので、名前の一致より先に外す
+  if (SCHEDULE_SETTING_KEYS.has(key)) return false
   if (USER_PROMPT_KEYS.has(key)) return false
   return (
     // 使用モデル（スロット選択 / プロバイダー選択）
@@ -85,6 +101,9 @@ function isBasicAiKey(key: string): boolean {
 
 /** どの TAB に入れるか。 */
 export function aiTabOf(key: string): AiTab {
+  // 実行設定（実行間隔・ずらし）は「AI の通信条件」ではなく実行条件なので、基本設定に置く
+  // （AI を使わないブロックなので厳密には共通レイアウトの対象外だが、置き場所は 1 か所に決める）
+  if (SCHEDULE_SETTING_KEYS.has(key)) return AI_TAB_BASIC
   if (/UserPrompt/.test(key) || USER_PROMPT_KEYS.has(key)) return AI_TAB_USER
   if (/Prompt/.test(key)) return AI_TAB_SYSTEM
   if (isBasicAiKey(key)) return AI_TAB_BASIC

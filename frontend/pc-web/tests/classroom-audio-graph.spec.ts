@@ -15,7 +15,11 @@ import {
  *
  * <p>実機の `getDisplayMedia` はヘッドレスで確かめにくいので、ここでは「どう混ぜるか」を固定する:
  * マイクと共有音声の両方をリミッターへつなぐ / スピーカーへは**つながない**（ハウリング防止） /
- * 映像トラックは混ぜない / 共有を選び直したら入れ替える / 解放で全部切れる。</p>
+ * 映像トラックは混ぜない / 共有の音が止まってもマイクは続く / 解放で全部切れる。</p>
+ *
+ * <p>**共有を選び直す口（`replaceRemote`）は消した**（利用者の指示）。混ぜる遠隔音だけを
+ * 入れ替えても**共有の音の書き起こしは入れ替わらない**（食い違いの元）ので、途中で入れ替える
+ * 道は残さない。先生の声を録り直すときは、録音を止めて新しく始める。</p>
  */
 class FakeNode {
   readonly connected: FakeNode[] = []
@@ -127,23 +131,21 @@ describe('授業録音：音源のミックス（マイク＋PC の音）', () =
     expect(loud).toBeLessThanOrEqual(1)
   })
 
-  it('共有を選び直すと、古い共有音声を切り離して入れ替える', () => {
+  it('共有の音が止まっても、マイクの音は混ざり続ける（録音は止めない）', () => {
     const context = new FakeContext()
-    const graph = createClassroomAudioGraph(streamOf([track('audio')]), {
+    const mic = streamOf([track('audio')])
+    const remote = streamOf([track('audio')])
+    const graph = createClassroomAudioGraph(mic, {
       context: context as unknown as AudioContext,
-      remote: streamOf([track('audio')])
+      remote
     })
-    const before = context.analysers.length
-
-    graph.replaceRemote(streamOf([track('audio')]))
-
-    // 解析器が作り直される（＝古い接続は切られている）
-    expect(context.analysers.length).toBeGreaterThan(before)
     expect(graph.remoteTrack).not.toBeNull()
+    expect(graph.levels().mic).toBe(0)
 
-    // 共有をやめたときは遠隔音なしに戻せる
-    graph.replaceRemote(null)
-    expect(graph.remoteTrack).toBeNull()
+    // 共有の音が止まっても、マイクの音は混ぜた流れへ入り続ける（アナライザーは生きている）
+    context.analysers[0].samples = new Array(1024).fill(0.5)
+    expect(graph.levels().mic).toBeGreaterThan(0)
+    // 遠隔のアナライザーは残る（値を 0 のまま返す＝止まったことを音量で見分けられる）
     expect(graph.levels().remote).toBe(0)
   })
 

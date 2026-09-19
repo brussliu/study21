@@ -5,6 +5,7 @@ import { ApiError, useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
   endClassroomRecord,
+  fetchClassroomChunks,
   fetchClassroomOptions,
   fetchClassroomRecord,
   fetchClassroomSegments,
@@ -37,8 +38,16 @@ import {
   PCM_CAPTURE_PROCESSOR,
   PCM_CAPTURE_WORKLET_SOURCE,
   PCM_CHUNK_MIME,
-  PcmChunkBuffer
+  PcmChunkBuffer,
+  TIMELINE_SAMPLE_RATE,
+  contextSampleOf,
+  toPcmCaptureMessage
 } from '@/features/classroom/pcm'
+import {
+  RecordingTimeline,
+  TimelineStore,
+  type TimelineSnapshot
+} from '@/features/classroom/timeline'
 import {
   CLASSROOM_QUERY,
   formatElapsed,
@@ -165,8 +174,14 @@ const detail = ref<ClassroomRecordDetail | null>(null)
 const options = ref<ClassroomOptions | null>(null)
 const segments = ref<ClassroomSegment[]>([])
 const notes = ref<ClassroomNote[]>([])
-/** 次に要求する afterSeq（サーバーが返す nextSeq をそのまま使う）。 */
-const nextSeq = ref(0)
+/**
+ * 次に要求する**書き起こし（セグメント）**の afterSeq（サーバーが返す nextSeq をそのまま使う）。
+ *
+ * <p>**分塊（音声）の連番とは別物**。分塊の連番は `chunkSeq`（下）で、サーバーの
+ * 分塊表（`GET /classroom/{id}/chunks`）から取る。以前はこの 1 つの値を両方に使っていて、
+ * 転写が分塊より多く出た回に分塊が「重複」として捨てられていた。</p>
+ */
+const nextSegmentSeq = ref(0)
 /** 書き起こし・ノートを取れなかったときの理由（録音は続ける）。 */
 const syncError = ref('')
 /**
@@ -307,7 +322,7 @@ function sendTranscript(text: string, offsetSeconds: number): void {
       })
       syncError.value = ''
       appendSegments(response.data.appendedSegments)
-      nextSeq.value = Math.max(nextSeq.value, response.data.nextSeq)
+      nextSegmentSeq.value = Math.max(nextSegmentSeq.value, response.data.nextSeq)
       const runPath = response.data.runPath
       if (response.data.triggered && runPath !== null && runPath !== '') {
         void runClassroomNote(runPath, 'classroom-live-view').catch((cause: unknown) => {
@@ -412,28 +427,30 @@ function stopBrowserRecognition(): void {
 
 /** 分塊の長さ（秒。設定 `CLASSROOM_AI_CHUNK_SECONDS`）。 */
 const chunkSeconds = computed(() => options.value?.chunkSeconds ?? 20)
-/** 送信済みの連番（次の分塊は +1）。再送しても同じ連番にしない。 */
+/**
+ * 送信済みの**分塊**の連番（次の分塊は +1。再送しても同じ連番にしない）。
+ *
+ * <p>続きの番号は**サーバーの分塊表**（`GET /classroom/{id}/chunks` の `nextSeq`）から取る。
+ * 転写セグメントの連番（＝文の数）からは作らない（分塊の数と一致しない）。
+ * 送信のたびに応答の `nextChunkSeq` でも合わせ直す（開き直しをまたいでもずれない）。</p>
+ */
 let chunkSeq = 0
-/** サーバーが持っている最後の連番（画面を開き直したときに続きから送る）。 */
-const maxKnownSeq = computed(() => segments.value.reduce((max, segment) => Math.max(max, segment.seq), 0))
 let recorder: MediaRecorder | null = null
 let stream: MediaStream | null = null
 /** 分塊の送信を直列にする（順序が入れ替わると STT の並びが崩れるため）。 */
 let uploadChain: Promise<void> = Promise.resolve()
 /**
- * 録音を始めた時刻と、直前の分塊が終わった秒。
+ * 直前の分塊が終わった秒（**録音回放の時間軸**の位置）。
  *
- * <p>書き起こしの時刻は**ここで測った実際の経過秒**を送る。以前はサーバーが
- * 「連番 × そのときの分塊の長さ設定」で計算していたため、録音中に設定を変えると
- * 時系列が壊れた（実測: 00:00 / 00:20 / 00:40 / 00:15 …）。</p>
+ * <p>以前は `Date.now()` の差で測っていた。時計は録音の実体とずれる（停止のあいだも進む・
+ * 端末の時計が飛ぶ）ので、いまは**同じ時間軸から取る**: 書き起こしの文の時刻・転写の並び・
+ * 回放の位置がすべて 1 つの基準になる（利用者の指示）。</p>
  */
-let recorderStartedAtMs = 0
 let lastChunkEndSeconds = 0
 
-/** いまの分塊の [始まり, 終わり] 秒（実際の経過時間から。単調に増える）。 */
+/** いまの分塊の [始まり, 終わり] 秒（統一の時間軸から。単調に増える）。 */
 function nextChunkOffsets(): { startSeconds: number; endSeconds: number } {
-  const nowSeconds = recorderStartedAtMs === 0 ? 0 : (Date.now() - recorderStartedAtMs) / 1000
-  const endSeconds = Math.max(lastChunkEndSeconds + 0.1, Math.round(nowSeconds * 100) / 100)
+  const endSeconds = Math.max(lastChunkEndSeconds + 0.1, timeline.positionSeconds())
   const startSeconds = lastChunkEndSeconds
   lastChunkEndSeconds = endSeconds
   return { startSeconds, endSeconds }
@@ -463,6 +480,35 @@ let retryTimer: number | null = null
 const RETRY_DELAY_MS = 10_000
 const RETRY_MAX_ATTEMPTS = 5
 
+/**
+ * 保存済みの分塊から、**続きの連番**と**録音の位置**を取る（開き直し・停止からの再開）。
+ *
+ * <p>取れたら true。取れなかったら false（呼び側は録音を始めない）。
+ * 0 から送ると、保存済みの連番と衝突して「同じ連番に違う内容」で断られ、
+ * その回の音声が丸ごと残らない（音は後から作り直せない）。</p>
+ */
+async function loadChunkState(): Promise<boolean> {
+  const id = recordId.value
+  if (id === null) return false
+  try {
+    const response = await fetchClassroomChunks(id)
+    // 次に送るのは nextSeq（1 から）。手元の番号は「送った最後の番号」
+    chunkSeq = Math.max(0, response.data.nextSeq - 1)
+    /*
+     * 時間軸を**保存済みの位置**へ進める（画面が覚えていた位置と、後端が持っている
+     * 分塊の位置の**先のほう**）。0 に戻すと、後端がその音を「すでに処理した位置より古い」
+     * として捨て、書き起こしが消える。
+     */
+    const recorded = response.data.recordedSeconds ?? 0
+    timeline.restore(Math.round(recorded * TIMELINE_SAMPLE_RATE))
+    lastChunkEndSeconds = Math.max(recorded, timeline.positionSeconds())
+      return true
+  } catch (caught) {
+    recorderNotice.value = messageOf(caught, '保存済みの音声の状態を確認できませんでした。')
+    return false
+  }
+}
+
 /** 送信待ちの件数を画面に出す（0 のときは何も出さない）。 */
 const pendingNotice = computed(() => {
   const count = pendingChunks.value.length
@@ -477,7 +523,7 @@ function sendChunk(blob: Blob, sttPcm: Blob | null = null): void {
   const id = recordId.value
   if (id === null || blob.size === 0) return
   const seq = ++chunkSeq
-  // この分塊が録音のどこかを、実際の経過時間で測る（サーバーはこの値を使う）
+  // この分塊が録音のどこかを、**統一の時間軸**から取る（サーバーはこの値で時系列を並べる）
   const offsets = nextChunkOffsets()
   uploadChain = uploadChain.then(() => uploadOne(id, { seq, blob, sttPcm, offsets, attempts: 0 }))
 }
@@ -488,7 +534,12 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     const response = await uploadClassroomChunk(id, chunk.seq, chunk.blob, chunk.sttPcm, chunk.offsets)
     syncError.value = ''
     appendSegments(response.data.appendedSegments)
-    nextSeq.value = Math.max(nextSeq.value, response.data.nextSeq)
+    nextSegmentSeq.value = Math.max(nextSegmentSeq.value, response.data.nextSeq)
+    // 分塊の続きの番号はサーバーの分塊表に合わせる（取りこぼしても番号が飛ばない）
+    const serverChunkSeq = response.data.nextChunkSeq
+    if (typeof serverChunkSeq === 'number' && Number.isFinite(serverChunkSeq)) {
+      chunkSeq = Math.max(chunkSeq, serverChunkSeq - 1)
+    }
     // 送れたら待ち行列から外す
     pendingChunks.value = pendingChunks.value.filter((item) => item.seq !== chunk.seq)
     schedulePendingRetry()
@@ -596,6 +647,18 @@ let audioGraph: ClassroomAudioGraph | null = null
  * スピーカーの音が書き起こされなかった原因の 1 つ）。</p>
  */
 let mixContext: AudioContext | null = null
+/**
+ * **録音回放の時間軸**（マイクと共有で 1 つ）。
+ *
+ * <p>基準は累計のサンプル位置（16kHz）。`Date.now()` も画面のタイマーも使わない
+ * （どちらも録音の実体とずれる）。**停止のあいだは進めない**ので、停止 → 続きの録音では
+ * 続きの位置から積まれる（0 へ戻すと後端が古い音として捨てる）。規則と理由は
+ * `src/features/classroom/timeline.ts` と `docs/DECISIONS.md`。</p>
+ */
+const timeline = new RecordingTimeline()
+/** 時間軸の保存（記録 ID ごと。**後端の分塊の状態だけに頼らない**）。 */
+let timelineStore: TimelineStore | null = null
+
 /** マイクと遠隔の音量（表示用。0〜1） */
 const micLevel = ref(0)
 const remoteLevel = ref(0)
@@ -645,13 +708,50 @@ function recordStreamOf(): MediaStream | null {
   return audioGraph?.stream ?? stream
 }
 
-/** 共有の音が終わった（「共有を停止」・タブを閉じた）ことを知らせる。 */
+/**
+ * 共有の音が終わった（「共有を停止」を押した・共有したタブを閉じた）ときに、
+ * **先生の音源が中断したことを明確に知らせ、その音源だけを収尾する**。
+ *
+ * <p>見せかけを続けない: 途切れたあとも録音中と言い続けると、先生の声が入っていないのに
+ * 「両方録れている」と誤解させる。ここで共有の音源の送信を締めて（尾部の確定文を取り切る）、
+ * **マイクはそのまま録り続ける**（学生の声は残す）。役割のラベル（共有＝先生／マイク＝学生）は
+ * 録音の設定で決まるので、片方が止まっても変わらない。</p>
+ *
+ * <p>**選び直しは用意しない**（利用者の指示で入口を消した）: 途中で共有を入れ替えると、
+ * 混ぜる音と書き起こす音が食い違う。先生の声を録り直すときは、録音を止めて新しく始める。</p>
+ */
 function watchSharedAudio(shared: MediaStream): void {
   const remoteTrack = shared.getAudioTracks()[0]
   if (remoteTrack === undefined) return
-  remoteTrack.addEventListener('ended', () => {
-    recorderNotice.value = '共有の音が終わりました。【共有を選び直す】で再開できます。'
-  })
+  remoteTrack.addEventListener('ended', () => { void handleSharedAudioEnded() })
+}
+
+/** 共有の音源の中断（1 回だけ走らせる。`ended` が二度来ても収尾は 1 回）。 */
+let sharedEndedHandled = false
+
+async function handleSharedAudioEnded(): Promise<void> {
+  if (sharedEndedHandled) return
+  sharedEndedHandled = true
+  recorderNotice.value = '共有の音が止まりました（先生の音源は中断しました）。'
+    + 'マイクの録音は続けています（学生の声は残ります）。'
+    + '先生の声も録り直すときは、録音を止めてから新しく始めてください。'
+  // この音源だけ収尾する（残りを送り切って尾部の確定文を取り切る）。マイクは録り続ける
+  const stream = sourceStreams.shared
+  if (stream === undefined) return
+  stream.stop()
+  try {
+    await stream.finish()
+  } catch (cause) {
+    // 収尾の失敗は音源の案内として出す（成功と言わない）
+    noticeOf.shared.value = `【${SOURCE_LABELS.shared}】書き起こしの収尾に失敗しました（${
+      cause instanceof Error ? cause.message : String(cause)}）。`
+    return
+  }
+  const reason = stream.finishFailure()
+  if (reason !== null && reason !== '') {
+    noticeOf.shared.value = `【${SOURCE_LABELS.shared}】${reason}`
+  }
+  stream.closeSocket()
 }
 
 /** 用意した音源（マイク・共有・混ぜる仕組み）を全部片付ける。 */
@@ -711,7 +811,8 @@ async function requestDisplayAudio(): Promise<MediaStream | null> {
   try {
     shared = await media.getDisplayMedia(displayAudioConstraints())
   } catch {
-    recorderNotice.value = '共有が許可されませんでした。共有を選び直してください（映像は使いません）。'
+    recorderNotice.value = '共有が許可されませんでした。もう一度【録音を開始】から共有を選んでください'
+      + '（映像は使いません）。'
     return null
   }
   if (!hasAudioTrack(shared)) {
@@ -739,11 +840,68 @@ let pcmNode: AudioWorkletNode | null = null
 /** ストリーミング書き起こしを使うか（阿里巴巴のリアルタイム認識のときだけ）。 */
 const streamStt = computed(() => options.value?.streamStt === true && !browserStt.value)
 
-/** 音源ごとの PCM 取り出し（AudioWorklet）。 */
+/** 音源ごとの／混ぜた音の PCM 取り出し（AudioWorklet）。 */
 interface PcmCapture {
   context: AudioContext
   node: AudioWorkletNode
-  streamSource: MediaStreamAudioSourceNode
+  streamSource: MediaStreamAudioSourceNode | null
+}
+
+/**
+ * 書き起こしの取り出しを載せる `AudioContext`（マイクと共有で**同じ 1 つ**）。
+ *
+ * <p>混ぜているときは**混ぜるのと同じコンテキスト**を使う（別のコンテキストの節点へは
+ * `connect` できず、二音源のときだけ黙って PCM が取れなくなる）。マイクだけのときは
+ * ここで作る（`releaseAudioSources` が片付ける）。</p>
+ */
+function sharedCaptureContext(): AudioContext | null {
+  if (mixContext !== null) return mixContext
+  const AudioContextClass = window.AudioContext
+    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (AudioContextClass === undefined) return null
+  const context = new AudioContextClass()
+  mixContext = context
+  return context
+}
+
+/**
+ * 時間軸を**録音の起点**にする（統一点から始める）。
+ *
+ * <p>音源を作り直した直後は「いまの時計」を基準にする（{@link RecordingTimeline.resume}）。
+ * 音源が同じ時計のまま続いているときは、止めていたあいだの時計を入れないため
+ * 「その音源のいまの時計」を渡す。</p>
+ */
+function beginTimeline(): void {
+  if (recording.value) return
+  if (anyCaptureExists()) timeline.resume()
+  else timeline.begin()
+  // これから始める音源の位置を、いまの時間軸にそろえる（その音源の送信はここから）
+  timeline.alignSourceCaptured(SOURCES)
+  saveTimelineState()
+}
+
+/** 取り出しが 1 つでも残っているか（作り直したかどうかの判定）。 */
+function anyCaptureExists(): boolean {
+  return SOURCES.some((source) => captures[source] !== undefined)
+}
+
+/**
+ * 時間軸の状態を作り直す（記録 ID ごと）。保存してあった位置を戻す。
+ *
+ * <p>**後端の分塊の状態（`GET /chunks`）だけに頼らない**: 分塊は「送れた音声」の位置しか
+ * 持たないので、送れずに控えている音の位置とフレーム番号は画面が残す（両方の先を採る）。</p>
+ */
+function openTimelineStore(id: number): void {
+  timelineStore = new TimelineStore(id)
+  const saved = timelineStore.load()
+  if (saved !== null) timeline.applySnapshot(saved)
+}
+
+/** 保存用の形を残す（**画面を離れても続きから録れる**ように）。 */
+function saveTimelineState(): void {
+  if (timelineStore === null) return
+  const snapshot: TimelineSnapshot = timeline.snapshot()
+  timelineStore.save(snapshot)
 }
 const captures: Partial<Record<ClassroomSource, PcmCapture>> = {}
 
@@ -776,11 +934,9 @@ const SPEAKER_CLASSES: Record<string, string> = {
  * <p>混ぜた音からの取り出しはしない（混ぜる前に音源ごとに認識する＝利用者の指示）。
  * そのため `connect` のコンテキスト違いで黙って取れなくなる問題も起きない。</p>
  */
-async function startSourceCapture(source: ClassroomSource, media: MediaStream): Promise<boolean> {
-  const AudioContextClass = window.AudioContext
-    ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-  if (AudioContextClass === undefined) return false
-  const context = new AudioContextClass()
+async function startSourceCapture(
+  source: ClassroomSource, media: MediaStream, context: AudioContext
+): Promise<boolean> {
   try {
     if (context.audioWorklet === undefined) {
       void context.close().catch(() => undefined)
@@ -797,9 +953,18 @@ async function startSourceCapture(source: ClassroomSource, media: MediaStream): 
     }
     const streamSource = context.createMediaStreamSource(media)
     const node = new AudioWorkletNode(context, PCM_CAPTURE_PROCESSOR)
-    node.port.onmessage = (event: MessageEvent<Float32Array>) => {
-      // 送信キューへ渡す（送信は SourceStream が受け持つ＝送れなければ保持して再送する）
-      sourceStreams[source]?.append(event.data, context.sampleRate)
+    node.port.onmessage = (event: MessageEvent<unknown>) => {
+      const message = toPcmCaptureMessage(event.data)
+      if (message === null) return
+      /*
+       * **音の位置は同じコンテキストの時計で決める**（マイクと共有で 1 つの時計）。
+       * 報告に時計が載っていない（古い実装）ときは受け取った時刻で代用する。
+       * 時間軸（`timeline`）へ採った位置を知らせてから、その位置を送信キューへ渡す。
+       */
+      const rate = message.sampleRate ?? context.sampleRate
+      const at = message.contextSample ?? contextSampleOf(context)
+      timeline.observeCapture(at, rate, source)
+          sourceStreams[source]?.append(message.samples, rate, at)
     }
     // 音をそのまま出すとハウリングするので、0 のゲインを通してから出力へ繋ぐ
     const silent = context.createGain()
@@ -810,11 +975,29 @@ async function startSourceCapture(source: ClassroomSource, media: MediaStream): 
     captures[source] = { context, node, streamSource }
     return true
   } catch {
-    void context.close().catch(() => undefined)
+    // 借りているコンテキスト（混ぜているとき）は閉じない（片付けは releaseAudioSources）
+    if (context !== mixContext) void context.close().catch(() => undefined)
     noticeOf[source].value = '書き起こし用の音声を準備できませんでした'
       + '（ページを再読み込みしてお試しください）。'
     return false
   }
+}
+
+/**
+ * 音源ごとの取り出しと送信キューを用意する（**録音を始めるとき**）。
+ *
+ * <p>用意するだけでは送らない（`startSourceStreams` が送り始める）。順番は
+ * 「キューを作る → 節点を組み立てる → 起点を決める」で、**音を採る前に起点が決まる**。</p>
+ */
+async function startSourceCaptures(context: AudioContext | null): Promise<void> {
+  /*
+   * **送信キューは必ず作る**（取り出しを載せられなくても作る）。
+   *
+   * <p>作らないと、収尾（残りを送り切る → `/finish`）が送る先を失い、マイクの尾部の文が
+   * 取り切れない（実測: `/finish` が 1 度も送られなくなった）。取り出しを載せられなかった
+   * ときは、その旨を案内して**録音は続ける**（あとで気づける）。</p>
+   */
+  await startSourceStreamsForRecorder(context)
 }
 
 /** 音源ごとの送信を始める（録音を始めるとき）。 */
@@ -1016,6 +1199,7 @@ async function runSttFinish(): Promise<string | null> {
     sttFinalized = true
     // 済んだので、音源の取り出しと送信を片付ける（**失敗のときは残す**＝やり直せるように）
     releaseSourceCaptures()
+    dropSourceStreams()
     return null
   } catch (cause) {
     return '書き起こしの収尾に失敗しました（'
@@ -1032,10 +1216,23 @@ function releaseSourceCaptures(): void {
     if (capture === undefined) continue
     capture.node.port.close()
     capture.node.disconnect()
-    capture.streamSource.disconnect()
-    void capture.context.close().catch(() => undefined)
+    capture.streamSource?.disconnect()
+    // 借りているコンテキスト（混ぜているとき・マイクだけのときの共通の器）は閉じない
+    if (capture.context !== mixContext) void capture.context.close().catch(() => undefined)
     delete captures[source]
   }
+  /*
+   * **送信キューはここでは捨てない**。
+   *
+   * <p>取り出しを外した時点で新しい音は入らなくなる（送るのは貯まっている分だけ）。収尾は
+   * 「残りを送り切る → `/finish`」を**同じキュー**で行うので、ここで捨てると尾部の文を
+   * 取り切れない（実測: `/finish` が 1 度も送られなくなった）。やり直せるように、片付けは
+   * 収尾が済んだあと（{@link dropSourceStreams}）に行う。</p>
+   */
+}
+
+/** 音源ごとの送信キューを捨てる（収尾が済んだあと・画面を離れるとき）。 */
+function dropSourceStreams(): void {
   sourceStreams.mic = undefined
   sourceStreams.shared = undefined
 }
@@ -1075,8 +1272,13 @@ async function startMixedPcmCapture(source: MediaStream, tap: AudioNode | null =
     }
     const sourceNode = tap === null ? context.createMediaStreamSource(source) : null
     const worklet = new AudioWorkletNode(context, PCM_CAPTURE_PROCESSOR)
-    worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
-      pcmBuffer.append(event.data)
+    worklet.port.onmessage = (event: MessageEvent<unknown>) => {
+      const message = toPcmCaptureMessage(event.data)
+      if (message === null) return
+      // 混ぜた音の位置も**同じ時間軸**で数える（分塊の経過秒と書き起こしの位置をそろえる）
+      const rate = message.sampleRate ?? context.sampleRate
+      timeline.observeCapture(message.contextSample ?? contextSampleOf(context), rate)
+          pcmBuffer.append(message.samples)
     }
     const silent = context.createGain()
     silent.gain.value = 0
@@ -1143,8 +1345,16 @@ async function startRecorder(): Promise<boolean> {
      * - ストリーミング（阿里巴巴）… **音源ごと**に取り出して別々に送る（混ぜる前に認識する）
      * - 分塊ごとの STT（google など）… 今までどおり混ぜた音から取る（分塊に付けて送る）
      */
+    /*
+     * **すべての節点を用意してから、統一点から始める**（利用者の指示）。
+     *
+     * <p>音源の取り出しは 1 つの `AudioContext` に載せる（混ぜているときは**混ぜるのと同じ
+     * コンテキスト**）。同じコンテキストなら**サンプルの時計が 1 つ**なので、マイクと共有の
+     * 位置がそろう（別々の時計だと、後から繋がった音源が録音の別の時刻として入る）。</p>
+     */
+    const captureContext = sharedCaptureContext()
     if (streamStt.value) {
-      await startSourceStreamsForRecorder()
+      await startSourceCaptures(captureContext)
     } else {
       await startMixedPcmCapture(recordStream, audioGraph?.mixed ?? null)
     }
@@ -1157,9 +1367,13 @@ async function startRecorder(): Promise<boolean> {
       const sttPcm = takeSttPcm()
       if (event.data.size > 0) sendChunk(event.data, sttPcm)
     }
+    /*
+     * **ここが録音の起点**（時間軸の 0）。用意が済んだあとに置くので、準備のあいだに
+     * 進んだ時計は時間軸へ入らない。停止 → 続きの録音では `resume` で
+     * 「作り直した音源の時計の 0」を基準にする（止めていた時間を入れない）。
+     */
+    beginTimeline()
     // 分塊の長さごとに 1 つのファイルが届く（STT の 1 リクエスト＝1 分塊）
-    recorderStartedAtMs = Date.now()
-    lastChunkEndSeconds = 0
     recorder.start(Math.max(5, chunkSeconds.value) * 1000)
     // 話しながら文字を出す（阿里巴巴のリアルタイム認識のときだけ）
     startSourceStreams()
@@ -1174,31 +1388,12 @@ async function startRecorder(): Promise<boolean> {
 }
 
 /**
- * 共有を選び直す（共有が終わった・音が入っていなかったとき）。
- *
- * <p>録音は止めずに、混ぜている遠隔音だけを入れ替える（マイクの声は続けて録れる）。</p>
- */
-async function reshareDisplayAudio(): Promise<void> {
-  recorderNotice.value = ''
-  const shared = await requestDisplayAudio()
-  if (shared === null) return
-  if (displayStream !== null) {
-    displayStream.getTracks().forEach((track) => track.stop())
-  }
-  displayStream = shared
-  watchSharedAudio(shared)
-  if (audioGraph === null) return
-  audioGraph.replaceRemote(shared)
-  recorderNotice.value = '共有の音を入れ替えました。'
-}
-
-/**
  * 録音に使う音源ごとに、PCM の取り出しと送信キューを用意する。
  *
  * <p>マイクは常に 1 本、共有の音は二音源のときだけ 1 本。**混ぜる前**に取るので、
  * 先生（共有）と学生（マイク）を別々に認識できる。</p>
  */
-async function startSourceStreamsForRecorder(): Promise<void> {
+async function startSourceStreamsForRecorder(context: AudioContext | null): Promise<void> {
   const id = recordId.value
   const build = (source: ClassroomSource): SourceStream => new SourceStream({
     source,
@@ -1207,7 +1402,20 @@ async function startSourceStreamsForRecorder(): Promise<void> {
     onInterim: (text) => { interimOf[source].value = text },
     onNotice: (message) => { noticeOf[source].value = message },
     onMissingRange: (range) => { missingOf[source].value = [...missingOf[source].value, range] },
-    maxSendSeconds: 2,
+    // 送った位置を時間軸へ知らせる（送り直し・張り直しで時間が戻らないように）
+    onSent: (samples, from, frameNo) => {
+      timeline.observeSent(samples, from, frameNo)
+          saveTimelineState()
+    },
+    /*
+     * **保存済みの位置と続きの番号**から始める（停止 → 続きの録音・画面の開き直し）。
+     * 0 から送ると後端が「すでに処理した位置より古い」としてその音を丸ごと捨てる。
+     */
+    // 送信は**その音源が採った位置**から（片方だけ先に進んでいても、先頭を飛ばさない）
+    startSample: timeline.sourceCapturedSamples(source),
+    startFrameNo: timeline.nextFrameNo(source),
+    // 1 回に送るのは 100ms（常時接続のフレームと同じ刻み。位置が同じ速さで進む）
+    maxSendSeconds: 0.1,
     maxBufferSeconds: 60
   })
   interimOf.mic.value = ''
@@ -1224,10 +1432,18 @@ async function startSourceStreamsForRecorder(): Promise<void> {
   for (const source of classroomSourcesOf(audioMode)) {
     sourceStreams[source] = build(source)
   }
-  if (stream !== null) await startSourceCapture('mic', stream)
+  /*
+   * 取り出しは**同じコンテキスト**へ載せる（マイクと共有で 1 つの時計）。
+   * 音源を用意できなかったときは、その音源だけ諦める（もう片方は送り続ける）。
+   */
+  if (context === null) {
+    noticeOf.mic.value = 'このブラウザは書き起こし用の音声を取り出せません（Chrome / Edge をお使いください）。'
+    return
+  }
+  if (stream !== null) await startSourceCapture('mic', stream, context)
   const shared = displayStream
   if (shared !== null && sourceStreams.shared !== undefined) {
-    await startSourceCapture('shared', shared)
+    await startSourceCapture('shared', shared, context)
   }
 }
 
@@ -1302,10 +1518,10 @@ async function pullSegments(): Promise<void> {
   const id = recordId.value
   if (id === null) return
   try {
-    const response = await fetchClassroomSegments(id, nextSeq.value)
+    const response = await fetchClassroomSegments(id, nextSegmentSeq.value)
     syncError.value = ''
     appendSegments(response.data.items)
-    nextSeq.value = Math.max(nextSeq.value, response.data.nextSeq)
+    nextSegmentSeq.value = Math.max(nextSegmentSeq.value, response.data.nextSeq)
   } catch (caught) {
     syncError.value = messageOf(caught, '書き起こしを取得できませんでした。')
   }
@@ -1320,7 +1536,8 @@ async function refreshDetail(): Promise<void> {
     detail.value = response.data
     notes.value = response.data.notes
     appendSegments(response.data.segments)
-    nextSeq.value = response.data.segments.reduce((max, segment) => Math.max(max, segment.seq), nextSeq.value)
+    nextSegmentSeq.value = response.data.segments.reduce(
+      (max, segment) => Math.max(max, segment.seq), nextSegmentSeq.value)
     if (!recording.value && response.data.status === 'COMPLETED') {
       stopPolling()
     }
@@ -1422,8 +1639,19 @@ async function startRecording(): Promise<void> {
     saveRecordAudioMode(id, audioMode)
     // 新しい録音では収尾の進み具合も戻す（前の録音の「済んだ段」を引きずらない）
     resetFinalize()
-    // すでに送った分塊がある（開き直し）ときは続きの番号から送る
-    chunkSeq = maxKnownSeq.value
+    /*
+     * 続きの**分塊の連番**と**録音の位置**は、サーバーに保存済みの分塊から取る。
+     *
+     * 転写セグメントの連番（＝文の数）から作ってはいけない: 文の数と分塊の数は違うので、
+     * 番号が飛んだり、保存済みと同じ番号を送り直したりする。取れなかったときは
+     * **録音を始めない**（0 から送ると、保存済みの分塊と番号が衝突して音を捨てることになる）。
+     */
+    if (!await loadChunkState()) {
+      recording.value = false
+      recorderNotice.value = '保存済みの音声の状態を確認できませんでした。'
+        + '通信の良い所でもう一度【録音を開始】を押してください。'
+      return
+    }
     startTimer()
     startPolling()
     // 書き起こしをブラウザで行う設定なら、録音と同時に認識を始める（音声は分塊で保存し続ける）
@@ -1669,6 +1897,8 @@ onMounted(async () => {
   }
   const id = recordId.value
   if (id === null) return
+  // この記録の時間軸（保存してあった位置）を戻す（開き直しでも続きから録れる）
+  openTimelineStore(id)
   await refreshDetail()
   // **この画面は録音を始めない**（マイクは利用者が【録音を開始】を押したときだけ使う）。
   // 記録は作成時点で状態=RECORDING なので、サーバーの状態だけで「録音中」にすると
@@ -1687,7 +1917,7 @@ onMounted(async () => {
     const media = navigator.mediaDevices as MediaDevices & { ondevicechange?: () => void }
     media.ondevicechange = () => {
       recorderNotice.value = '音声の機器が変わりました。音が入っているか、音量表示で確かめてください。'
-        + '（必要なら録音を止めて選び直してください）'
+        + '（マイクを差し直したときは、録音を止めてから【録音を開始】を押してください）'
     }
   }
   // 自動開始（dialog から来たとき）。マイクの許可はこの操作の中で求める
@@ -1702,6 +1932,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  // 続きから録れるように、時間軸の位置を残してから片付ける
+  saveTimelineState()
   stopTimer()
   stopPolling()
   stopSourceStreams()
@@ -1709,6 +1941,7 @@ onBeforeUnmount(() => {
   stopMixedPcmCapture()
   // 常時接続も閉じる（音源ごと）
   for (const source of SOURCES) sourceStreams[source]?.closeSocket()
+  dropSourceStreams()
   // 用意した音源（マイク・共有・混ぜる仕組み）は掴んだままにしない
   releaseAudioSources()
   stopRecorder()
@@ -1944,14 +2177,8 @@ onBeforeUnmount(() => {
             </span>
           </span>
           <span v-if="mixing" class="cr-hint">
-            両方の音が入っているか、レベルで確かめてください（共有が切れたら【共有を選び直す】）。
+            両方の音が入っているか、レベルで確かめてください（共有が止まったら、その旨をここに出します）。
           </span>
-          <button
-            v-if="mixing && recording" type="button" class="btn btn--secondary btn--sm"
-            data-cr-reshare @click="reshareDisplayAudio"
-          >
-            共有を選び直す
-          </button>
         </div>
       </section>
 

@@ -141,8 +141,6 @@ export interface ClassroomAudioGraph {
   readonly micTrack: MediaStreamTrack | null
   /** 共有音声のトラック（マイクのみのときは null）。 */
   readonly remoteTrack: MediaStreamTrack | null
-  /** 共有音声を入れ替える（共有を選び直したとき）。古い方は切り離す。 */
-  replaceRemote(stream: MediaStream | null): void
   /** すべて切り離して解放する（AudioContext は呼び出し側が閉じる）。 */
   close(): void
 }
@@ -248,9 +246,6 @@ export function createClassroomAudioGraph(
       micLevel = micLevel + (nextMic - micLevel) * LEVEL_SMOOTHING
       remoteLevel = remoteLevel + (nextRemote - remoteLevel) * LEVEL_SMOOTHING
       return { mic: micLevel, remote: remoteLevel }
-    },
-    replaceRemote(stream: MediaStream | null): void {
-      attachRemote(stream)
     },
     close(): void {
       for (const node of nodes) {

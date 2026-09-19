@@ -150,6 +150,14 @@ describe('システム設定：AI バッチの共通レイアウト', () => {
 
     expect(tabsOf('study_monitor', 'bat-l02')).toEqual(['基本設定', 'カメラ基本情報'])
     expect(labelsOf('study_monitor', 'bat-l02', '基本設定')).toContain('スナップショット間隔（秒）')
+    // batL02 の**実行設定**（バッチをいつ動かすか）は 2026-09-19 に足した。
+    // 動画処理時間帯・スナップショット間隔とは別の欄（AI を使わないので共通レイアウトの対象外）
+    expect(labelsOf('study_monitor', 'bat-l02', '基本設定')).toEqual(expect.arrayContaining([
+      '動画処理時間帯（開始）',
+      '動画処理時間帯（終了）',
+      '実行間隔（バッチを動かす間隔）',
+      'ずらし（毎時の何分に実行するか）'
+    ]))
     // AI 分析（batL03）は共通レイアウト
     expect(tabsOf('study_monitor', 'bat-l03')).toEqual([
       '基本設定',
@@ -157,7 +165,15 @@ describe('システム設定：AI バッチの共通レイアウト', () => {
       'User Prompt',
       'その他'
     ])
-    expect(labelsOf('study_monitor', 'bat-l03', '基本設定')).toEqual(['使用モデル', 'リクエストタイムアウト'])
+    // 実行設定（間隔・ずらし）は数値のスライダーではない（6 択のラジオ）ので、AI の数字項目の
+    // 後ろ＝同じ 基本設定 TAB の末尾に並ぶ。名前が `…Timeout` / `…Provider` に似ていても、
+    // AI の通信条件ではないので「その他」TAB へは入れない
+    expect(labelsOf('study_monitor', 'bat-l03', '基本設定')).toEqual([
+      '使用モデル',
+      'リクエストタイムアウト',
+      '実行間隔（バッチを動かす間隔）',
+      'ずらし（毎時の何分に実行するか）'
+    ])
     expect(labelsOf('study_monitor', 'bat-l03', 'その他')).toEqual([
       'スレッド数',
       '1回の最大処理数',

@@ -198,6 +198,13 @@ export interface SourceStreamOptions {
    * 後から録音を聞き直して補書き起こしするために残す。
    */
   onMissingRange?: (range: MissingRange) => void
+  /**
+   * 送った位置を知らせる（録音回放の時間軸。16kHz のサンプル数）。
+   *
+   * <p>画面は「送った位置」を別に持ち、**送り直し・張り直しで時間が戻らない**ようにする
+   * （位置は前へだけ進める）。</p>
+   */
+  onSent?: (absoluteSamples: number, source: ClassroomSource, frameNo: number) => void
   /** 送信の周期（ミリ秒）。既定 250ms（音は 100ms ずつ送る前提で十分間に合う）。 */
   intervalMs?: number
   /** 1 回に送る最大の長さ（秒）。既定 2 秒。 */
@@ -225,6 +232,16 @@ export interface SourceStreamOptions {
   recoveryRetentionDays?: number
   /** テスト用: 補書き起こしの手がかりの保存先（既定は `localStorage`）。 */
   recoveryStorage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null
+  /**
+   * この音源の**送信を始める位置**（録音回放の時間軸。16kHz のサンプル数）。
+   *
+   * <p>停止 → 続きの録音・画面の開き直しでは**保存済みの位置**を渡す。0 から送ると後端が
+   * 「すでに処理した位置より古い」として**その音を丸ごと捨てる**（書き起こしが消える）。
+   * 画面が持つ時間軸（`RecordingTimeline`）が決める値なので、ここでは積むだけにする。</p>
+   */
+  startSample?: number
+  /** この音源の**次に使うフレーム番号**（張り直し・開き直しでも 1 へ戻さない）。 */
+  startFrameNo?: number
 }
 
 /** 画面に出す状態（音源ごと）。 */
@@ -260,6 +277,12 @@ const MAX_FRAMES_PER_TICK = 50
 const DEFAULT_MAX_RECONNECTS = 5
 /** 接続が開くのを待つ上限（ミリ秒）。開かなければ HTTP へ退避する。 */
 const DEFAULT_SOCKET_CONNECT_TIMEOUT_MS = 1_500
+/**
+ * HTTP 送信で 1 回に送る最小の長さ（秒）。
+ *
+ * <p>周期が短い設定でも、細かすぎる送信をしない（1 リクエストの往復のほうが大きい）。</p>
+ */
+const HARVEST_MIN_SECONDS = 0.1
 
 /** 補書き起こしの手がかりを残しておく期間（日）。録音の保存期間と同じ考え方。 */
 const DEFAULT_RECOVERY_RETENTION_DAYS = 30
@@ -286,7 +309,7 @@ export class SourceStream {
    * ここに残っている音を**古い順にそのまま**送り直せる（欠けも重複も作らない）。</p>
    */
   private outbox: PendingFrame[] = []
-  /** 取り出し済みのサンプル数（入力レート。**録音の時間軸の位置**を出すのに使う）。 */
+  /** 取り出し済みのサンプル数（入力レート。**この回に取り出した累計**）。 */
   private consumedSamples = 0
   private sampleRate = 0
   private timer: number | null = null
@@ -303,6 +326,46 @@ export class SourceStream {
   private socketFailed = false
   private reconnects = 0
   private nextFrameNo = 1
+  /**
+   * この回に採った音の**時間軸での先頭**（{@link SourceStreamOptions.startSample}）。
+   *
+   * <p>停止 → 続きの録音では 0 ではない（0 にすると後端に古い音として捨てられる）。</p>
+   */
+  private sampleOrigin = 0
+  /**
+   * **届いている音の先頭**が時間軸のどこか（16kHz のサンプル数）。
+   *
+   * <p>取り出すたびにその長さぶん進み、貯めすぎで捨てたときは捨てた長さぶん進む
+   * （捨てた区間は位置に残る＝詰めない）。</p>
+   */
+  private arrivalStart = 0
+  /**
+   * **届いている音の終わり**が時間軸のどこか（16kHz のサンプル数）。
+   *
+   * <p>取り出しや欠落では動かない（音が届いたときにだけ進む）。</p>
+   */
+  private arrivedEnd = 0
+  /**
+   * この音源の**時計の起点**（最初の報告の値。null なら未確定）。
+   *
+   * <p>この音源の位置は「起点の位置 ＋ 時計の進みぶん」で出す。同じ `AudioContext` の時計なので、
+   * マイクと共有で**同じ瞬間が同じ位置**になる。</p>
+   */
+  private clockOrigin: number | null = null
+  /** 時計の起点での時間軸の位置（{@link sampleOrigin} の写し）。 */
+  private clockBase = 0
+
+  /** これまででいちばん新しい報告の時計（時計が飛んだぶんだけ位置を進めるのに使う）。 */
+  private lastClock = 0
+  /**
+   * いま送っている位置（時間軸。16kHz のサンプル数）。送ったら画面へ知らせる
+   * （{@link SourceStreamOptions.onSent}）。
+   */
+  private sentSamples = 0
+  /** いままでに送った音の**終わりの位置**（次に送るフレームはここから続く）。 */
+  private lastSentEnd = 0
+  /** 直前に送った時刻（ミリ秒。**待った長さぶんだけ**送るのに使う。0 はまだ送っていない）。 */
+  private lastSendAt = 0
   /** 送信ループが回った回数（周期ぶんのフレーム数を計算するのに使う）。 */
   private ticks = 0
   /**
@@ -363,18 +426,114 @@ export class SourceStream {
       ...options
     }
     this.sampleRate = 48_000
+    // 続きの録音・開き直しでは**保存済みの位置と番号**から始める（0 から送ると後端に捨てられる）
+    this.sampleOrigin = safeSamples(options.startSample)
+    this.arrivalStart = this.sampleOrigin
+    this.arrivedEnd = this.sampleOrigin
+    this.clockBase = this.sampleOrigin
+    this.sentSamples = this.sampleOrigin
+    this.lastSentEnd = this.sampleOrigin
+    this.nextFrameNo = Math.max(1, Math.floor(options.startFrameNo ?? 1))
   }
 
   get source(): ClassroomSource {
     return this.options.source
   }
 
-  /** AudioWorklet から届いたサンプルを足す（録音中はこれを呼び続ける）。 */
-  append(samples: Float32Array, sampleRate: number): void {
+  /**
+   * AudioWorklet から届いたサンプルを足す（録音中はこれを呼び続ける）。
+   *
+   * @param contextSample この回の先頭の**コンテキストの時計**（サンプル数）。
+   *   **音源をまたいで同じ値**（同じ `AudioContext` の時計）なので、これを位置の基準にする。
+   */
+  append(samples: Float32Array, sampleRate: number, contextSample?: number): void {
     if (samples.length === 0) return
     this.sampleRate = sampleRate > 0 ? sampleRate : this.sampleRate
+    const length = timelineSamplesOf(samples.length, this.sampleRate)
+    /*
+     * この音源の位置は「**起点の位置 ＋ 時計の進みぶん**」で出す。
+     *
+     * <p>起点は最初の報告のときの（位置・時計）。時計は同じ `AudioContext` の値なので、
+     * マイクと共有で**同じ瞬間が同じ位置**になり、後から繋がった音源も**その時点の位置**から
+     * 始まる（0 から始めると録音の先頭へ入る）。**止めていた時間は入らない**
+     * （停止 → 続きの録音では画面が `startSample` を渡し直す）。</p>
+     *
+     * <p>時計が分からない（古い実装・テスト）ときは、時計を使わず**届いた音の長さ**で進む
+     * （従来どおり `startSample` から積む）。</p>
+     */
+    if (contextSample !== undefined && Number.isFinite(contextSample)) {
+      // 時計の起点は**この音源の最初の報告**（そのときの位置が基準になる）
+      if (this.clockOrigin === null) {
+        this.clockOrigin = Math.max(0, contextSample)
+        this.clockBase = this.sampleOrigin
+      }
+      /** 同じコンテキストの時計から出した**この音の終わりの位置**（音源をまたいで比べられる）。 */
+      const fromClock = this.clockBase + timelineSamplesOf(
+        Math.max(0, contextSample - this.clockOrigin), this.sampleRate)
+      /*
+       * **届いている音の終わり**を決める。
+       *
+       * <p>時計のほうが先なら、その差は**録れていない区間**（マイクを抜いた・端末が止まった・
+       * 共有が切れた）。記録して画面へ知らせ、届いている音の先頭も**その長さぶん先へずらす**
+       * （詰めて隠さない）。時計と音が同じ速さなら差は無い。</p>
+       */
+      const chainedEnd = this.arrivedEnd + length
+      const skipped = Math.max(0, fromClock - chainedEnd)
+      if (skipped > 0) {
+        const range = this.missingRange(chainedEnd, chainedEnd + skipped, this.nextFrameNo)
+        this.remember(range)
+        this.options.onNotice(`音源の時計が ${round3(range.toSeconds - range.fromSeconds)} 秒進みました`
+          + `（${range.fromSeconds}〜${range.toSeconds} 秒の音は録れていません）。`)
+        this.arrivalStart += skipped
+      }
+      this.arrivedEnd = Math.max(chainedEnd, fromClock)
+      this.lastClock = Math.max(this.lastClock, contextSample)
+    } else {
+      // 時計が分からないときは、届いた音をつないで進む（従来どおり）
+      this.arrivedEnd += length
+    }
+    this.sampleOrigin = this.arrivedEnd
     this.buffer.append(samples)
     this.dropIfTooMuch()
+  }
+
+  /**
+   * 貯めすぎたら**古い分を捨てて欠落として記録する**（黙って消さない）。
+   *
+   * <p>送信が追いつかないと（サーバーの往復が遅い）、貯まる一方になって書き起こしが遅れ、
+   * 1 回に送る量も膨らむ。**古い音を捨てて今の音を送る**ほうが授業の書き起こしとしては
+   * 役に立つ（音声そのものは録音側に残っている）。捨てた区間は**時間軸の位置つき**で記録して、
+   * あとから録音を聞き直して補書き起こしできるようにする。</p>
+   */
+  private dropIfTooMuch(): void {
+    const rate = this.rate()
+    if (rate <= 0) return
+    const keep = Math.round(rate * this.options.maxBufferSeconds)
+    const dropped = this.buffer.trim(keep)
+    if (dropped <= 0) return
+    /*
+     * 捨てたのは**まだ取り出していない**音なので、先頭が捨てたぶんだけ先へ進む（詰めない）。
+     * 捨てた長さは {@link droppedTimelineSamples} に積む（先頭が先へずれる）。
+     */
+    const droppedTimeline = timelineSamplesOf(dropped, rate)
+    const fromSample = this.arrivalStart
+    // 捨てたぶんだけ先頭が先へ進む（位置は詰めない）
+    this.arrivalStart += droppedTimeline
+    const range = this.missingRange(fromSample, this.arrivalStart, this.nextFrameNo)
+    this.remember(range)
+    this.options.onNotice(`送信が追いつかず ${range.fromSeconds}〜${range.toSeconds} 秒の音を飛ばしました`
+      + '（録音そのものには入っています。あとで補書き起こしできます）。')
+  }
+
+  /**
+   * **いま取り出すフレーム**が始まる時間軸の位置（16kHz のサンプル数）。
+   *
+   * <p>位置は**採った音の先頭**（{@link arrivalStart}）。送り出しが遅れて「まだ送っていない音」が
+   * 貯まっていても、**送ったところの続き**より前へは戻さない（同じ音を別の時刻で二度送ると、
+   * 文の時刻が重なったり順序が入れ替わったりする）。</p>
+   */
+  private frameStart(): number {
+    return Math.max(this.arrivalStart, this.lastSentEnd)
   }
 
   /** 送信ループを始める（録音を始めるときに 1 回）。 */
@@ -424,10 +583,15 @@ export class SourceStream {
       this.waitingReconnect = false
       // 送信のまとまりが変わった＝**セッションの先頭**を取り直す（最初に送るフレームで決まる）
       this.sessionOriginSample = null
-      // 張り直しの回数は**ここでは数え直さない**。開いてすぐ切れる接続を繰り返すと
-      // 数え直しのせいで永久につなぎ直してしまう（進んだときに数え直す＝`acknowledge`）
-      // 断線して張り直したときは、最後に確認できた番号の続きから送り直す
-      socket.send(JSON.stringify({ type: 'resume', from: this.processed + 1 }))
+      /*
+       * **`resume` は送らない**。
+       *
+       * <p>後端は `resume` の番号から「その音源へ送ったサンプル数」を計算して
+       * **時間軸の下端**にする（番号 × 100ms）。こちらは番号も位置も**録音全体で通し**なので、
+       * 続きの録音（番号 600 番台から）で送ると下端が**実際の音より遥かに先**へ飛び、
+       * 続きの音が全部「すでに処理した位置より古い」として捨てられる（書き起こしが消える）。
+       * 位置はフレームの見出し（`startSample`）で毎回送るので、後端は番号から計算しなくてよい。</p>
+       */
       this.resendUnacked()
     }
     socket.onmessage = (event: MessageEvent) => this.onSocketMessage(event)
@@ -641,8 +805,28 @@ export class SourceStream {
     this.retrying = true
     // 実時間ぶん送れているかの計算に数えるのは**新しい**フレームだけ（送り直しは数えない）
     this.framesSent += 1
+    this.noteSent(frame)
     this.queueOverSocket(frame)
     return true
+  }
+
+  /**
+   * 送った位置を画面へ知らせる（**前へだけ**）。
+   *
+   * <p>画面はこれで「送った位置」を持ち、断線からの送り直しで**時間が戻らない**ようにする
+   * （送り直しは古い位置なので、画面の控えは前のまま）。</p>
+   */
+  private noteSent(frame: PendingFrame): void {
+    /*
+     * 送った位置は**そのフレームの先頭**（送り直しで同じ位置をもう一度知らせても、
+     * 画面側は前へだけ進めるので時間は戻らない）。番号も一緒に知らせて、
+     * 画面が続きの番号を残せるようにする（張り直しで 1 へ戻さない）。
+     */
+    this.sentSamples = Math.max(this.sentSamples,
+      frame.startSample + timelineSamplesOf(frame.samples, this.rate()))
+    this.lastSentEnd = Math.max(this.lastSentEnd,
+      frame.startSample + timelineSamplesOf(frame.samples, this.rate()))
+    this.options.onSent?.(frame.startSample, this.options.source, frame.no)
   }
 
   /** 送信ループだけ止める（`finish` を呼ばない＝録音を一時停止したとき）。 */
@@ -808,23 +992,6 @@ export class SourceStream {
     return this.sampleRate > 0 ? this.sampleRate : 0
   }
 
-  /** 貯めすぎたら**古い分を捨てて欠落として記録する**（黙って消さない）。 */
-  private dropIfTooMuch(): void {
-    const rate = this.rate()
-    if (rate <= 0) return
-    const keep = Math.round(rate * this.options.maxBufferSeconds)
-    const dropped = this.buffer.trim(keep)
-    if (dropped <= 0) return
-    // 捨てたのは**まだ送っていない**音なので、位置は「取り出し済みの累計」から始まる
-    const fromSample = timelineSamplesOf(this.consumedSamples, rate)
-    this.consumedSamples += dropped
-    const range = this.missingRange(fromSample, timelineSamplesOf(this.consumedSamples, rate),
-      this.nextFrameNo)
-    this.remember(range)
-    this.options.onNotice(`送信が追いつかず ${range.fromSeconds}〜${range.toSeconds} 秒の音を飛ばしました`
-      + '（録音そのものには入っています。あとで補書き起こしできます）。')
-  }
-
   /** 送ったが確認が取れなかったフレームを、欠落として記録する（音源と絶対位置つき）。 */
   private recordMissing(frame: PendingFrame): void {
     const range = this.missingRange(frame.startSample,
@@ -884,18 +1051,32 @@ export class SourceStream {
   private async tick(): Promise<void> {
     const id = this.options.recordId()
     if (id === null || this.sending) return
+    /*
+     * 1 回に送る長さは「**前の送信から待った音の長さ**」まで（上限は `maxSendSeconds`）。
+     *
+     * <p>いつも上限まで送ると、送信の周期（250ms）ごとに 2 秒ぶんの音を投げることになり、
+     * **送る位置が受信した音を追い越す**（位置が跳ぶ・同じ音を別の時刻で送る）。
+     * 待った長さだけ送れば、速い回線では細かく・遅い回線ではまとめて送り、
+     * 位置は「採った音の先頭」と同じ速さで進む。</p>
+     */
+    const waited = this.lastSendAt === 0 ? this.options.maxSendSeconds
+      : Math.max(HARVEST_MIN_SECONDS, (Date.now() - this.lastSendAt) / 1000)
+    const maxSeconds = Math.min(this.options.maxSendSeconds, waited)
     // **確認できていない音を先に送る**（常時接続から退避したときに、欠けも重複も作らないため、
     // 古い順＝番号の順に送る。新しい音はその後ろに続く）
-    if (this.outbox.length === 0 && this.takeFrame() === null) return
+    if (this.outbox.length === 0 && this.takeFrame(maxSeconds) === null) return
     const sendingFrame = this.outbox[0]
     if (sendingFrame === undefined) return
     this.sending = true
+    // 次に送る長さは「ここから待った長さ」で決める
+    this.lastSendAt = Date.now()
     // HTTP へ退避した分のまとまりも、最初に送るフレームが認識セッションの先頭になる
     if (this.sessionOriginSample === null) this.sessionOriginSample = sendingFrame.startSample
     try {
       const response = await pushClassroomSttStream(id, sendingFrame.blob, this.options.source,
         { frameNo: sendingFrame.no, startSample: sendingFrame.startSample })
       // 送れた: 次の音へ（番号で外す＝送っているあいだに確認が進んでいても取り違えない）
+      this.noteSent(sendingFrame)
       this.dropFrame(sendingFrame.no)
       this.sentFrames += 1
       this.retrying = this.outbox.length > 0
@@ -932,18 +1113,23 @@ export class SourceStream {
   private takeFrame(seconds = this.options.maxSendSeconds): PendingFrame | null {
     const rate = this.rate()
     if (rate <= 0 || this.buffer.sampleCount === 0) return null
-    // 上限を超えて貯まっている分は、いちばん新しい音を残して捨てる（欠落として記録）
-    this.dropIfTooMuch()
     const maxInputSamples = Math.max(1, Math.round(rate * seconds))
     const { pcm, inputSamples } = this.buffer.takeBounded(rate, maxInputSamples)
     if (pcm.length === 0) return null
+    /*
+     * このフレームの位置 ＝「まだ取り出していない音の先頭 ＋ **取り出した合計**」。
+     *
+     * <p>累計から出すので、捨てた区間（欠落）のぶんだけ**先の位置**になる（詰めない）。
+     * 続きの録音でも `sampleOrigin` から続くので 0 へ戻らない。</p>
+     */
     const frame: PendingFrame = {
       no: this.nextFrameNo,
-      startSample: timelineSamplesOf(this.consumedSamples, rate),
+      startSample: this.frameStart(),
       blob: new Blob([pcm], { type: PCM_CHUNK_MIME }),
       samples: inputSamples
     }
     this.nextFrameNo += 1
+    this.arrivalStart += timelineSamplesOf(inputSamples, rate)
     this.consumedSamples += inputSamples
     this.outbox.push(frame)
     this.trimOutbox()
@@ -989,4 +1175,10 @@ function blobToArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
 
 function round3(value: number): number {
   return Math.round(value * 1000) / 1000
+}
+
+/** 0 未満・NaN を 0 に丸める（壊れた値で時間軸を戻さない）。 */
+function safeSamples(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value) || value <= 0) return 0
+  return Math.floor(value)
 }
