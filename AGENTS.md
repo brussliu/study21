@@ -1,5 +1,11 @@
 # AGENTS.md — Study 2.1
 
+> **★ 与用户交流一律用中文（最优先、每次都必须遵守）**
+> 面向用户的一切内容都要用中文：回复正文、提问与选项（`ask_user_question`）、待办列表（`todo`）、
+> 进度说明、报告、截图说明、总结。**不要用日文跟用户说话**（曾经违反过，用户明确要求纠正）。
+> 日文只用于仓库内的对象：UI 文案、代码注释、文档与设计说明。
+> 用户要求：即使上下文被压缩（checkpoint）或换了新的一轮，也必须继续遵守这一条。
+
 规范来源（Standards 轴）：`docs/ARCHITECTURE.md`、`docs/FRONTEND_GUIDE.md`、`docs/BACKEND_GUIDE.md`、`docs/API_CONVENTIONS.md`、`docs/DECISIONS.md`、`docs/PC_FRONTEND_STRUCTURE.md`。动手前先读改动所涉领域的那一份。
 行为基准实现是 2.0：`C:\work\Source\study2\study2`（JSP + `src/main/webapp/js/*.js`），移植类需求以它为准。
 

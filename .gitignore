@@ -12,6 +12,8 @@ backend/*/target/
 *.tsbuildinfo
 *.class
 .vite/
+# ブラウザ拡張の配布パッケージ（deploy のビルド中に extension/ から作られる）
+frontend/pc-web/public/downloads/
 
 # ==== Logs ====
 logs/
