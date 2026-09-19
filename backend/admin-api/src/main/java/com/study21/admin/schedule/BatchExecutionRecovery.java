@@ -46,6 +46,29 @@ import java.util.Set;
  * **新しい点から順に見る**。古い方（＝逆向きの操作）は判定で無効になり、スキップとして閉じる。
  * <b>種別 L（batL02 / batL03）は取りこぼしを最新の 1 点に合并する</b>（古い点は実行しない）。</p>
  *
+ * <h2>1 パスは「整理」と「投入」の 2 段階（古い記録を先に閉じる）</h2>
+ *
+ * <p>判定しながら実行器へ渡すと、**同じタスクの古い記録がまだ未完了のうちに新しい記録が走り出し**、
+ * 業務側の「前回が終わっていないのでスキップ」に当たって**本来実行すべき記録が失われる**
+ * （例: batL02 の古い A と最新の B があり、B が A のためにスキップされ、そのあと A が
+ * 「計画が古い」で閉じられる）。そこで 1 パスを 2 段階に分ける:</p>
+ *
+ * <ol>
+ *   <li><b>第 1 段階（判定と整理）</b>: そのパスの**1 枚のスナップショット**で全遺留を判定し、
+ *       実行しない記録は理由つきで閉じ、有効な記録は**投入待ちとして集めるだけ**にする
+ *       （実行器へはまだ渡さない）。実行中（RUNNING）は従来どおり
+ *       {@link ScheduledTriggerStore#recoverRunningExecution} で
+ *       「閉じる＋やり直しを作る」を**1 トランザクション**で行い、**コミット後に**やり直しを
+ *       投入待ちへ入れる。</li>
+ *   <li><b>第 2 段階（投入）</b>: 投入待ちを実行器へ渡す。同じタスクに未決の遺留
+ *       （保留・閉じられなかった・復旧トランザクションが失敗した）が残っているタスクは
+ *       **今回は投入せず持ち越す**（次で再判定。未決が片付けば投入する）。他のタスクは進める。</li>
+ * </ol>
+ *
+ * <p>投入待ちは**復旧の追跡に残す**（渡すまで、または明確に終わったと分かるまで外さない）。
+ * 実行中から作ったやり直しは**このプロセスの記録**なので「前のプロセスの遺留」の検索では
+ * 二度と出てこない。だから**この追跡が唯一の持ち主**であり、次パス・次回起動まで責任を持つ。</p>
+ *
  * <h2>復旧は「1 回やって終わり」ではない（自動で続ける）</h2>
  *
  * <p>起動時に設定が読めないことがある（DB がまだ上がっていない等）。そのとき実行を
@@ -140,7 +163,10 @@ public class BatchExecutionRecovery {
 
     /** 処理を 1 本に直列化する（起動イベント・周期検査・手動の再読み込みが同時に来ても 1 件ずつ）。 */
     private final Object lock = new Object();
+    /** まだ**決着していない**遺留（保留・閉じる途中・復旧トランザクション待ち）。 */
     private final Set<Long> leftoverIds = new LinkedHashSet<>();
+    /** まだ**実行器へ渡していない**実行（遺留の再投入と、実行中から作ったやり直し）。 */
+    private final Map<Long, PendingDispatch> pendingDispatches = new LinkedHashMap<>();
     private Phase phase = Phase.PENDING_DISCOVERY;
     private Instant nextAttemptAt = Instant.EPOCH;
     private int attempts;
@@ -215,8 +241,10 @@ public class BatchExecutionRecovery {
     /** いまの復旧の状態（画面・ログ用）。 */
     public RecoveryStatus status() {
         synchronized (lock) {
+            Set<Long> pending = new LinkedHashSet<>(leftoverIds);
+            pending.addAll(pendingDispatches.keySet());
             return new RecoveryStatus(phase, phase.label(), processRunId.value(),
-                    leftoverIds.size(), processed, skipped, retried);
+                    pending.size(), processed, skipped, retried);
         }
     }
 
@@ -296,10 +324,12 @@ public class BatchExecutionRecovery {
     }
 
     /**
-     * 遺留リストの行を 1 件ずつ判定する。
+     * 1 パスぶんの復旧（**判定と整理 → 投入**の 2 段階）。
      *
-     * <p>このパスでは**1 枚のスナップショット**だけを使う（判定の途中で設定が入れ替わって
-     * 行ごとに違う設定で判断しない）。</p>
+     * <p>第 1 段階は 1 枚のスナップショットだけを使い、**実行器へは渡さない**。
+     * 実行しない記録を先に閉じてから、第 2 段階で有効な記録を投入する
+     * （古い記録が未完了のまま新しい記録が走り出して「前回が終わっていない」で
+     * 失われるのを防ぐ）。</p>
      */
     private void review(String reason, Instant now) {
         ScheduleConfigSnapshot snapshot = configService.snapshot();
@@ -312,12 +342,10 @@ public class BatchExecutionRecovery {
             }
             rows.put(executionId, row);
         }
-        if (rows.isEmpty()) {
-            phase = Phase.COMPLETED;
-            return;
-        }
 
-        // **新しい計画実行点から見る**。R は 1 つのネット状態なので、新しい方を先に確定させる
+        // ---------------------------------------------------------------- 第 1 段階: 判定と整理
+        Set<String> unresolvedTasks = new LinkedHashSet<>();
+        List<PendingDispatch> judged = new ArrayList<>();
         List<BatchExecutionEntity> ordered = new ArrayList<>(rows.values());
         ordered.sort(Comparator
                 .comparing((BatchExecutionEntity row) -> plannedAtOf(row),
@@ -325,74 +353,129 @@ public class BatchExecutionRecovery {
                 .reversed()
                 .thenComparing(BatchExecutionEntity::getExecutionId));
 
-        List<Long> waiting = new ArrayList<>();
         for (BatchExecutionEntity row : ordered) {
             long executionId = row.getExecutionId();
+            String taskCode = row.getBatchCode();
             if (processRunId.value().equals(row.getRunId())) {
                 // **このプロセスが作った実行**（実行中・待機中）。復旧の対象にしない
                 // （読み直しの間に増えても、帰属で必ず外れる。二重実行・実行中の行を閉じる事故を防ぐ）
                 leftoverIds.remove(executionId);
+                pendingDispatches.remove(executionId);
                 log.info("このプロセスが作った実行は復旧しません。executionId={} taskCode={} 状態={}",
-                        executionId, row.getBatchCode(), row.getStatus());
+                        executionId, taskCode, row.getStatus());
                 continue;
             }
             String status = row.getStatus();
             if (!BatchExecutionStatus.QUEUED.name().equals(status)
                     && !BatchExecutionStatus.RUNNING.name().equals(status)) {
                 leftoverIds.remove(executionId);   // 既に終わっている（他の復旧が閉じた等）
+                pendingDispatches.remove(executionId);
                 continue;
             }
-            if (!catalog.taskCodes().contains(row.getBatchCode())) {
+            if (!catalog.taskCodes().contains(taskCode)) {
                 // スケジューラが管理しないタスクは今までどおり閉じるだけ
-                triggerStore.closeLeftover(executionId, BatchExecutionStatus.FAILED, RECOVERY_MESSAGE);
-                leftoverIds.remove(executionId);
-                processed++;
+                if (closeSafely(executionId, BatchExecutionStatus.FAILED, RECOVERY_MESSAGE, taskCode)) {
+                    leftoverIds.remove(executionId);
+                    processed++;
+                } else {
+                    unresolvedTasks.add(taskCode);
+                }
                 continue;
             }
 
             LocalDateTime plannedAt = plannedAtOf(row);
-            SchedulePlanGuard.PlanDecision decision = planGuard.decide(snapshot, row.getBatchCode(),
+            SchedulePlanGuard.PlanDecision decision = planGuard.decide(snapshot, taskCode,
                     plannedAt, now, SchedulePlanGuard.Stage.RECOVERY);
             if (decision.deferred()) {
-                waiting.add(executionId);   // 判定できない（設定が読めない等）→ 保留して次に回す
+                // 判定できない（設定が読めない等）→ 保留。**同じタスクの投入は次に回す**
+                unresolvedTasks.add(taskCode);
                 continue;
             }
             if (!decision.allowed()) {
-                closeNotRunnable(row, plannedAt, decision);
-                leftoverIds.remove(executionId);
-                processed++;
-                skipped++;
+                if (closeNotRunnable(row, plannedAt, decision)) {
+                    leftoverIds.remove(executionId);
+                    processed++;
+                    skipped++;
+                } else {
+                    unresolvedTasks.add(taskCode);   // 閉じられなかった → 次で再試行（未決として扱う）
+                }
                 continue;
             }
             if (BatchExecutionStatus.QUEUED.name().equals(status)) {
-                // まだ始まっていない → 同じ実行IDのまま実行し直す（実行直前にさらに再検証される）
-                log.warn("再起動前に確保していた計画実行点を実行し直します。taskCode={} executionId={} 予定={} "
-                        + "configVersion={}", row.getBatchCode(), executionId, plannedAt, decision.configVersion());
-                executor.submit(row.getBatchCode(), executionId, plannedAt);
-                leftoverIds.remove(executionId);
-                processed++;
-                retried++;
+                // まだ始まっていない → 同じ実行IDで実行し直す。**投入は第 2 段階**
+                log.warn("再起動前に確保していた計画実行点を実行し直します（投入は整理のあと）。"
+                        + "taskCode={} executionId={} 予定={} configVersion={}",
+                        taskCode, executionId, plannedAt, decision.configVersion());
+                judged.add(new PendingDispatch(taskCode, executionId, plannedAt));
                 continue;
             }
             // 実行中（結果が分からない）→ 閉じる＋やり直しを 1 トランザクションで作る
-            ScheduledTriggerStore.RecoveryResult result = triggerStore.recoverRunningExecution(
-                    executionId, row.getBatchCode(),
-                    row.getTriggerType() == null ? "C" : row.getTriggerType(),
-                    plannedAt, RECOVERY_MESSAGE, RETRY_CODE);
-            if (!result.handled()) {
-                waiting.add(executionId);   // 他の復旧が処理中 → 次のパスで確認する
+            ScheduledTriggerStore.RecoveryResult result;
+            try {
+                result = triggerStore.recoverRunningExecution(executionId, taskCode,
+                        row.getTriggerType() == null ? "C" : row.getTriggerType(),
+                        plannedAt, RECOVERY_MESSAGE, RETRY_CODE);
+            } catch (RuntimeException cause) {
+                // 閉じるのもやり直しの作成も**巻き戻っている**（どちらか片方だけ残らない）。
+                // 次のパスでやり直す（未決として扱うので、同じタスクの投入も待つ）
+                log.warn("中断した実行の復旧に失敗しました（次のパスでやり直します）。taskCode={} executionId={} "
+                        + "reason={}", taskCode, executionId, messageOf(cause));
+                unresolvedTasks.add(taskCode);
                 continue;
             }
-            if (result.retryExecutionId() != null) {
-                // **コミット後**に投入する（投入はここ。トランザクションの中では投入しない）
-                executor.submit(row.getBatchCode(), result.retryExecutionId(), plannedAt);
-                retried++;
+            if (!result.handled()) {
+                unresolvedTasks.add(taskCode);   // 他の復旧が処理中 → 次のパスで確認する
+                continue;
             }
             leftoverIds.remove(executionId);
             processed++;
+            if (result.retryExecutionId() != null) {
+                // **コミット後**に投入待ちへ入れる（トランザクションの中で投入しない）。
+                // このやり直しは**このプロセスの記録**なので遺留検索では二度と出ない →
+                // ここで追跡に入れて、この追跡が投入まで責任を持つ
+                judged.add(new PendingDispatch(taskCode, result.retryExecutionId(), plannedAt));
+            }
         }
 
-        if (waiting.isEmpty()) {
+        // ---------------------------------------------------------------- 第 2 段階: 投入
+        // 前のパスから持ち越した投入待ち＋今回判定した分（実行IDで重複を除く）
+        Map<Long, PendingDispatch> candidates = new LinkedHashMap<>(pendingDispatches);
+        for (PendingDispatch pending : judged) {
+            candidates.put(pending.executionId(), pending);
+        }
+        int submitted = 0;
+        int held = 0;
+        for (PendingDispatch pending : candidates.values()) {
+            if (unresolvedTasks.contains(pending.taskCode())) {
+                // 同じタスクに未決の遺留が残っている。ここで投入すると業務側の
+                // 「前回が終わっていない」でスキップされ、**本来実行すべき記録が失われる**。
+                // 追跡に残して次に回す（未決が片付けば投入する）
+                pendingDispatches.put(pending.executionId(), pending);
+                held++;
+                continue;
+            }
+            if (!isStillQueued(pending.executionId())) {
+                // 既に実行済み・閉じられている（別の経路が処理した）→ 追跡から外す（二重実行しない）
+                pendingDispatches.remove(pending.executionId());
+                leftoverIds.remove(pending.executionId());
+                continue;
+            }
+            if (dispatchToExecutor(pending)) {
+                pendingDispatches.remove(pending.executionId());
+                leftoverIds.remove(pending.executionId());
+                retried++;
+                submitted++;
+            } else {
+                // 投入できなかった（想定外の例外）→ 追跡に残して次に回す（記録は待機中のまま残る）
+                pendingDispatches.put(pending.executionId(), pending);
+                held++;
+            }
+        }
+
+        // ---------------------------------------------------------------- 決着の判定
+        Set<Long> pending = new LinkedHashSet<>(leftoverIds);
+        pending.addAll(pendingDispatches.keySet());
+        if (pending.isEmpty()) {
             phase = Phase.COMPLETED;
             log.warn("サービス再起動で中断した実行の復旧が完了しました。processed={} retried={} skipped={} reason={}",
                     processed, retried, skipped, reason);
@@ -401,31 +484,65 @@ public class BatchExecutionRecovery {
         attempts++;
         Duration wait = backoff(attempts);
         nextAttemptAt = now.plus(wait);
-        log.warn("再起動の復旧で判定できない実行が残っています（{} 秒後に判定し直します）。"
-                + "waiting={} taskCodes={}", wait.toSeconds(), waiting.size(), taskCodesOf(rows, waiting));
+        log.warn("再起動の復旧に未決の実行が残っています（{} 秒後に判定し直します）。"
+                + "未決の遺留={} 投入待ち={} 保留のタスク={} 今回は投入しなかった件数={} 投入した件数={}",
+                wait.toSeconds(), leftoverIds.size(), pendingDispatches.size(),
+                unresolvedTasks.isEmpty() ? "-" : unresolvedTasks, held, submitted);
     }
 
-    /** 実行しないと判定した行を閉じる（待機中は SKIPPED、実行中は結果不明として FAILED）。 */
-    private void closeNotRunnable(BatchExecutionEntity row, LocalDateTime plannedAt,
-                                  SchedulePlanGuard.PlanDecision decision) {
+    /** 実行器へ渡す（1 回だけ）。想定外の例外は握って false（追跡に残して次のパスで再挑戦）。 */
+    private boolean dispatchToExecutor(PendingDispatch pending) {
+        try {
+            executor.submit(pending.taskCode(), pending.executionId(), pending.plannedAt());
+            return true;
+        } catch (RuntimeException cause) {
+            log.warn("復旧した実行を実行器へ渡せませんでした（次のパスで再挑戦します）。taskCode={} executionId={} "
+                    + "reason={}", pending.taskCode(), pending.executionId(), messageOf(cause));
+            return false;
+        }
+    }
+
+    /** その実行記録がいまも**待機中**か（実行済み・閉じられたものを投入しない＝二重実行しない）。 */
+    private boolean isStillQueued(long executionId) {
+        BatchExecutionEntity row = executionMapper.findById(executionId);
+        return row != null && BatchExecutionStatus.QUEUED.name().equals(row.getStatus());
+    }
+
+    /** 例外を握って閉じる（false = 閉じられなかった＝次のパスで再試行）。 */
+    private boolean closeSafely(long executionId, BatchExecutionStatus status, String message, String taskCode) {
+        try {
+            triggerStore.closeLeftover(executionId, status, message);
+            return true;
+        } catch (RuntimeException cause) {
+            log.warn("中断した実行を閉じられませんでした（次のパスで再試行します）。taskCode={} executionId={} "
+                    + "reason={}", taskCode, executionId, messageOf(cause));
+            return false;
+        }
+    }
+
+    /**
+     * 実行しないと判定した行を閉じる（待機中は SKIPPED、実行中は結果不明として FAILED）。
+     *
+     * @return 閉じた（または既に閉じられていた）ら true。閉じるのに失敗したら false（次で再試行）
+     */
+    private boolean closeNotRunnable(BatchExecutionEntity row, LocalDateTime plannedAt,
+                                     SchedulePlanGuard.PlanDecision decision) {
         boolean queued = BatchExecutionStatus.QUEUED.name().equals(row.getStatus());
         String message = queued
                 ? SKIPPED_PREFIX + decision.reason()
                 : RECOVERY_MESSAGE + "（いまの計画では有効でないため、やり直しません。" + decision.reason() + "）";
         BatchExecutionStatus status = queued ? BatchExecutionStatus.SKIPPED : BatchExecutionStatus.FAILED;
-        triggerStore.closeLeftover(row.getExecutionId(), status, message);
+        if (!closeSafely(row.getExecutionId(), status, message, row.getBatchCode())) {
+            return false;
+        }
         log.warn("中断した実行は実行しません（いまの計画では有効でない）。taskCode={} executionId={} 予定={} "
                 + "status={} reason={} configVersion={}", row.getBatchCode(), row.getExecutionId(), plannedAt,
                 row.getStatus(), decision.reason(), decision.configVersion());
+        return true;
     }
 
-    private List<String> taskCodesOf(Map<Long, BatchExecutionEntity> rows, List<Long> ids) {
-        return ids.stream()
-                .map(rows::get)
-                .filter(java.util.Objects::nonNull)
-                .map(BatchExecutionEntity::getBatchCode)
-                .distinct()
-                .toList();
+    /** まだ実行器へ渡していない実行（遺留の再投入と、実行中から作ったやり直し）。 */
+    private record PendingDispatch(String taskCode, long executionId, LocalDateTime plannedAt) {
     }
 
     private static Duration backoff(int failures) {

@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
@@ -37,8 +38,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>テストは自分が書いた値を最後に元へ戻す（実データは変えない）。</p>
  */
 @SpringBootTest
-@EnabledIfEnvironmentVariable(named = "STUDY21_DATASOURCE_PASSWORD", matches = ".+",
-        disabledReason = "DB のパスワード（STUDY21_DATASOURCE_PASSWORD）が未設定のためスキップ")
+@ActiveProfiles("testdb")
+@EnabledIfEnvironmentVariable(named = "STUDY21_TEST_DATASOURCE_URL", matches = ".+",
+        disabledReason = "専用のテスト DB（STUDY21_TEST_DATASOURCE_URL）が未設定のためスキップします"
+                + "（tmp/tools/study21-batchtestdb.sh start で用意できます）")
 class ScheduleConfigSnapshotConsistencyTest {
 
     private static final String END_TIME_FIELD = "netControlEndTime";
@@ -96,6 +99,13 @@ class ScheduleConfigSnapshotConsistencyTest {
     @Test
     @DisplayName("読み込みの途中で設定が保存されても、混ざった版を読まない（1 つのスナップショット）")
     void loadReadsOneConsistentSnapshot() throws Exception {
+        // 専用テスト DB には計画行が無いことがあるので、この検証に必要な 1 行を自分で用意する
+        // （「設定値の保存と一緒に適用時刻と計画バージョンが進む」ことを見るため）
+        if (planMapper.findPlan(TASK) == null) {
+            planMapper.claim(TASK, "2026-09-01T00:00:00");
+        }
+        // 適用時刻が未設定だと「混ざっていない」ことを比べられないので、既知の古い値を 1 度入れる
+        planMapper.markConfigEffectiveFrom(TASK, "2026-09-01T00:00:00");
         String beforeValue = currentValue();
         String afterValue = "21:00".equals(beforeValue) ? "22:00" : "21:00";
         Map<String, Object> beforePlan = planMapper.findPlan(TASK);

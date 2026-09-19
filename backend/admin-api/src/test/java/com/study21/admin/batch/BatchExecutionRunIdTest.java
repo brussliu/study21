@@ -1,13 +1,18 @@
 package com.study21.admin.batch;
 
-import com.study21.admin.migration.MigrationTestMapper;
 import com.study21.admin.schedule.ScheduledTriggerStore;
+import com.study21.admin.testing.BatchTestExecutionCleanup;
+import com.study21.admin.testing.StubBatchTaskHandler;
+import com.study21.admin.testing.TestSqlMapper;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -15,21 +20,26 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * **実行記録の帰属（起動識別子）**（実 DB）。
+ * **実行記録の帰属（起動識別子）**（実 DB・専用の使い捨て DB で実行）。
  *
- * <p>再起動の復旧は「前のプロセスが残した実行」だけを扱う。その判定に使う起動識別子が、
- * **すべての実行記録の入口**（自動スケジューラの確保・起動時バッチ・画面の手動実行・
- * 復旧のやり直し）で必ず刻まれること、そして**現在のプロセスの記録が遺留に出ない**ことを
- * 実 DB で確かめる。</p>
+ * <p>見るもの: 実行記録の**すべての入口**（自動スケジューラの確保・起動時バッチ・画面の手動実行・
+ * 復旧のやり直し）で起動識別子が刻まれ、**現在のプロセスの記録が遺留（復旧の対象）に出ない**こと。</p>
  *
- * <p>テストが作った記録は最後に閉じる（未完了を残さない）。</p>
+ * <p>環境: {@code STUDY21_TEST_DATASOURCE_URL} で渡された**専用のテスト DB**だけで動く
+ * （日常の開発 DB には繋がない。渡されなければスキップする）。
+ * 起動時の副作用（スケジューラ・起動時バッチ・実業務のハンドラ）は止めてある。</p>
+ *
+ * <p>後始末は {@link BatchTestExecutionCleanup} で**このテストが作った実行IDだけ**を閉じる
+ * （「最近の N 件」をまとめて触らない）。</p>
  */
 @SpringBootTest(properties = "study21.proxy.port=17777")
-@EnabledIfEnvironmentVariable(named = "STUDY21_DATASOURCE_PASSWORD", matches = ".+",
-        disabledReason = "DB のパスワード（STUDY21_DATASOURCE_PASSWORD）が未設定のためスキップ")
+@ActiveProfiles("testdb")
+@EnabledIfEnvironmentVariable(named = "STUDY21_TEST_DATASOURCE_URL", matches = ".+",
+        disabledReason = "専用のテスト DB（STUDY21_TEST_DATASOURCE_URL）が未設定のためスキップします"
+                + "（tmp/tools/study21-batchtestdb.sh start で用意できます）")
 class BatchExecutionRunIdTest {
 
-    /** 実データと衝突しないコード（テストの前後で自分で閉じる）。 */
+    /** 実データと衝突しないコード（テストの後始末は自分が作った ID だけを閉じる）。 */
     private static final String TEST_CODE = "batT" + Long.toString(System.nanoTime() % 1_000_000_000L);
 
     /** 前のプロセスの起動識別子（遺留の目印）。 */
@@ -42,32 +52,52 @@ class BatchExecutionRunIdTest {
     private ScheduledTriggerStore triggerStore;
 
     @Autowired
-    private BatchService batchService;
-
-    @Autowired
     private ProcessRunId processRunId;
 
     @Autowired
-    private MigrationTestMapper sql;
+    private TestSqlMapper sql;
 
-    @AfterEach
-    void closeUnfinishedRows() {
-        for (BatchExecutionEntity row : executionMapper.findRecent(TEST_CODE, 50)) {
-            closeIfUnfinished(row);
-        }
-        for (String code : List.of("batS01")) {
-            for (BatchExecutionEntity row : executionMapper.findRecent(code, 10)) {
-                closeIfUnfinished(row);
-            }
-        }
+    @Autowired
+    private BatchTaskRegistry registry;
+
+    @Autowired
+    private com.study21.admin.setting.SettingsService settingsService;
+
+    @Autowired
+    private BatchControlMapper controlMapper;
+
+    @Autowired
+    private AiCallLogMapper aiCallLogMapper;
+
+    @Autowired
+    private com.study21.admin.schedule.ScheduleTimingRecorder timingRecorder;
+
+    /** 起動時バッチ（実業務の入口）はテストでは走らせない。 */
+    @MockitoBean
+    private BatchStartupRunner startupRunner;
+
+    /**
+     * テストが組み立てたバッチサービス（**代役ハンドラだけ**を持つ）。
+     * 実ハンドラ（プロキシ起動など）を動かさないため、Spring の Bean ではなく自前で作る。
+     */
+    private BatchServiceImpl testBatchService;
+    private StubBatchTaskHandler stubHandler;
+
+    private BatchTestExecutionCleanup cleanup;
+
+    @BeforeEach
+    void setUp() {
+        cleanup = new BatchTestExecutionCleanup(executionMapper);
+        // 実ハンドラの代わりに「記録だけ返す」代役を使う（外部への副作用を出さない）
+        stubHandler = new StubBatchTaskHandler("batS01", "テスト: 何もしません");
+        testBatchService = new BatchServiceImpl(registry, settingsService, executionMapper, controlMapper,
+                aiCallLogMapper, List.of(stubHandler), List.of(), timingRecorder);
     }
 
-    private void closeIfUnfinished(BatchExecutionEntity row) {
-        if (BatchExecutionStatus.QUEUED.name().equals(row.getStatus())
-                || BatchExecutionStatus.RUNNING.name().equals(row.getStatus())) {
-            executionMapper.markFinished(row.getExecutionId(), BatchExecutionStatus.SKIPPED.name(),
-                    "テストの後始末（未完了を残さない）", null, 0L);
-        }
+    @AfterEach
+    void closeOnlyOwnRows() {
+        // アサーションが失敗しても必ず通る。**このテストが作った ID だけ**を閉じる
+        cleanup.closeAll();
     }
 
     private List<Long> leftoverIds(String runId) {
@@ -75,7 +105,7 @@ class BatchExecutionRunIdTest {
                 .map(BatchExecutionEntity::getExecutionId).toList();
     }
 
-    /** テスト用の記録を 1 件作る（RUNNING にするなら開始時刻も入れる）。 */
+    /** テスト用の記録を 1 件作る（自分で作ったものとして登録する）。 */
     private BatchExecutionEntity insert(String runId, String status) {
         BatchExecutionEntity record = new BatchExecutionEntity();
         record.setBatchCode(TEST_CODE);
@@ -86,6 +116,7 @@ class BatchExecutionRunIdTest {
         record.setRunId(runId);
         record.setMessage("テスト用");
         executionMapper.insert(record);
+        cleanup.register(record);
         if (BatchExecutionStatus.RUNNING.name().equals(status)) {
             executionMapper.markRunning(record.getExecutionId());
         }
@@ -96,10 +127,10 @@ class BatchExecutionRunIdTest {
     @DisplayName("自動スケジューラの確保で作った記録に、現在の起動識別子が刻まれる")
     void scheduledClaimIsStampedWithTheCurrentRunId() {
         Long executionId = triggerStore.claimAndRecord(TEST_CODE, LocalDateTime.of(2026, 9, 20, 6, 30), "L");
+        cleanup.register(executionId);
 
         assertThat(executionId).isNotNull();
-        BatchExecutionEntity row = executionMapper.findById(executionId);
-        assertThat(row.getRunId()).isEqualTo(processRunId.value());
+        assertThat(executionMapper.findById(executionId).getRunId()).isEqualTo(processRunId.value());
         // 自分の記録は遺留に出ない（＝復旧が触らない）
         assertThat(leftoverIds(processRunId.value())).doesNotContain(executionId);
         // 別のプロセスの識別子では遺留に出る（＝次の起動が拾える）
@@ -109,9 +140,10 @@ class BatchExecutionRunIdTest {
     @Test
     @DisplayName("起動時バッチの記録にも、現在の起動識別子が刻まれる")
     void startupRunIsStampedWithTheCurrentRunId() {
-        var result = batchService.runOnStartup("batS01");
+        var result = testBatchService.runOnStartup("batS01");
 
         Long executionId = (Long) result.get("executionId");
+        cleanup.register(executionId);
         assertThat(executionId).isNotNull();
         assertThat(executionMapper.findById(executionId).getRunId()).isEqualTo(processRunId.value());
         assertThat(leftoverIds(processRunId.value())).doesNotContain(executionId);
@@ -120,9 +152,10 @@ class BatchExecutionRunIdTest {
     @Test
     @DisplayName("画面の手動実行（【再実行】）の記録にも、現在の起動識別子が刻まれる")
     void manualRerunIsStampedWithTheCurrentRunId() {
-        var result = batchService.rerun("batS01", "tester");
+        var result = testBatchService.rerun("batS01", "tester");
 
         Long executionId = (Long) result.get("executionId");
+        cleanup.register(executionId);
         assertThat(executionId).isNotNull();
         assertThat(executionMapper.findById(executionId).getRunId()).isEqualTo(processRunId.value());
         assertThat(leftoverIds(processRunId.value())).doesNotContain(executionId);
@@ -139,9 +172,10 @@ class BatchExecutionRunIdTest {
                 "テスト: やり直し", "RECOVERY");
 
         assertThat(result.retryExecutionId()).isNotNull();
-        BatchExecutionEntity retry = executionMapper.findById(result.retryExecutionId());
-        assertThat(retry.getRunId()).isEqualTo(processRunId.value());
-        assertThat(leftoverIds(processRunId.value())).doesNotContain(retry.getExecutionId());
+        // やり直しは元実行ID でつながっているので、後始末でも自分のものとして扱える
+        assertThat(executionMapper.findById(result.retryExecutionId()).getRunId())
+                .isEqualTo(processRunId.value());
+        assertThat(leftoverIds(processRunId.value())).doesNotContain(result.retryExecutionId());
     }
 
     @Test
@@ -149,7 +183,7 @@ class BatchExecutionRunIdTest {
     void legacyRowsWithoutRunIdAreLeftovers() {
         BatchExecutionEntity row = insert(processRunId.value(), BatchExecutionStatus.QUEUED.name());
         // この列が無かった頃の記録を再現する（列は NULL）
-        sql.execute("UPDATE " + "\"BAT_バッチ実行履歴情報\"" + " SET \"起動識別子\" = NULL"
+        sql.execute("UPDATE public.\"BAT_バッチ実行履歴情報\" SET \"起動識別子\" = NULL"
                 + " WHERE \"実行ID\" = " + row.getExecutionId());
 
         assertThat(leftoverIds(processRunId.value())).contains(row.getExecutionId());
@@ -161,7 +195,6 @@ class BatchExecutionRunIdTest {
         BatchExecutionEntity running = insert(processRunId.value(), BatchExecutionStatus.RUNNING.name());
 
         assertThat(leftoverIds(processRunId.value())).doesNotContain(running.getExecutionId());
-        // 実行ID が最大でも（＝ID の大小では判定しない）遺留にならない
         assertThat(executionMapper.findById(running.getExecutionId()).getStatus())
                 .isEqualTo(BatchExecutionStatus.RUNNING.name());
     }

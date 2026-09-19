@@ -239,6 +239,8 @@ class BatchExecutionRecoveryTest {
                 eq(LocalDateTime.of(2026, 9, 20, 6, 30)), anyString(),
                 eq(BatchExecutionRecovery.RETRY_CODE)))
                 .thenReturn(new ScheduledTriggerStore.RecoveryResult(true, 807L, true));
+        // やり直しの記録は**待機中**（投入の直前に状態を確かめる）
+        when(executionMapper.findById(807L)).thenReturn(row("batR04", "QUEUED", 807L, "2026-09-20T06:30:00"));
 
         recovery.recoverInterruptedExecutions();
 
@@ -508,6 +510,139 @@ class BatchExecutionRecoveryTest {
         verify(executor, times(1)).submit(eq("batR04"), eq(870L), any());
         verify(triggerStore, never()).closeLeftover(anyLong(), any(), anyString());
         assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    // ------------------------------------------------------------------ 整理してから投入する（競合の修正）
+
+    @Test
+    @DisplayName("同じタスクに古い記録と最新の記録: **古い方を閉じてから**最新を投入する（1 回だけ）")
+    void closesTheOlderRecordBeforeSubmittingTheNewestOne() {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        // 09:00 の時点で、最新の点は 08:56・その前は 08:51（古い方は「追い越された」で閉じる）
+        leftovers(row("batL02", "QUEUED", 700L, "2026-09-20T08:51:00"),
+                row("batL02", "QUEUED", 701L, "2026-09-20T08:56:00"));
+
+        recovery.recoverInterruptedExecutions();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(triggerStore, executor);
+        order.verify(triggerStore).closeLeftover(eq(700L), eq(BatchExecutionStatus.SKIPPED), anyString());
+        order.verify(executor).submit(eq("batL02"), eq(701L), any());
+        order.verifyNoMoreInteractions();
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("古い方が実行中（RUNNING）でも、先に閉じてから最新を投入する（最新は誤ってスキップされない）")
+    void closesTheOlderRunningRecordBeforeSubmittingTheNewestOne() {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        // 古い方は「追い越された」ので、結果不明として閉じるだけ（やり直しは作らない）
+        leftovers(row("batL02", "RUNNING", 702L, "2026-09-20T08:51:00"),
+                row("batL02", "QUEUED", 703L, "2026-09-20T08:56:00"));
+
+        recovery.recoverInterruptedExecutions();
+
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(triggerStore, executor);
+        order.verify(triggerStore).closeLeftover(eq(702L), eq(BatchExecutionStatus.FAILED), anyString());
+        order.verify(executor).submit(eq("batL02"), eq(703L), any());
+        order.verifyNoMoreInteractions();
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("同じタスクに未決の遺留が残っている間は投入を**持ち越す**（スキップで失わせない）")
+    void holdsSubmissionWhileTheSameTaskHasAnUnresolvedLeftover() {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        leftovers(row("batL02", "QUEUED", 704L, "2026-09-20T08:51:00"),
+                row("batL02", "QUEUED", 705L, "2026-09-20T08:56:00"));
+        // 古い方を閉じるのに失敗する（＝未決が残る）
+        when(triggerStore.closeLeftover(eq(704L), any(), anyString()))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenReturn(true);
+
+        recovery.recoverInterruptedExecutions();
+
+        // 未決があるので**投入しない**（投入すると「前回が終わっていない」でスキップされ、失われる）
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_REVIEW);
+        assertThat(recovery.status().pendingCount()).isEqualTo(2);
+
+        // 次のパス: 閉じられたら、最新を投入する（投入待ちは失われていない）
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        // 閉じるのは 2 回（1 回目は失敗・2 回目で成功）。成功したあとに 1 回だけ投入する
+        verify(triggerStore, times(2)).closeLeftover(eq(704L), eq(BatchExecutionStatus.SKIPPED), anyString());
+        verify(executor, times(1)).submit(eq("batL02"), eq(705L), any());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("復旧トランザクションが失敗したら投入せず、次のパスで**同じやり直し**を 1 回だけ投入する")
+    void retriesWhenTheRecoveryTransactionFailsWithoutDuplicatingTheRetry() {
+        networkTasks();
+        leftovers(row("batR04", "RUNNING", 706L, "2026-09-20T06:30:00"));
+        when(executionMapper.findById(707L)).thenReturn(row("batR04", "QUEUED", 707L, "2026-09-20T06:30:00"));
+        when(triggerStore.recoverRunningExecution(eq(706L), eq("batR04"), eq("R"), any(), anyString(),
+                eq(BatchExecutionRecovery.RETRY_CODE)))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenReturn(new ScheduledTriggerStore.RecoveryResult(true, 707L, true),
+                        new ScheduledTriggerStore.RecoveryResult(true, 707L, false));
+
+        recovery.recoverInterruptedExecutions();
+
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        assertThat(recovery.status().pendingCount()).isEqualTo(1);
+
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        // やり直しの作成は 2 回目に成功。投入は**1 回だけ**（同じ実行IDを二重に走らせない）
+        verify(executor, times(1)).submit(eq("batR04"), eq(707L), any());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("持ち越した投入待ちの記録が既に終わっていたら、投入せずに追跡から外す")
+    void dropsThePendingDispatchWhenTheRecordIsAlreadyTerminal() {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        BatchExecutionEntity stale = row("batL02", "QUEUED", 708L, "2026-09-20T08:51:00");
+        BatchExecutionEntity fresh = row("batL02", "QUEUED", 709L, "2026-09-20T08:56:00");
+        leftovers(stale, fresh);
+        when(triggerStore.closeLeftover(eq(708L), any(), anyString()))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenReturn(true);
+
+        recovery.recoverInterruptedExecutions();   // 未決があるので持ち越し
+        assertThat(recovery.status().pendingCount()).isEqualTo(2);
+
+        // 次のパスまでに、その記録が別の経路で終わっていた（＝二重実行しない）
+        fresh.setStatus(BatchExecutionStatus.SUCCESS.name());
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        assertThat(recovery.status().pendingCount()).isZero();
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("設定が読めない間は両方とも保留し、読めたら古い方を閉じて最新を 1 回だけ投入する")
+    void defersBothAndExecutesTheNewestAfterTheConfigRecovers() {
+        configNotLoaded();
+        leftovers(row("batL02", "QUEUED", 710L, "2026-09-20T08:51:00"),
+                row("batL02", "QUEUED", 711L, "2026-09-20T08:56:00"));
+
+        recovery.recoverInterruptedExecutions();
+
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        assertThat(recovery.status().pendingCount()).isEqualTo(2);
+
+        clock.advance(Duration.ofSeconds(31));
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        recovery.retryPendingRecoveryIfDue();
+
+        verify(triggerStore).closeLeftover(eq(710L), eq(BatchExecutionStatus.SKIPPED), anyString());
+        verify(executor, times(1)).submit(eq("batL02"), eq(711L), any());
     }
 
     @Test

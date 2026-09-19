@@ -268,6 +268,31 @@
 | 画面の【再実行】 | `BatchController#rerun` → `BatchServiceImpl#rerun` → `execute` | 同上（種別 C は不可） |
 | 復旧のやり直し | `BatchExecutionRecovery` → `ScheduledTriggerStore#recoverRunningExecution` | 旧実行を閉じて `QUEUED` を作る（1 トランザクション） |
 
+#### 1 パスは「整理」と「投入」の 2 段階（古い記録を先に閉じる）
+
+判定しながら実行器へ渡すと、**同じタスクの古い記録が未完了のうちに新しい記録が走り出し**、
+業務側の「前回の実行が終わっていないのでスキップ」（`BatchServiceImpl#runQueued`）に当たって
+**本来実行すべき記録が失われる**（例: batL02 の古い A と最新の B があり、B が A のためにスキップされ、
+そのあと A が「計画が古い」で閉じられる）。そこで 1 パスを 2 段階に分ける:
+
+1. **第 1 段階（判定と整理）** … そのパスの**1 枚のスナップショット**で全遺留を判定し、
+   実行しない記録は理由つきで閉じ、有効な記録は**投入待ちとして集めるだけ**（実行器へは渡さない）。
+   実行中（RUNNING）は `recoverRunningExecution` で「閉じる＋やり直しを作る」を 1 トランザクションで行い、
+   **コミット後に**やり直しを投入待ちへ入れる。
+2. **第 2 段階（投入）** … 投入待ちを実行器へ渡す。**同じタスクに未決の遺留**
+   （保留・閉じられなかった・復旧トランザクションが失敗した）が残っているタスクは
+   **今回は投入せず持ち越す**（投入すると冒頭のスキップで失われるため）。未決が片付けば次で投入する。
+   他のタスクは進める（1 つのタスクの失敗で全体を止めない）。
+
+- **投入待ちは復旧の追跡に残す**（実行器へ渡すまで、または明確に終わったと分かるまで外さない）。
+  実行中から作ったやり直しは**このプロセスの記録**なので「前のプロセスの遺留」の検索では二度と出ない
+  → **この追跡が唯一の持ち主**で、次パス・次回起動まで責任を持つ。
+- 投入の直前に**記録がいまも待機中か**を確かめ、実行済み・閉じられていれば投入しない（二重実行しない）。
+  実行の直前には**そのとき最新の 1 枚**で再検証する（待機中に設定が変わっていれば見送る）。
+- 待ち行列があふれたときの入り直しは**実行器の既存の仕組み**（`retryPendingSubmissions`）に任せる
+  （復旧側に別の投入経路を作らない）。
+- 同じ実行IDの二重実行は、実行側の最後の砦（`runQueued` は**待機中の記録だけ**を実行する）でも防ぐ。
+
 #### 「閉じる＋やり直しを作る」は**1 トランザクション**（`ScheduledTriggerStore#recoverRunningExecution`）
 
 1. 旧実行を**未完了のときだけ**閉じる（条件つき UPDATE。他の復旧と同時でも閉じられるのは 1 つ）
@@ -351,6 +376,26 @@ batL03 は `最新版フラグ` の張り替え。**同じ計画実行点が二�
 - 新規環境は `database/バッチ/TBL_BAT_バッチ実行履歴情報.sql` が同じ形を作る
   （移行後と一致することをテストで確認: `BatchExecutionMigrationTest`）。
 
+## 7-3. 実 DB 統合試験の環境（**専用の使い捨て DB**）
+
+バッチの実 DB 統合試験は、**日常の開発 DB には繋がない**。専用のテスト DB を指す URL が
+環境変数で渡されたときだけ動き、無ければ**スキップ**する（理由を出して落とさない）。
+
+```bash
+tmp/tools/study21-batchtestdb.sh start     # 使い捨ての PostgreSQL（127.0.0.1:55433）＋スキーマ＋初期データ
+STUDY21_TEST_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:55433/study21_test \
+STUDY21_TEST_DATASOURCE_USERNAME=postgres \
+  tmp/tools/mvn-test.sh test               # 実 DB 統合試験はこちらで実行される
+tmp/tools/study21-batchtestdb.sh stop      # 止める（使い捨てなので消してもよい）
+```
+
+- 試験側は `@ActiveProfiles("testdb")`（`src/test/resources/application-testdb.properties`）で
+  データ源を切り替え、**起動時の副作用**（30 秒スケジューラ・起動時バッチ）を止める。
+- 実業務のハンドラ（動画取込・AI・プロキシ起動）は**代役**にして、外部への副作用を出さない
+  （MyBatis・起動識別子のインターセプタ・トランザクションの経路は本物のまま通す）。
+- 試験が作った記録は `BatchTestExecutionCleanup` で**自分が作った実行IDだけ**を閉じる
+  （「最近の N 件」をまとめて触らない）。
+
 ## 8. 運用
 
 - **確認**: バッチ一覧の「実行タイミング」と、設定画面の実行スケジュール表示
@@ -417,6 +462,11 @@ batL03 は `最新版フラグ` の張り替え。**同じ計画実行点が二�
 | 4-30 | 移行: 古い構造から列と索引が増え、**既存の実行記録は変わらない／繰り返し実行できる** | `BatchExecutionMigrationTest#migratesOldStructureAndKeepsTheRows`（実 DB・出荷スクリプトをそのまま実行） |
 | 4-31 | 移行: `元実行ID` に重複があれば**中止して報告**（履歴を消さない・直さない） | `BatchExecutionMigrationTest#abortsWhenSourceExecutionIdHasDuplicates` |
 | 4-32 | 新規作成と移行後で表の形が同じ（列と部分一意索引がそろっている） | `BatchExecutionMigrationTest#theRealTableHasTheColumnsAndTheUniqueIndex` |
+| 4-33 | 同じタスクの古い記録を**閉じてから**最新を投入する（最新がスキップされない） | `BatchExecutionRecoveryTest#closesTheOlderRecordBeforeSubmittingTheNewestOne`・`#closesTheOlderRunningRecordBeforeSubmittingTheNewestOne`・`BatchRecoveryDispatchIntegrationTest`（実 DB・実実行器・実 `runQueued`＋代役ハンドラ） |
+| 4-34 | 未決の遺留が残る間は投入を持ち越し、片付いたら投入する（スキップで失わせない） | `BatchExecutionRecoveryTest#holdsSubmissionWhileTheSameTaskHasAnUnresolvedLeftover`・`#defersBothAndExecutesTheNewestAfterTheConfigRecovers`・`#dropsThePendingDispatchWhenTheRecordIsAlreadyTerminal` |
+| 4-35 | 復旧トランザクション失敗でも次のパスで回復し、やり直しを二重に作らない | `BatchExecutionRecoveryTest#retriesWhenTheRecoveryTransactionFailsWithoutDuplicatingTheRetry` |
+| 4-36 | 待機中でない記録は実行しない（同じ実行IDの二重実行を防ぐ） | `BatchRerunServiceImplTest`（実行済みの記録は実行しない）・`BatchExecutionRecoveryTest#dropsThePendingDispatchWhenTheRecordIsAlreadyTerminal` |
+| 4-37 | テストの後始末は自分が作った記録だけを閉じる（他の記録を変えない） | `BatchExecutionCleanupIsolationTest`（実 DB） |
 | 4-26 | 1 回の判断が**1 枚のスナップショット**だけを使う（途中で入れ替わっても混ざらない） | `SchedulePlanGuardTest#usesOnlyTheGivenSnapshot`・`#networkAndIntervalDecisionsUseTheGivenSnapshot`、`BatchScheduleExecutorTest#beforeRunUsesTheLatestSnapshot` |
 | 4-15 | 設定が無い・不正のときは、画面に**理由と次に確認する時刻**を出す | `ScheduleConfigServiceTest`（`fallbackMessage` / `configMissingMessage`）・`batch-schedule-panel.spec.ts`（`task-fallback` / `schedule-config-missing`）、実機（設定画面） |
 | 5 | メモリ欠落時に DB から托底して回填する | `ScheduleConfigServiceTest#fallbackLoadsOnceForConcurrentMisses` |

@@ -164,6 +164,15 @@ public class BatchServiceImpl implements BatchService {
                     "実行記録が見つかりません: " + executionId, null);
         }
         String batchCode = record.getBatchCode();
+        // **待機中の記録だけ**を実行する（二重実行の最後の砦）。
+        // 同じ実行IDが復旧の再投入・待ち行列の入り直し・別経路から二度渡されても、
+        // 業務をもう一度走らせない（既に実行中・終了済みなら何もしない）。
+        if (record.getStatus() != null && !BatchExecutionStatus.QUEUED.name().equals(record.getStatus())) {
+            String message = "この実行は既に処理されています（状態=" + record.getStatus() + "）ため実行しません。";
+            log.warn("Scheduled batch was already handled. batchCode={} executionId={} status={}",
+                    batchCode, executionId, record.getStatus());
+            return result(false, executionId, BatchExecutionStatus.valueOf(record.getStatus()), message, null);
+        }
         BatchTaskDefinition task = registry.findByCode(batchCode);
         if (task == null) {
             return failQueued(executionId, batchCode, "バッチタスクが見つかりません: " + batchCode, null);

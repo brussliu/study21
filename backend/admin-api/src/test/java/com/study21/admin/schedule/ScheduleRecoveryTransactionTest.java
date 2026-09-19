@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -32,8 +33,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <p>テストは自分で作った行（テスト専用のバッチコード）だけを使い、最後に消す。</p>
  */
 @SpringBootTest
-@EnabledIfEnvironmentVariable(named = "STUDY21_DATASOURCE_PASSWORD", matches = ".+",
-        disabledReason = "DB のパスワード（STUDY21_DATASOURCE_PASSWORD）が未設定のためスキップ")
+@ActiveProfiles("testdb")
+@EnabledIfEnvironmentVariable(named = "STUDY21_TEST_DATASOURCE_URL", matches = ".+",
+        disabledReason = "専用のテスト DB（STUDY21_TEST_DATASOURCE_URL）が未設定のためスキップします"
+                + "（tmp/tools/study21-batchtestdb.sh start で用意できます）")
 class ScheduleRecoveryTransactionTest {
 
     /** 実データと衝突しないコード（テストの前後で自分で消す）。 */
