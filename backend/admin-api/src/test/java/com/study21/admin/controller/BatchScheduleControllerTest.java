@@ -1,5 +1,6 @@
 package com.study21.admin.controller;
 
+import com.study21.admin.schedule.BatchExecutionRecovery;
 import com.study21.admin.schedule.BatchScheduleExecutor;
 import com.study21.admin.schedule.BatchScheduleScheduler;
 import com.study21.admin.schedule.ScheduleConfigReport;
@@ -45,8 +46,11 @@ class BatchScheduleControllerTest {
         configService = mock(ScheduleConfigService.class);
         triggerStore = mock(ScheduledTriggerStore.class);
         executor = mock(BatchScheduleExecutor.class);
+        BatchExecutionRecovery recovery = mock(BatchExecutionRecovery.class);
+        when(recovery.status()).thenReturn(new BatchExecutionRecovery.RecoveryStatus(
+                BatchExecutionRecovery.Phase.COMPLETED, "完了", 1234L, 0, 2, 1, 1));
         BatchScheduleController controller = new BatchScheduleController(
-                configService, triggerStore, executor, mock(BatchScheduleScheduler.class));
+                configService, triggerStore, executor, mock(BatchScheduleScheduler.class), recovery);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();

@@ -1,6 +1,8 @@
 package com.study21.admin.schedule;
 
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -10,7 +12,8 @@ import java.util.Map;
  * MyBatis でスケジュール設定を読む {@link ScheduleConfigLoader} の実装。
  *
  * <p>「設定値（COM_設定情報）」「有効／無効（BAT_バッチコントロール情報）」「設定の適用時刻と
- * 計画バージョン（BAT_スケジュール状態情報）」を**3 クエリ**でまとめて読む（タスクごとに 1 回ずつ問い合わせない）。読み込み中の例外は
+ * 計画バージョン（BAT_スケジュール状態情報）」を**1 つの読み取り専用トランザクション
+ * （REPEATABLE READ）の中で 3 クエリ**でまとめて読む（タスクごとに 1 回ずつ問い合わせない）。読み込み中の例外は
  * {@link ScheduleConfigLoadException} に包み、呼び出し側（{@link ScheduleConfigService}）が
  * 「前の有効な設定を残して再試行」を判断できるようにする。</p>
  */
@@ -25,7 +28,25 @@ public class MyBatisScheduleConfigLoader implements ScheduleConfigLoader {
         this.planMapper = planMapper;
     }
 
+    /**
+     * 3 つの表（設定値・有効／無効・適用時刻と計画バージョン）を**同じスナップショット**で読む。
+     *
+     * <p><b>なぜ 1 本のトランザクションで読むか（単一 SQL ではなく）</b>:
+     * 3 つは別の表にあり、1 文にすると「種類の違う行を UNION して Java で振り分ける」形になって
+     * 既存の Mapper と SQL ログの形を崩す。PostgreSQL の {@code REPEATABLE READ} は
+     * **トランザクションの中で 1 つのスナップショット**を使うので、3 クエリでも
+     * 「設定値は新しい・有効状態は古い」という混ざった読み方をしない
+     * （既定の {@code READ COMMITTED} は**文ごと**にスナップショットを取るため混ざりうる）。</p>
+     *
+     * <p>読み取り専用（{@code readOnly = true}）なので副作用は無い。MyBatis は Spring の
+     * トランザクションに紐づいた**同じ接続**を使う（{@code SqlSessionTemplate} の既定の動き）。</p>
+     *
+     * <p>呼び出し側はトランザクションの外から呼ぶ（{@code ScheduleConfigService} は別の Bean で、
+     * 設定の保存が**コミットしたあと**に呼ぶ）。ここで読み込みの途中に
+     * 適用時刻や計画バージョンを**書かない**（設定値の保存と同じトランザクションで書く）。</p>
+     */
     @Override
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public ScheduleSourceData load(List<String> settingKeys, List<String> taskCodes) {
         try {
             List<String> pageCodes = List.of("NET_CONTROL", "STUDY_MONITOR");

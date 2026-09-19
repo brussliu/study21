@@ -117,6 +117,10 @@ function mockApi(options: MockOptions = {}): { calls: Call[] } {
     const fail = (status: number, message: string, data: unknown = null): Response => new Response(
       JSON.stringify({ success: false, code: 'ERROR', message, data, timestamp: '' }),
       { status, headers: { 'Content-Type': 'application/json' } })
+    /** 409（同じ連番に違う内容）は、後端と同じコードで返す（画面はコードで「直らない」を判断する）。 */
+    const failConflict = (message: string): Response => new Response(
+      JSON.stringify({ success: false, code: 'CONFLICT', message, data: null, timestamp: '' }),
+      { status: 409, headers: { 'Content-Type': 'application/json' } })
     const target = String(url)
     if (target.includes('/options')) {
       return ok({
@@ -135,7 +139,7 @@ function mockApi(options: MockOptions = {}): { calls: Call[] } {
       chunkPosts += 1
       if (options.chunkFailFrom !== undefined && chunkPosts >= options.chunkFailFrom) {
         return options.chunkFailKind === 'client'
-          ? fail(409, '同じ連番に違う内容の音声が届きました。')
+          ? failConflict('同じ連番に違う内容の音声が届きました。')
           : fail(500, 'サーバーでエラーが発生しました。')
       }
       return ok({

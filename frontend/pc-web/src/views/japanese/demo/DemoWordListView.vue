@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { useJapaneseDemoStore } from '@/features/japanese-demo/store/japaneseDemo'
 import {
@@ -9,30 +8,31 @@ import {
   PART_OF_SPEECH_OPTIONS,
   collectionLabel
 } from '@/features/japanese-demo/logic'
-import DemoStatusPanel from '@/features/japanese-demo/components/DemoStatusPanel.vue'
+import { openEditPopup, openStudyPopup } from '@/features/japanese-demo/popup'
 import DemoDeleteDialog from '@/features/japanese-demo/components/DemoDeleteDialog.vue'
+import DemoWordNewView from './DemoWordNewView.vue'
 import '@/features/japanese-demo/japanese-demo.css'
 
 /**
- * 日本語勉強【単語情報管理】デモ：一覧。
+ * 日本語勉強【単語情報管理】：一覧。
  *
  * 参考にした 2.0: `japanese_word.jsp` ＋ `js/japanese_word.js`
  * （検索条件で母表を絞り、行ごとに操作を置き、AI 取得の状態を列で見せる）。
+ * 2.0 と同じく、**詳細編集と学習画面（A. 勉強）は別ウィンドウ**で開き、
+ * 新規登録と削除確認はダイアログで行う。
  *
- * この画面は**デモ専用**で、本番 API は呼ばない（`mock/demoWords.ts` の仮データだけ）。
  * 一覧の絞り込み・ページ・スクロール位置はストアが持つので、
- * 詳細編集や学習画面から戻っても同じ見え方に戻る。
+ * 別ウィンドウを閉じて戻っても同じ見え方に戻る。
  */
 
 const store = useJapaneseDemoStore()
-const router = useRouter()
 
-/** 二次条件（書籍・Unit・品詞・JLPT・状態）は既定でたたむ（§3-1）。 */
+/** 二次条件（書籍・Unit・品詞・JLPT・状態）は既定でたたむ。 */
 const advancedOpen = ref(false)
 /** 収録が多い語を展開している ID（複数書籍の収録を見る）。 */
 const expanded = ref<string[]>([])
-/** 一覧へ戻ったときに「デモをリセット」の注意を出す。 */
-const resetting = ref(false)
+/** 新規登録のダイアログ。 */
+const creating = ref(false)
 const deleting = ref(false)
 
 const notice = computed(() => store.listNotice)
@@ -54,16 +54,30 @@ function collectionsOf(id: string): ReturnType<typeof collectionLabel>[] {
   return word === null ? [] : word.collections.map((collection) => collectionLabel(collection))
 }
 
-async function openEditor(id: string): Promise<void> {
+/** 詳細編集を別ウィンドウで開く（下書きはストアと控えで共有する）。 */
+function openEditor(id: string): void {
   store.rememberScroll(window.scrollY)
   if (store.openEditor(id)) {
-    await router.push({ name: 'student-japanese-demo-edit', params: { wordId: id } })
+    openEditPopup(id)
   }
 }
 
-async function openStudy(id: string): Promise<void> {
+/** 学習画面（A. 勉強）を別ウィンドウで開く。 */
+function openStudy(id: string): void {
   store.rememberScroll(window.scrollY)
-  await router.push({ name: 'student-japanese-demo-study', params: { wordId: id } })
+  openStudyPopup(id)
+}
+
+function openCreate(): void {
+  creating.value = true
+}
+
+function closeCreate(): void {
+  creating.value = false
+}
+
+function afterCreate(): void {
+  creating.value = false
 }
 
 function askDelete(id: string): void {
@@ -84,64 +98,31 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
-function resetDemo(): void {
-  store.resetAll()
-  advancedOpen.value = false
-  expanded.value = []
-  resetting.value = true
-}
-
 function scrollToListPosition(): void {
   window.scrollTo({ top: store.listScrollTop })
 }
 
 onMounted(() => {
-  // 一覧へ戻ってきたときは、離れる前のスクロール位置に戻す
+  // 別ウィンドウから戻ってきたときは、離れる前のスクロール位置に戻す
   scrollToListPosition()
+  // 動作確認で状態を固定したいときだけ（画面には出さない）
+  store.applyDisplayFromQuery(window.location.search)
 })
 </script>
 
 <template>
   <div class="jp-demo">
-    <!-- 見出し。デモであることと、操作が保存されないことを最初に伝える -->
     <div class="jp-demo__head">
       <div>
         <h1 class="page-title">単語情報管理</h1>
         <p class="page-sub">日本語の単語（母表）を検索し、詳細情報の状態を見て、編集・学習の確認をします。</p>
       </div>
-      <span class="jp-demo__badge" data-demo-badge>
-        <AppIcon name="info" size="sm" /> デモ
-      </span>
       <div class="jp-demo__actions">
-        <button type="button" class="btn btn--secondary btn--sm" data-demo-reset @click="resetDemo">
-          <AppIcon name="rotate" size="sm" /> デモをリセット
-        </button>
-        <button
-          type="button" class="btn btn--primary btn--sm" data-demo-new
-          @click="router.push({ name: 'student-japanese-demo-new' })"
-        >
+        <button type="button" class="btn btn--primary btn--sm" data-demo-new @click="openCreate">
           <AppIcon name="plus" size="sm" /> 新規登録
         </button>
       </div>
     </div>
-
-    <p class="jp-demo__notice" data-demo-notice>
-      <AppIcon name="alert" size="sm" />
-      <span>
-        <strong>これは画面確認用のデモです。</strong>
-        表示している単語・書籍・学習内容はすべて仮のデータで、追加・編集・削除・AI 生成・音声再生は
-        <strong>この画面の中だけで起き、実際のシステムには保存されません</strong>。
-        「デモをリセット」で最初の状態に戻せます。
-      </span>
-    </p>
-
-    <!-- デモ表示設定（既定はたたむ。切り替えは確認用で、業務の操作とは分けて置く） -->
-    <DemoStatusPanel />
-
-    <p v-if="resetting" class="alert alert--info" data-demo-reset-done>
-      デモをリセットしました。仮データは最初の状態に戻っています。
-      <button type="button" class="jp-demo-linkbtn" @click="resetting = false">閉じる</button>
-    </p>
 
     <p v-if="notice !== ''" class="alert alert--info" data-demo-notice-bar>
       {{ notice }}
@@ -253,7 +234,7 @@ onMounted(() => {
             </select>
           </span>
           <p class="jp-demo-panel__hint">
-            JLPT レベルは<strong>例示値</strong>です（権威ある判定ではありません）。デモの仮データでは未確認の語は空にしています。
+            JLPT レベルは<strong>参考値</strong>です（全語について確認できているものではありません）。未確認の語は空にしています。
           </p>
         </div>
       </div>
@@ -385,7 +366,7 @@ onMounted(() => {
                 >
                   <AppIcon name="rotate" size="sm" /> 再試行
                 </button>
-                <span v-else-if="row.detailStatus === 'RUNNING'" class="jp-demo-meta">デモの生成中です（通信はしていません）</span>
+                <span v-else-if="row.detailStatus === 'RUNNING'" class="jp-demo-meta">生成しています…</span>
               </td>
             </tr>
           </tbody>
@@ -420,13 +401,11 @@ onMounted(() => {
       </div>
     </section>
 
-    <p class="jp-demo__notice">
-      <AppIcon name="info" size="sm" />
-      <span>
-        正式開発では、この一覧は <strong>JPN_単語情報</strong> と <strong>JPN_単語収録情報</strong> を結合して表示し、
-        詳細情報の状態は <strong>JPN_単語詳細情報</strong> の有無と取得日時から判定します（§9 の申し送りを参照）。
-      </span>
-    </p>
+    <DemoWordNewView
+      v-if="creating"
+      @close="closeCreate"
+      @saved="afterCreate"
+    />
 
     <DemoDeleteDialog
       v-if="deleting && store.deleteTarget"

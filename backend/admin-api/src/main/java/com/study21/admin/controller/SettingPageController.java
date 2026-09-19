@@ -4,6 +4,7 @@ import com.study21.admin.ai.AiConnectionTester;
 import com.study21.admin.ai.SttConnectionTester;
 import com.study21.admin.geometryai.dto.AiResponseDtos;
 import com.study21.admin.geometryai.dto.AiResponseSchemaService;
+import com.study21.admin.schedule.BatchExecutionRecovery;
 import com.study21.admin.schedule.ScheduleConfigService;
 import com.study21.admin.schedule.ScheduleSettingValidator;
 import com.study21.admin.setting.SettingsService;
@@ -39,13 +40,17 @@ public class SettingPageController {
     private final SttConnectionTester sttConnectionTester;
     /** 保存の**コミット後**にバッチの実行スケジュールのメモリを更新する。 */
     private final ScheduleConfigService scheduleConfigService;
+    /** 設定が読めるようになったら、保留している再起動の復旧もその場で判定し直す。 */
+    private final BatchExecutionRecovery recovery;
     /** 実行スケジュールの欄をまたぐ検証（保存の前）。 */
     private final ScheduleSettingValidator scheduleSettingValidator;
 
     public SettingPageController(SettingsService settingsService, AiResponseSchemaService schemaService,
                                  AiConnectionTester connectionTester, SttConnectionTester sttConnectionTester,
                                  ScheduleConfigService scheduleConfigService,
-                                 ScheduleSettingValidator scheduleSettingValidator) {
+                                 ScheduleSettingValidator scheduleSettingValidator,
+                                 BatchExecutionRecovery recovery) {
+        this.recovery = recovery;
         this.settingsService = settingsService;
         this.schemaService = schemaService;
         this.connectionTester = connectionTester;
@@ -136,6 +141,10 @@ public class SettingPageController {
         // コミット後に反映する（トランザクションの中でキャッシュを触ると、ロールバックしたのに
         // 実行設定だけ変わっている、という食い違いが起きる）
         ScheduleConfigService.RefreshResult refresh = scheduleConfigService.refresh("設定保存");
+        if (refresh.published()) {
+            // 設定が読めるようになった → 保留している再起動の復旧をその場で判定し直す
+            recovery.retryPendingRecoveryNow("設定保存");
+        }
         data.put("scheduleVersion", refresh.version());
         data.put("schedulePending", !refresh.published());
         data.put("scheduleMessage", refresh.published() ? null : refresh.error());

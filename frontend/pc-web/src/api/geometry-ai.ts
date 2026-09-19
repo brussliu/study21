@@ -309,6 +309,8 @@ export interface GeometryAiTaskRow {
   questionCount: number
   /** 完了したタスクが作った図形（まだ無ければ null）。 */
   figureId: number | null
+  /** 楽観的ロックの版数（【削除】などカードからの操作に使う）。 */
+  version: number
   /** 失敗した工程（PREPROCESS / GENERATE / VALIDATE。成功なら null）。 */
   failedStage: string | null
   errorCode: string | null
@@ -464,6 +466,18 @@ export function cancelGeometryAiRequest(
   requestId: number, version: number
 ): Promise<ApiResponse<GeometryAiRequestStatus>> {
   return http.post<GeometryAiRequestStatus>(`/requests/${requestId}/cancel`, { body: { version } })
+}
+
+/**
+ * タスクを**一覧から消す**（状態を取消にする。行は監査のためサーバーに残る）。
+ *
+ * 【取消】と違ってどの状態でも消せる（生成済み・失敗・追加入力待ちを片付けられる）。
+ * 図形として保存済みのものは消せない（図形一覧から削除する）。
+ */
+export function discardGeometryAiRequest(
+  requestId: number, version: number
+): Promise<ApiResponse<GeometryAiRequestStatus>> {
+  return http.post<GeometryAiRequestStatus>(`/requests/${requestId}/discard`, { body: { version } })
 }
 
 /** 図形として保存（作図画面で確認・調整したあと。登録元コード = 'AI'）。 */

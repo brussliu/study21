@@ -145,6 +145,98 @@ public class ScheduledTriggerStore {
     }
 
     /**
+     * 再起動の復旧: 中断した実行を**未完了のときだけ**閉じる。
+     *
+     * <p>「閉じる」は 1 文の条件つき UPDATE なので、2 つの復旧が同時に同じ実行を扱っても
+     * 閉じられるのは 1 つだけ（行ロックで直列化され、後から来た方は 0 件になる）。</p>
+     *
+     * @return 閉じたら true（false = 他の復旧が先に閉じた・既に終わっていた）
+     */
+    public boolean closeLeftover(long executionId, BatchExecutionStatus status, String message) {
+        int closed = executionMapper.closeIfUnfinished(executionId, status.name(), message);
+        if (closed == 0) {
+            return false;
+        }
+        log.warn("中断した実行を閉じました。executionId={} status={} message={}", executionId, status, message);
+        return true;
+    }
+
+    /**
+     * 再起動の復旧: **実行中**（結果が分からない）の実行を閉じ、
+     * 「やり直し」の実行記録を作るまでを**1 つのトランザクション**で行う。
+     *
+     * <p>閉じるのと作るのが別々だと、間で落ちたときに
+     * ・閉じたのにやり直しが無い（＝その計画実行点が永久に実行されない）
+     * という漏執行が残る。ここではまとめて行い、**どちらか一方だけが残ることを防ぐ**。</p>
+     *
+     * <p>二重の防止は 2 段:</p>
+     * <ol>
+     *   <li>閉じるのは条件つき UPDATE（未完了のときだけ）＝ 勝った 1 つだけが先へ進む</li>
+     *   <li>やり直しは {@code 元実行ID} の**部分一意索引**で 1 つだけ
+     *       （{@code INSERT ... ON CONFLICT DO NOTHING}。メモリのロックに依存しない）</li>
+     * </ol>
+     *
+     * <p>メモリの早見はコミット後にだけ触る。実行器への投入は**呼び出し側がコミット後**に行う
+     * （コミット前に投入すると、ロールバックしたのに実行が始まってしまう）。</p>
+     *
+     * @param oldExecutionId 中断した実行の ID
+     * @param batchCode      バッチコード（計画表への紐付けに使う）
+     * @param batchType      起動種別（C / L / R / S）
+     * @param plannedAt      計画実行点（やり直しにも同じ予定時刻を残す）
+     * @param message        閉じた実行に残すメッセージ
+     * @param requestedByCode やり直しの依頼元コード（例 RETRY）
+     * @return 結果（やり直しの実行ID・新しく作ったか・この呼び出しが処理したか）
+     */
+    public RecoveryResult recoverRunningExecution(long oldExecutionId, String batchCode, String batchType,
+                                                  LocalDateTime plannedAt, String message,
+                                                  String requestedByCode) {
+        RecoveryResult result = transactionTemplate.execute(txStatus -> {
+            // (1) 未完了のときだけ閉じる（他の復旧と競合したら 0 件になる）
+            int closed = executionMapper.closeIfUnfinished(oldExecutionId, BatchExecutionStatus.FAILED.name(), message);
+
+            // (2) 既にやり直しがあればそれを使う（やり直しは 1 つだけ）
+            BatchExecutionEntity existing = executionMapper.findBySourceExecutionId(oldExecutionId);
+            if (existing != null) {
+                return new RecoveryResult(closed > 0, existing.getExecutionId(), false);
+            }
+            if (closed == 0) {
+                // 閉じられず、やり直しも無い = 既に終わっている（正常終了など）。
+                // 何も作らない（既に終わった実行をやり直さない）
+                return new RecoveryResult(true, null, false);
+            }
+
+            // (3) やり直しを作る（元実行ID の一意性で守る）
+            BatchExecutionEntity record = new BatchExecutionEntity();
+            record.setBatchCode(batchCode);
+            record.setBatchType(batchType);
+            record.setTriggerType(batchType);
+            record.setStatus(BatchExecutionStatus.QUEUED.name());
+            record.setRequestedByCode(requestedByCode);
+            record.setScheduleTime(plannedAt == null ? null : plannedAt.format(PAYLOAD_FORMAT));
+            record.setMessage("サービス再起動のため、中断した実行をやり直します（予定 "
+                    + (plannedAt == null ? "不明" : plannedAt.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")))
+                    + "）");
+            record.setSourceExecutionId(oldExecutionId);
+            int inserted = executionMapper.insertRetryIfAbsent(record);
+            if (inserted == 0) {
+                // 同時に走った復旧が先に作った → その 1 件を使う
+                BatchExecutionEntity raced = executionMapper.findBySourceExecutionId(oldExecutionId);
+                return new RecoveryResult(true, raced == null ? null : raced.getExecutionId(), false);
+            }
+            planMapper.attachExecution(batchCode, record.getExecutionId());
+            return new RecoveryResult(true, record.getExecutionId(), true);
+        });
+        if (result == null) {
+            return new RecoveryResult(false, null, false);
+        }
+        if (Boolean.TRUE.equals(result.created())) {
+            log.warn("中断した実行のやり直しを作りました（冪等な業務のみ）。oldExecutionId={} newExecutionId={}",
+                    oldExecutionId, result.retryExecutionId());
+        }
+        return result;
+    }
+
+    /**
      * 計画実行点を**実行せずに**進める（タスクが無効のとき）。
      *
      * <p>無効の間に計画を進めておかないと、有効に戻した直後に古い計画実行点を
@@ -197,6 +289,17 @@ public class ScheduledTriggerStore {
     /** そのタスクの実行が未完了（待機中・実行中）か。 */
     public boolean isTaskRunning(String taskCode) {
         return executionMapper.findRunningByBatchCode(taskCode) != null;
+    }
+
+    /**
+     * 復旧の結果。
+     *
+     * @param handled          この呼び出し（または既に完了していたこと）で処理が確定したか
+     *                         （false = 他の復旧が処理中。次のパスで確認する）
+     * @param retryExecutionId やり直しの実行ID（作らなかった・不要なら null）
+     * @param created          この呼び出しがやり直しを**新しく作った**か
+     */
+    public record RecoveryResult(boolean handled, Long retryExecutionId, Boolean created) {
     }
 
     /** 実行記録（スキップ理由を書くために読む）。 */

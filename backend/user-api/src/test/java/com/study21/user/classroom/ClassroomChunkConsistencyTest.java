@@ -230,18 +230,24 @@ class ClassroomChunkConsistencyTest {
      * どちらも黙って通さない（矛盾した一覧を受け付けない）。</p>
      */
     @Test
-    @DisplayName("② 宣言したのに無い連番と、宣言していないのに在る連番を、どちらも欠落として返す")
+    @DisplayName("② 録れた範囲に足りない連番と、範囲の外に在る連番を、どちらも欠落として返す")
     void endRejectsContradictoryManifest() {
         byte[] content = bytes(7);
         service.uploadChunk(student, RECORD_ID, 3, file(content), null, null, null);
-        // 画面は「1・2 を送った」と言っているが、保存されているのは 3 だけ
+        /*
+         * 画面は「2 つ録れて、そのうち 1・2 の応答を受け取った」と言っている。
+         * 保存されているのは 3 だけ（1・2 は届いていない＝送り直せる。3 は録れた範囲の外＝食い違い）。
+         */
         ClassroomModels.ChunkManifest manifest =
-                new ClassroomModels.ChunkManifest(2, 2, null, List.of(1, 2));
+                new ClassroomModels.ChunkManifest(2, 2, List.of(1, 2), null, List.of());
 
-        assertThatThrownBy(() -> service.end(student, RECORD_ID, false, manifest))
-                .isInstanceOf(ChunkChecklistException.class)
-                .hasMessageContaining("1")
-                .hasMessageContaining("3");
+        ChunkChecklistException refusal = org.junit.jupiter.api.Assertions.assertThrows(
+                ChunkChecklistException.class, () -> service.end(student, RECORD_ID, false, manifest));
+
+        // 送り直せるのは 1・2（まだ届いていない）。3 は「範囲の外に在る」として別に返す
+        assertThat(refusal.checklist().missingSeqs()).containsExactly(1, 2, 3);
+        assertThat(refusal.checklist().extraSeqs()).containsExactly(3);
+        assertThat(refusal.checklist().reasonCode()).isEqualTo(ClassroomModels.CHECK_MISSING);
     }
 
     /**
@@ -273,7 +279,7 @@ class ClassroomChunkConsistencyTest {
         when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
         when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyInt(), anyLong(),
-                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+                org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any())).thenReturn(1);
 
         ClassroomModels.EndResult result = service.end(student, RECORD_ID);
 
@@ -318,10 +324,11 @@ class ClassroomChunkConsistencyTest {
         when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
         when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyInt(), anyLong(),
-                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+                org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any())).thenReturn(1);
 
+        // 20 秒 × 2 = 40 秒（分塊の終わりは 40 秒。時間軸は 16kHz）
         ClassroomModels.EndResult result = service.end(student, RECORD_ID, false,
-                new ClassroomModels.ChunkManifest(2, 2, 40_000L, List.of(1, 2)));
+                new ClassroomModels.ChunkManifest(2, 2, List.of(1, 2), 40L * 16_000L, List.of()));
 
         assertThat(result.complete()).isTrue();
         assertThat(result.missingSeqs()).isEmpty();
@@ -330,7 +337,7 @@ class ClassroomChunkConsistencyTest {
     /* ---------------- ③ 結合の状態を業務の入口から読める ---------------- */
 
     @Test
-    @DisplayName("③ 結合の状態を記録の詳細から読める（画面が「生成中／失敗」を出せる）")
+    @DisplayName("③ 結合の状態を記録の詳細から読める（まだ作っていない回は NOT_STARTED）")
     void detailExposesAssemblyStatus() {
         byte[] content = bytes(1, 2);
         service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
@@ -338,8 +345,74 @@ class ClassroomChunkConsistencyTest {
         ClassroomModels.RecordDetail detail = service.detail(student, RECORD_ID);
 
         // 分塊は保存できているが、まだ結合していない＝「音声は保存されている」
-        assertThat(detail.assembly().state()).isEqualTo(ClassroomAssembly.State.NONE.name());
+        assertThat(detail.assembly().state()).isEqualTo("NOT_STARTED");
         assertThat(detail.assembly().storedChunks()).isEqualTo(1);
+    }
+
+    /**
+     * 再起動後の復帰: DB に残した状態（＋いまの分塊と合っているか）から状態を組み立て直す。
+     *
+     * <p>メモリの Map だけだと、user-api を止めた瞬間に READY が消えて NONE（＝画面は「作成中」）
+     * に戻り、永久に待たされる。DB の**内容の要約**がいまの分塊と一致していれば READY と言える。</p>
+     */
+    @Test
+    @DisplayName("③ 再起動しても、DB に残した状態から READY を復帰できる（作成中のまま止まらない）")
+    void detailRestoresAssemblyStateFromDbAfterRestart() throws IOException {
+        byte[] content = bytes(1, 2);
+        service.uploadChunk(student, RECORD_ID, 1, file(content), null, null, null);
+        ClassroomRecordingChunkEntity row = chunks.chunk(1).orElseThrow();
+
+        // 以前の起動が「この分塊から作って READY」と書いた状態を作る
+        ClassroomRecordEntity stored = recordingRecord();
+        stored.setAssemblyState("READY");
+        stored.setAssemblyDigest(digestOf(row));
+        stored.setAudioSize(1L);
+        Files.write(storage.resolve(DIR, "recording.webm"), bytes(1, 2, 3));
+        when(recordMapper.findById(RECORD_ID)).thenReturn(stored);
+
+        ClassroomModels.RecordDetail detail = service.detail(student, RECORD_ID);
+
+        assertThat(detail.assembly().state()).isEqualTo(ClassroomAssembly.State.READY.name());
+        assertThat(detail.assembly().complete()).isTrue();
+        assertThat(detail.assembly().storedChunks()).isEqualTo(1);
+    }
+
+    /**
+     * 前回の起動が「作成中」のまま落ちた回は、**再起動後にやり直せる失敗**にする。
+     *
+     * <p>このプロセスが始めたのではない {@code PROCESSING} を「作成中」と見せると、
+     * 画面は永久に待つ（実際に起きていた）。</p>
+     */
+    @Test
+    @DisplayName("③ 前回の起動が残した PROCESSING は、再起動後に「やり直せる失敗」として出す")
+    void detailTurnsStaleProcessingIntoRetryableFailure() throws IOException {
+        service.uploadChunk(student, RECORD_ID, 1, file(bytes(1, 2)), null, null, null);
+        ClassroomRecordEntity stored = recordingRecord();
+        stored.setAssemblyState("PROCESSING");
+        when(recordMapper.findById(RECORD_ID)).thenReturn(stored);
+
+        ClassroomModels.RecordDetail detail = service.detail(student, RECORD_ID);
+
+        assertThat(detail.assembly().state()).isEqualTo(ClassroomAssembly.State.FAILED.name());
+        assertThat(detail.assembly().reason()).contains("再起動");
+    }
+
+    /** 分塊の内容の要約（サービスの実装と同じ作り方。DB に入っている値を作るため）。 */
+    private static String digestOf(ClassroomRecordingChunkEntity row) {
+        String material = row.getSeq() + ":" + row.getByteSize() + ":" + row.getChecksum() + "\n";
+        byte[] digest;
+        try {
+            digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(material.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        } catch (java.security.NoSuchAlgorithmException cause) {
+            throw new IllegalStateException(cause);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (byte value : digest) {
+            builder.append(Character.forDigit((value >> 4) & 0x0F, 16));
+            builder.append(Character.forDigit(value & 0x0F, 16));
+        }
+        return builder.toString();
     }
 
     // ------------------------------------------------------------------ 資材

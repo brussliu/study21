@@ -334,6 +334,36 @@ public class GeometryAiServiceImpl implements GeometryAiService {
         return toStatus(requireOwned(user, requestId));
     }
 
+    /**
+     * **タスクを一覧から消す**（状態を取消にする。行は監査のため残す）。
+     *
+     * <p>【取消】は「お金を使ったあとは取り消せない」という規則だが、こちらは
+     * **利用者が自分のタスクカードを片付ける**ための入口なので、どの状態でも消せる
+     * （生成中のものを消したときは、走っている働き手の書き込みが版数で弾かれ、
+     * 取消のままになる）。図形として保存済みのものは図形を消す話なので受け付けない。</p>
+     */
+    @Override
+    @Transactional
+    public GeometryAiModels.RequestStatus discard(UserPrincipal user, long requestId, Integer version) {
+        GeometryAiRequestEntity entity = requireOwned(user, requestId);
+        if (GeometryAiModels.STATUS_REGISTERED.equals(entity.getStatusCode())
+                || entity.getFigureId() != null) {
+            throw new ConflictException("この AI 生図は図形として保存済みです。"
+                    + "図形一覧から削除してください。");
+        }
+        if (GeometryAiModels.STATUS_CANCELLED.equals(entity.getStatusCode())) {
+            // 既に消えている（別の端末で消した等）。画面は一覧を取り直せばよい
+            throw new ConflictException("この AI 生図は既に一覧から消えています。");
+        }
+        if (requestMapper.updateDiscarded(requestId, user.accountId(), GeometryAiModels.SOURCE_BATCH,
+                requireVersion(entity, version)) == 0) {
+            throw new ConflictException("他の操作で先に更新されました。再読み込みしてください。");
+        }
+        log.info("geometry ai request discarded. requestId={} accountId={} status={}",
+                requestId, user.accountId(), entity.getStatusCode());
+        return toStatus(requireOwned(user, requestId));
+    }
+
     // ------------------------------------------------------------------ 確定
 
     @Override
@@ -401,6 +431,7 @@ public class GeometryAiServiceImpl implements GeometryAiService {
                     entity.getFailedStage(), entity.getErrorCode(), entity.getErrorMessage(),
                     notBlank(entity.getCroppedName()),
                     entity.getRetryCount() == null ? 0 : entity.getRetryCount(),
+                    entity.getVersion() == null ? 1 : entity.getVersion(),
                     iso(entity.getCreatedAt()), iso(entity.getUpdatedAt())));
         }
         return new GeometryAiModels.TaskListResult(items, items.size(), safeLimit);

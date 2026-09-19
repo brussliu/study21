@@ -54,8 +54,12 @@ export function prototypeMenu(area: AppArea, role?: Role): MenuItem[] {
       screen(area, 'japanese-test', '単語テスト', 'japanese-test', 'play'),
       screen(area, 'japanese-word', '単語情報管理', 'japanese-word', 'folder'),
       screen(area, 'japanese-word-status', '単語勉強状況', 'japanese-word-status', 'clock'),
-      // 画面確認用のデモ（仮データのみ。本番 API は呼ばない）。確認が済んだら外す
-      screen(area, 'japanese-demo', '単語情報管理（デモ）', 'japanese-demo', 'eye')
+      /*
+       * 画面確認用の単語情報管理（仮データだけで動き、本番 API は呼ばない）。
+       * 本番の「単語情報管理」と MENU 上で見分けられるよう「（新画面）」を付けている。
+       * 確認が済んだら、この 1 行を外す。
+       */
+      screen(area, 'japanese-demo', '単語情報管理（新画面）', 'japanese-demo', 'eye')
     ]),
     screen(area, 'math', '数学勉強', 'math', 'sigma', [
       screen(area, 'math-knowledge', '知識点管理', 'math-knowledge', 'grid'),

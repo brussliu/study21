@@ -20,6 +20,7 @@ import {
 } from '@/api/geometry'
 import {
   DEFAULT_GEOMETRY_AI_TASK_LIMIT,
+  discardGeometryAiRequest,
   fetchGeometryAiOptions,
   fetchGeometryAiTasks,
   type GeometryAiCardStatus,
@@ -287,6 +288,8 @@ function applyQueryFilters(): void {
  * 図形として保存済（REGISTERED）は API が返さない（図形一覧のカードとして出るので重複しない）。
  */
 const aiTasks = ref<GeometryAiTaskRow[]>([])
+/** タスクの削除中か（二重に押させない。図形の操作とは別に持つ）。 */
+const aiTaskBusy = ref(false)
 /** タスクの取得に失敗したか（**図形一覧は壊さない**。小さな案内だけ出す）。 */
 const aiTasksFailed = ref(false)
 /** タスク一覧に出す上限（サーバーの既定と同じ 20 件）。 */
@@ -436,6 +439,32 @@ function openTaskDrawing(task: GeometryAiTaskRow): void {
   })
 }
 
+/**
+ * 【削除】。タスクカードを**一覧から消す**（状態を取消にする。記録はサーバーに残る）。
+ *
+ * <p>図形の削除と同じく**確認してから**消す（生成済みの作図は、消すと作り直しになるため）。
+ * 図形として保存済みのものは消せない（図形一覧から削除する。サーバーも断る）。</p>
+ */
+async function discardTask(task: GeometryAiTaskRow): Promise<void> {
+  if (aiTaskBusy.value) return
+  if (!window.confirm(`AI 生図のタスク「${task.requestNo}」を削除します。よろしいですか？`
+    + '（一覧から消えます。作図がまだ保存されていない場合は作り直しになります）')) {
+    return
+  }
+  aiTaskBusy.value = true
+  try {
+    const response = await discardGeometryAiRequest(task.requestId, task.version)
+    toast.success(response.message)
+    await loadAiTasks()
+  } catch (caught) {
+    toast.danger(messageOf(caught, 'AI 生図のタスクを削除できませんでした。'))
+    // 他の端末で先に消えたときは、一覧を取り直して状態を合わせる
+    await loadAiTasks()
+  } finally {
+    aiTaskBusy.value = false
+  }
+}
+
 onMounted(() => {
   applyQueryFilters()
   void reload(1)
@@ -567,29 +596,48 @@ onBeforeUnmount(() => {
             {{ errorOf(task) }}
           </p>
 
+          <!--
+            操作は**アイコンだけ**（カードが狭いので文字は入らない。意味は title と aria-label で伝える。
+            図形カードの操作と同じ規則）。
+          -->
           <div class="gm-ai-task__foot">
             <span class="gm-ai-task__updated" data-gm-ai-task-updated>更新 {{ taskUpdatedLabel(task) }}</span>
-            <button
-              v-if="canResumeTask(task)" type="button" class="btn btn--primary btn--sm"
-              data-gm-ai-task-resume @click="resumeTask(task)"
-            >
-              内容を直して送り直す
-            </button>
-            <button
-              v-else-if="task.cardStatus === 'READY'" type="button" class="btn btn--primary btn--sm"
-              data-gm-ai-task-open @click="openTaskDrawing(task)"
-            >
-              作図を確認する
-            </button>
-            <!-- 保存まで終わったもの（サーバーはいま一覧に返さないが、返しても文言が崩れないように） -->
-            <button
-              v-else-if="task.cardStatus === 'SAVED'" type="button" class="btn btn--secondary btn--sm"
-              data-gm-ai-task-open @click="openTaskDrawing(task)"
-            >
-              保存した図形を開く
-            </button>
-            <!-- 処理中はボタンを出さない（押しても進めないため） -->
-            <span v-else class="gm-ai-task__wait">処理が終わるとここから確認できます。</span>
+            <div class="gm-ai-task__actions">
+              <button
+                v-if="canResumeTask(task)" type="button" class="btn btn--icon btn--sm"
+                title="内容を直して送り直す" aria-label="内容を直して送り直す"
+                data-gm-ai-task-resume @click="resumeTask(task)"
+              >
+                <AppIcon name="rotate" size="sm" />
+              </button>
+              <button
+                v-else-if="task.cardStatus === 'READY'" type="button" class="btn btn--icon btn--sm"
+                title="作図を確認する" aria-label="作図を確認する"
+                data-gm-ai-task-open @click="openTaskDrawing(task)"
+              >
+                <AppIcon name="eye" size="sm" />
+              </button>
+              <!-- 保存まで終わったもの（サーバーはいま一覧に返さないが、返しても文言が崩れないように） -->
+              <button
+                v-else-if="task.cardStatus === 'SAVED'" type="button" class="btn btn--icon btn--sm"
+                title="保存した図形を開く" aria-label="保存した図形を開く"
+                data-gm-ai-task-open @click="openTaskDrawing(task)"
+              >
+                <AppIcon name="check-square" size="sm" />
+              </button>
+              <!-- 処理中は何も出さない（押しても進めないため） -->
+              <span v-else class="gm-ai-task__wait">処理が終わるとここから確認できます。</span>
+
+              <!-- 一覧から消す（状態を取消にする。行はサーバーに残る） -->
+              <button
+                type="button" class="btn btn--icon btn--sm is-danger" :disabled="aiTaskBusy"
+                :title="`AI 生図のタスク「${task.requestNo}」を削除`"
+                :aria-label="`AI 生図のタスク「${task.requestNo}」を削除`"
+                data-gm-ai-task-delete @click="discardTask(task)"
+              >
+                <AppIcon name="trash" size="sm" />
+              </button>
+            </div>
           </div>
         </article>
       </div>

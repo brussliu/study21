@@ -43,6 +43,7 @@ public class BatchScheduleScheduler {
     private final BatchScheduleExecutor executor;
     private final ScheduleRuleCatalog catalog;
     private final SchedulePlanGuard planGuard;
+    private final BatchExecutionRecovery recovery;
     private final Clock clock;
 
     /** 設定が読めないときの案内ログを出しすぎないための間隔（この回数ごとに 1 行）。 */
@@ -56,8 +57,9 @@ public class BatchScheduleScheduler {
                                   BatchScheduleExecutor executor,
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
+                                  BatchExecutionRecovery recovery,
                                   @Value("${study21.batch.schedule.skip-log-every:20}") int skipLogEvery) {
-        this(configService, triggerStore, executor, catalog, planGuard, skipLogEvery,
+        this(configService, triggerStore, executor, catalog, planGuard, recovery, skipLogEvery,
                 Clock.system(ScheduleConfigService.ZONE));
     }
 
@@ -67,6 +69,7 @@ public class BatchScheduleScheduler {
                                   BatchScheduleExecutor executor,
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
+                                  BatchExecutionRecovery recovery,
                                   int skipLogEvery,
                                   Clock clock) {
         this.configService = configService;
@@ -74,6 +77,7 @@ public class BatchScheduleScheduler {
         this.executor = executor;
         this.catalog = catalog;
         this.planGuard = planGuard;
+        this.recovery = recovery;
         this.skipLogEvery = Math.max(1, skipLogEvery);
         this.clock = clock;
     }
@@ -106,6 +110,14 @@ public class BatchScheduleScheduler {
         List<String> skipped = new ArrayList<>();
         List<String> deferred = new ArrayList<>();
 
+        // (0) 再起動の復旧で保留になっている実行があれば、ここで続きを進める。
+        //     設定が読めるようになっていれば判定でき、完了すれば以後は何もしない（DB を引かない）。
+        //     保留のまま残した実行は「前回が未完了」として次の実行を止めるので、
+        //     再起動しないでも自動で続くことが要る（利用者の指示）
+        recovery.retryPendingRecoveryIfDue();
+        // 実行の待ち行列があふれて入らなかった実行を入り直す（取りこぼしを作らない）
+        executor.retryPendingSubmissions();
+
         // (1) 種別 R（ネット利用の開始／終了）は**1 つのネット状態の切替**として扱う
         runNetworkGroup(snapshot, now, nowLocal, triggered, skipped, deferred);
 
@@ -126,7 +138,7 @@ public class BatchScheduleScheduler {
             if (due == null || triggerStore.alreadyClaimed(taskCode, due)) {
                 continue;
             }
-            claimAndRun(taskCode, due, now, triggered, skipped, null);
+            claimAndRun(snapshot, taskCode, due, now, triggered, skipped, null);
         }
 
         if (!triggered.isEmpty()) {
@@ -187,7 +199,7 @@ public class BatchScheduleScheduler {
                         candidate.taskCode(), candidate.due());
             }
         }
-        claimAndRun(newest.taskCode(), newest.due(), now, triggered, skipped, deferred);
+        claimAndRun(snapshot, newest.taskCode(), newest.due(), now, triggered, skipped, deferred);
     }
 
     /**
@@ -195,10 +207,15 @@ public class BatchScheduleScheduler {
      *
      * <p>実行しないと判定された点は**計画だけ進める**（無効・適用時刻より前・新しい点に追い越された等）。</p>
      */
-    private void claimAndRun(String taskCode, LocalDateTime due, Instant now,
+    /**
+     * 判定してから確保・投入する。判定には**この回に固定した 1 枚のスナップショット**を渡す。
+     *
+     * <p>実行しないと判定された点は**計画だけ進める**（無効・適用時刻より前・新しい点に追い越された等）。</p>
+     */
+    private void claimAndRun(ScheduleConfigSnapshot snapshot, String taskCode, LocalDateTime due, Instant now,
                              List<String> triggered, List<String> skipped, List<String> deferred) {
         SchedulePlanGuard.PlanDecision decision =
-                planGuard.decide(taskCode, due, now, SchedulePlanGuard.Stage.SCHEDULING);
+                planGuard.decide(snapshot, taskCode, due, now, SchedulePlanGuard.Stage.SCHEDULING);
         if (decision.deferred()) {
             if (deferred != null) {
                 deferred.add(taskCode);

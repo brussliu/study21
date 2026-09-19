@@ -12,11 +12,10 @@ import {
   findSameHeading
 } from '@/features/japanese-demo/logic'
 import type { DemoCautionKind, DemoPracticeKind } from '@/features/japanese-demo/types'
-import DemoStatusPanel from '@/features/japanese-demo/components/DemoStatusPanel.vue'
 import '@/features/japanese-demo/japanese-demo.css'
 
 /**
- * 日本語勉強【単語情報管理】デモ：詳細編集。
+ * 日本語勉強【単語情報管理】：詳細編集（別ウィンドウ）。
  *
  * 長い内容を 1 ページに積まないよう、左のナビで 11 の欄に分ける。
  * 参考にした 2.0: `japanese_word.jsp` の詳細モーダル（`jpWordDetailContent`）——
@@ -200,7 +199,7 @@ function preview(): void {
   emit('preview', { draft: true })
 }
 
-/** 競合のときに、自分の入力を残したまま相手の版を確認する（デモ）。 */
+/** 競合のときに、自分の入力を残したまま相手の版を確認する。 */
 function keepMine(): void {
   store.resolveConflictAsMine()
 }
@@ -226,7 +225,6 @@ function collectionsText(): string[] {
             <template v-if="draft.jlpt"> ／ {{ draft.jlpt }}（例）</template>
           </div>
         </div>
-        <span class="jp-demo__badge"><AppIcon name="info" size="sm" /> デモ</span>
         <span class="jp-demo-status">
           <span class="badge" :class="DETAIL_STATUS_BADGES[draft.detailStatus]">
             {{ DETAIL_STATUS_LABELS[draft.detailStatus] }}
@@ -244,21 +242,10 @@ function collectionsText(): string[] {
             type="button" class="btn btn--primary btn--sm" data-demo-editor-save
             :disabled="saving" @click="save"
           >
-            <AppIcon name="check" size="sm" /> {{ saving ? '保存しています…' : '保存（デモ）' }}
+            <AppIcon name="check" size="sm" /> {{ saving ? '保存しています…' : '保存' }}
           </button>
         </div>
       </div>
-
-      <p class="jp-demo__notice" data-demo-notice>
-        <AppIcon name="alert" size="sm" />
-        <span>
-          <strong>これは画面確認用のデモです。</strong>
-          保存しても実際のシステムには保存されません。読み込み・保存・生成はすべてこの画面の中だけで動きます。
-        </span>
-      </p>
-
-      <!-- デモ表示設定（保存の失敗・衝突もここで切り替える。既定はたたむ） -->
-      <DemoStatusPanel />
 
       <!-- 保存の結果（成功・失敗・衝突） -->
       <p
@@ -276,7 +263,7 @@ function collectionsText(): string[] {
         <p style="margin: 0 0 var(--sp-2)" class="jp-demo-meta">{{ store.conflictNote }}</p>
         <div class="jp-demo-array-actions">
           <button type="button" class="jp-demo-linkbtn" data-demo-conflict-keep @click="keepMine">
-            いまの入力で続ける（デモ）
+            いまの入力で続ける
           </button>
           <button type="button" class="jp-demo-linkbtn" data-demo-conflict-reload @click="store.openEditor(draft.id)">
             保存済みの内容を読み直す
@@ -295,22 +282,22 @@ function collectionsText(): string[] {
         </div>
       </div>
 
-      <!-- AI の補助（デモ。ユーザーの入力を自動で上書きしない） -->
+      <!-- AI の補助（人の入力を自動で上書きしない） -->
       <section class="jp-demo-panel">
         <div class="jp-demo-panel__body" style="padding-top: var(--sp-3)">
           <div class="jp-demo-array-actions">
             <button type="button" class="btn btn--secondary btn--sm" data-demo-supplement @click="store.startGeneration(draft.id)">
-              <AppIcon name="copy" size="sm" /> AI で補足案を作る（デモ）
+              <AppIcon name="copy" size="sm" /> AI で補足案を作る
             </button>
             <button type="button" class="btn btn--secondary btn--sm" data-demo-regenerate @click="store.startGeneration(draft.id)">
-              <AppIcon name="rotate" size="sm" /> 詳細情報を再生成（デモ）
+              <AppIcon name="rotate" size="sm" /> 詳細情報を再生成
             </button>
             <span class="jp-demo-meta">
-              どちらも通信しません。案を採用するかどうかは人が選びます（いまの入力は自動で上書きしません）。
+              案を採用するかどうかは人が選びます（いまの入力は自動で上書きしません）。
             </span>
           </div>
           <p v-if="store.runningJobs.length > 0" class="jp-demo-meta" data-demo-job-running>
-            デモの生成処理を実行中です（{{ store.runningJobs.length }} 件）。しばらくすると結果が入ります。
+            生成しています…（{{ store.runningJobs.length }} 件）しばらくすると結果が入ります。
           </p>
         </div>
       </section>
@@ -389,7 +376,7 @@ function collectionsText(): string[] {
 
             <!-- 収録は学習内容と混ざらないよう別のまとまりにする -->
             <h3 class="jp-demo-section__title">収録（教材のどこに載っているか）</h3>
-            <p class="jp-demo-section__hint">この欄は学習の説明ではなく、教材との対応です（デモでは編集できません）。</p>
+            <p class="jp-demo-section__hint">この欄は学習の説明ではなく、教材との対応です。</p>
             <ul data-demo-editor-collections>
               <li v-for="collection in collectionsText()" :key="collection">{{ collection }}</li>
             </ul>
@@ -786,7 +773,7 @@ function collectionsText(): string[] {
             <h2 class="jp-demo-section__title">発音・アクセント</h2>
             <p class="jp-demo-section__hint">
               アクセントが<strong>確認できていないときは空のまま</strong>にしてください（推測で作らない）。
-              学習画面では「未確認」と表示されます。音声はデモでは再生の状態だけを演示します。
+              学習画面では「未確認」と表示されます。音声は再生の状態だけを示します。
             </p>
 
             <div v-if="draft.detail?.pronunciation" class="jp-demo-fieldgrid" data-demo-pronunciation>
@@ -1033,13 +1020,5 @@ function collectionsText(): string[] {
         </div>
       </div>
     </template>
-
-    <p class="jp-demo__notice">
-      <AppIcon name="info" size="sm" />
-      <span>
-        正式開発では、この編集画面は 1 語ぶんの詳細（現在は <strong>JPN_単語詳細情報.詳細JSON</strong> に集約）を
-        読み書きする API が要ります。欄ごとの部分更新にするか、まとめて 1 回で保存するかは §9 の申し送りで確認してください。
-      </span>
-    </p>
   </div>
 </template>

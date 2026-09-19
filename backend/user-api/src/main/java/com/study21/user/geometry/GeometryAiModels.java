@@ -379,6 +379,8 @@ public final class GeometryAiModels {
             String errorMessage,
             boolean hasCroppedImage,
             int retryCount,
+            /** 楽観的ロックの版数（【削除】などカードからの操作に使う） */
+            int version,
             String createdAt,
             String updatedAt) {
     }

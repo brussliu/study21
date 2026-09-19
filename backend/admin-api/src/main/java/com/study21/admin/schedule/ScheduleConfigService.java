@@ -97,7 +97,12 @@ public class ScheduleConfigService {
      * <p>失敗しても起動は止めない（前のスナップショット＝この場合は空のまま）。
      * 30 秒スケジューラが托底で再試行する。</p>
      */
+    /**
+     * 起動時の読み込み。**再起動の復旧より先**に走らせる（復旧は「いまの計画」で判定するので、
+     * 設定が読めていないと判定を保留してしまう。順序を明示して読み込みを 1 回で済ませる）。
+     */
     @EventListener(ApplicationReadyEvent.class)
+    @org.springframework.core.annotation.Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
     public void loadOnStartup() {
         RefreshResult result = refresh("起動時");
         if (result.published()) {

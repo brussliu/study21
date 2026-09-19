@@ -33,6 +33,18 @@ import java.time.format.DateTimeFormatter;
  *
  * <p>「手動操作を上書きしない」規則は業務側（{@code NetworkUsageService}）にある。ここでは
  * 判定せず、そのまま実行させる（端末の更新日時を見て業務が最終判断する）。</p>
+ *
+ * <p><b>設定は自分で取りに行かず、呼び出し側が渡す。</b> 1 回の判定の途中でメモリのスナップショットが
+ * 入れ替わると、古い間隔と新しい時刻が混ざった判断になる（例: 判定の前半は古い設定、後半は新しい設定）。
+ * 呼び出し側は「その回に使う 1 枚」を決めて渡す:</p>
+ * <ul>
+ *   <li>30 秒の検査 … 托底のあとに固定した 1 枚（その回の候補計算と判定で同じものを使う）</li>
+ *   <li>再起動の復旧 … その復旧パスで固定した 1 枚（全行を同じ設定で判定する）</li>
+ *   <li>実行直前の再検証 … **そのとき最新の 1 枚**を取り直して渡す（待機中に変わった設定を反映する）</li>
+ * </ul>
+ *
+ * <p>実行状態（もう一方のネット切替が実行中か等）だけは DB を見る（{@link ScheduledTriggerStore}）。
+ * 設定の判断と実行状態の判断の境界をここに固定する。</p>
  */
 @Component
 public class SchedulePlanGuard {
@@ -49,28 +61,25 @@ public class SchedulePlanGuard {
 
     private static final DateTimeFormatter LABEL = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
 
-    private final ScheduleConfigService configService;
     private final ScheduleRuleCatalog catalog;
     private final ScheduledTriggerStore triggerStore;
 
-    public SchedulePlanGuard(ScheduleConfigService configService,
-                             ScheduleRuleCatalog catalog,
-                             ScheduledTriggerStore triggerStore) {
-        this.configService = configService;
+    public SchedulePlanGuard(ScheduleRuleCatalog catalog, ScheduledTriggerStore triggerStore) {
         this.catalog = catalog;
         this.triggerStore = triggerStore;
     }
 
     /**
-     * 1 つの計画実行点の判定。
+     * 1 つの計画実行点の判定。**この呼び出しの中では 1 枚のスナップショットだけを使う。**
      *
+     * @param snapshot  その回に使う設定（呼び出し側が固定する。この中では取り直さない）
      * @param taskCode  バッチコード
      * @param plannedAt 計画実行点（実行記録の「予定時刻」）
      * @param now       いまの時刻
      * @param stage     判定の場面
      */
-    public PlanDecision decide(String taskCode, LocalDateTime plannedAt, Instant now, Stage stage) {
-        ScheduleConfigSnapshot snapshot = configService.snapshot();
+    public PlanDecision decide(ScheduleConfigSnapshot snapshot, String taskCode,
+                               LocalDateTime plannedAt, Instant now, Stage stage) {
         long version = snapshot.version();
         if (plannedAt == null) {
             return PlanDecision.skip("計画実行点（予定時刻）が分かりません。", version);
@@ -84,8 +93,13 @@ public class SchedulePlanGuard {
         if (!status.usable() || schedule == null) {
             if (status == TaskConfigStatus.NOT_LOADED) {
                 // 設定を**まだ読めていない**（起動直後・DB を読めなかった）。無効と決めつけず、判定を保留する
-                // （保留した実行は復旧で閉じない。次の起動や托底のあとにもう一度判定する）
+                // （保留した実行は復旧で閉じない。設定が読めたあとにもう一度判定する）
                 return PlanDecision.wait("実行設定をまだ読み込めていないため、判定を保留します（" + status.label() + "）。", version);
+            }
+            if (stage == Stage.RECOVERY) {
+                // 復旧では**閉じない**。設定が無い・不正は「いま実行できない」だけで、
+                // 設定を直せば実行できる（利用者の指示: 配置不可用时保留 → 可用后重新判定）
+                return PlanDecision.wait(statusReason(status) + "ため、復旧の判定を保留します。", version);
             }
             return PlanDecision.skip(statusReason(status) + "ため実行しません。", version);
         }
@@ -101,7 +115,7 @@ public class SchedulePlanGuard {
             return PlanDecision.skip("まだ到来していない計画実行点です（" + label(plannedAt) + "）。", version);
         }
         if (rule.kind() == ScheduleKind.DAILY) {
-            return decideNetworkPoint(rule, schedule, plannedAt, nowLocal, stage, version);
+            return decideNetworkPoint(snapshot, rule, schedule, plannedAt, nowLocal, stage, version);
         }
         return decideIntervalPoint(schedule, plannedAt, nowLocal, stage, version);
     }
@@ -112,10 +126,10 @@ public class SchedulePlanGuard {
      * <p>2 つのタスクで 1 つのネット状態なので、**いま以前で最後に到来した点**だけを実行する。
      * それより古い点（＝逆向きの操作）は実行しない。</p>
      */
-    private PlanDecision decideNetworkPoint(ScheduleTaskRule rule, TaskSchedule schedule,
-                                            LocalDateTime plannedAt, LocalDateTime nowLocal,
-                                            Stage stage, long version) {
-        LocalDateTime newest = newestNetworkPointAtOrBefore(nowLocal);
+    private PlanDecision decideNetworkPoint(ScheduleConfigSnapshot snapshot, ScheduleTaskRule rule,
+                                            TaskSchedule schedule, LocalDateTime plannedAt,
+                                            LocalDateTime nowLocal, Stage stage, long version) {
+        LocalDateTime newest = newestNetworkPointAtOrBefore(snapshot, nowLocal);
         if (newest == null) {
             return PlanDecision.skip("いま適用すべきネット状態の切替が見つかりません。", version);
         }
@@ -170,9 +184,11 @@ public class SchedulePlanGuard {
      *
      * <p>無効・適用時刻より前の点も「最後に到来した点」として数える（それが最新なら、
      * それより古い逆向きの操作は実行しない。スケジューラと同じ規則）。</p>
+     *
+     * <p><b>渡された 1 枚のスナップショットだけで計算する</b>（判定の途中で設定が入れ替わって、
+     * 2 つの版が混ざらないようにする）。</p>
      */
-    private LocalDateTime newestNetworkPointAtOrBefore(LocalDateTime nowLocal) {
-        ScheduleConfigSnapshot snapshot = configService.snapshot();
+    private LocalDateTime newestNetworkPointAtOrBefore(ScheduleConfigSnapshot snapshot, LocalDateTime nowLocal) {
         LocalDateTime newest = null;
         for (ScheduleTaskRule rule : catalog.rules()) {
             if (rule.kind() != ScheduleKind.DAILY) {

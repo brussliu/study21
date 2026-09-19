@@ -19,6 +19,26 @@ public interface ClassroomRecordMapper {
 
     ClassroomRecordEntity findById(@Param("recordId") long recordId);
 
+    /**
+     * 授業記録の行を**排他で押さえて**読む（`SELECT ... FOR UPDATE`）。
+     *
+     * <p>分塊の受け入れ（{@code uploadChunk}）と収尾（{@code end}）は**同じ記録の行**を
+     * 押さえてから状態を読み直す。押さえる前の状態で判断すると、次の競合が起きる:</p>
+     * <ol>
+     *   <li>収尾が状態を {@code TRANSCRIBING} にして、収尾の処理を進める。</li>
+     *   <li>同時に走っていたアップロードが**押さえる前の状態（RECORDING）**を根拠に通り、
+     *       収尾のあとに分塊の行を足す（確定した範囲が動く）。</li>
+     * </ol>
+     *
+     * <p>行を押さえれば、収尾の更新はアップロードのコミットを待ち、アップロードは収尾の
+     * コミット後に**新しい状態**を読む（どちらか一方が必ず後になる）。長い処理（AI 解析・
+     * FFmpeg）は**このトランザクションの中で走らせない**（押さえたままにしない）。</p>
+     *
+     * <p><b>トランザクションの中からだけ呼ぶ</b>（外で呼ぶと 1 文でコミットされ、押さえても
+     * 意味が無い）。</p>
+     */
+    ClassroomRecordEntity lockById(@Param("recordId") long recordId);
+
     ClassroomRecordEntity findByNo(@Param("recordNo") String recordNo);
 
     /** 履歴の件数。owner（学生）・familyId（保護者）のどちらかで絞る（管理者は両方 null = 全件）。 */
@@ -61,7 +81,29 @@ public interface ClassroomRecordMapper {
                       @Param("durationSeconds") int durationSeconds,
                       @Param("retentionDays") int retentionDays,
                       @Param("operator") long operator,
-                      @Param("version") int version);
+                      @Param("version") int version,
+                      /** 収尾で確定した「実際に録れた」最後の分塊の連番（旧い画面は 0）。 */
+                      @Param("recordedLastSeq") Integer recordedLastSeq,
+                      /** 収尾で確定した「録れた分塊の数」。 */
+                      @Param("recordedCount") Integer recordedCount,
+                      /** 収尾で確定した録音の終わりの位置（統一時間軸。16kHz のサンプル数）。 */
+                      @Param("recordedEndSample") Long recordedEndSample,
+                      /** 音声が全部そろっていると確認できたか。 */
+                      @Param("recordedComplete") Boolean recordedComplete,
+                      /** 不完全なまま終えたときに失った連番（カンマ区切り。無ければ null）。 */
+                      @Param("lostSeqs") String lostSeqs);
+
+    /**
+     * 結合（再生用の 1 本）の状態を書く（**再起動しても読めるように DB に残す**）。
+     *
+     * <p>{@code state} が {@code PROCESSING} のときは開始時刻を入れ、{@code READY}／
+     * {@code FAILED}／{@code INCOMPLETE} のときは終了時刻を入れる。</p>
+     */
+    int updateAssemblyState(@Param("recordId") long recordId,
+                            @Param("state") String state,
+                            @Param("digest") String digest,
+                            @Param("durationSeconds") java.math.BigDecimal durationSeconds,
+                            @Param("reason") String reason);
 
     /** 最初の分塊で音声ファイルの保存先を確定する。 */
     int updateAudio(@Param("recordId") long recordId,

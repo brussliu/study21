@@ -40,6 +40,32 @@ public class ClassroomRecordEntity {
     private Timestamp createdAt;
     private Timestamp updatedAt;
 
+    // ---- 収尾で確定した「録れた分塊」の範囲（終了後の遅い分塊を断る根拠） ----
+    /** 収尾で確定した「実際に録れた」最後の分塊の連番（未確定は null）。 */
+    private Integer recordedLastSeq;
+    /** 収尾で確定した「録れた分塊の数」（画面の一覧の件数）。 */
+    private Integer recordedCount;
+    /** 収尾で確定した録音の終わりの位置（統一時間軸。16kHz のサンプル数）。 */
+    private Long recordedEndSample;
+    /** 収尾のときに音声が全部そろっていると確認できたか。 */
+    private Boolean recordedComplete;
+    /** 不完全なまま終えた回に失った連番（カンマ区切り）。 */
+    private String lostSeqs;
+
+    // ---- 再生用 1 本（分塊の結合）の状態（再起動後も読めるように DB に残す） ----
+    /** 結合の状態（NOT_STARTED / QUEUED / PROCESSING / READY / FAILED / INCOMPLETE）。 */
+    private String assemblyState;
+    /** 結合のもとにした分塊の内容の要約（SHA-256）。 */
+    private String assemblyDigest;
+    /** できた 1 本の長さ（秒）。 */
+    private java.math.BigDecimal assemblyDuration;
+    /** 人が読む理由（日本語）。 */
+    private String assemblyReason;
+    /** 結合を始めた時刻（PROCESSING のまま残った回を再起動後に見分ける）。 */
+    private Timestamp assemblyStartedAt;
+    /** 結合が終わった時刻。 */
+    private Timestamp assemblyFinishedAt;
+
     public Long getRecordId() { return recordId; }
     public void setRecordId(Long recordId) { this.recordId = recordId; }
     public String getRecordNo() { return recordNo; }
@@ -94,4 +120,29 @@ public class ClassroomRecordEntity {
     public void setCreatedAt(Timestamp createdAt) { this.createdAt = createdAt; }
     public Timestamp getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Timestamp updatedAt) { this.updatedAt = updatedAt; }
+
+    public Integer getRecordedLastSeq() { return recordedLastSeq; }
+    public void setRecordedLastSeq(Integer recordedLastSeq) { this.recordedLastSeq = recordedLastSeq; }
+    public Integer getRecordedCount() { return recordedCount; }
+    public void setRecordedCount(Integer recordedCount) { this.recordedCount = recordedCount; }
+    public Long getRecordedEndSample() { return recordedEndSample; }
+    public void setRecordedEndSample(Long recordedEndSample) { this.recordedEndSample = recordedEndSample; }
+    public Boolean getRecordedComplete() { return recordedComplete; }
+    public void setRecordedComplete(Boolean recordedComplete) { this.recordedComplete = recordedComplete; }
+    public String getLostSeqs() { return lostSeqs; }
+    public void setLostSeqs(String lostSeqs) { this.lostSeqs = lostSeqs; }
+    public String getAssemblyState() { return assemblyState; }
+    public void setAssemblyState(String assemblyState) { this.assemblyState = assemblyState; }
+    public String getAssemblyDigest() { return assemblyDigest; }
+    public void setAssemblyDigest(String assemblyDigest) { this.assemblyDigest = assemblyDigest; }
+    public java.math.BigDecimal getAssemblyDuration() { return assemblyDuration; }
+    public void setAssemblyDuration(java.math.BigDecimal assemblyDuration) {
+        this.assemblyDuration = assemblyDuration;
+    }
+    public String getAssemblyReason() { return assemblyReason; }
+    public void setAssemblyReason(String assemblyReason) { this.assemblyReason = assemblyReason; }
+    public Timestamp getAssemblyStartedAt() { return assemblyStartedAt; }
+    public void setAssemblyStartedAt(Timestamp assemblyStartedAt) { this.assemblyStartedAt = assemblyStartedAt; }
+    public Timestamp getAssemblyFinishedAt() { return assemblyFinishedAt; }
+    public void setAssemblyFinishedAt(Timestamp assemblyFinishedAt) { this.assemblyFinishedAt = assemblyFinishedAt; }
 }

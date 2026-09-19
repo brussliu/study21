@@ -17,6 +17,7 @@
         <result property="durationMs"           column="処理時間ms"/>
         <result property="message"              column="メッセージ"/>
         <result property="errorDetail"          column="エラー詳細"/>
+        <result property="sourceExecutionId"    column="元実行ID"/>
         <result property="createdAt"            column="登録日時"/>
         <result property="updatedAt"            column="更新日時"/>
     </resultMap>
@@ -24,7 +25,7 @@
     <sql id="ExecutionColumns">
         "実行ID", "バッチコード", "バッチ種別", "起動種別", "状態", "要求内容",
         "依頼者アカウントID", "依頼元コード", "予定時刻", "開始時刻", "終了時刻",
-        "処理時間ms", "メッセージ", "エラー詳細", "登録日時", "更新日時"
+        "処理時間ms", "メッセージ", "エラー詳細", "元実行ID", "登録日時", "更新日時"
     </sql>
 
     <insert id="insert" useGeneratedKeys="true" keyProperty="executionId" keyColumn="実行ID">
@@ -32,7 +33,7 @@
             ("バッチコード", "バッチ種別", "起動種別", "状態", "要求内容",
              "依頼者アカウントID", "依頼元コード",
              "予定時刻", "開始時刻", "終了時刻", "処理時間ms",
-             "メッセージ", "エラー詳細", "登録日時", "更新日時")
+             "メッセージ", "エラー詳細", "元実行ID", "登録日時", "更新日時")
         VALUES
             (#{batchCode}, #{batchType}, #{triggerType}, #{status},
              <choose>
@@ -44,7 +45,26 @@
              #{requestedByAccountId}, #{requestedByCode},
              COALESCE(#{scheduleTime}::timestamp, CURRENT_TIMESTAMP),
              #{startTime}::timestamp, #{endTime}::timestamp, #{durationMs},
-             #{message}, #{errorDetail}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+             #{message}, #{errorDetail}, #{sourceExecutionId}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    </insert>
+
+    <!--
+      復旧のやり直しの実行記録。**元実行ID の部分一意索引**で守るので、
+      2 つの復旧が同時に走っても挿入されるのは 1 つだけ（メモリのロックに依存しない）。
+      既にやり直しがあるときは何も挿入しない（呼び出し側が既存の 1 件を読んで使う）。
+    -->
+    <insert id="insertRetryIfAbsent" useGeneratedKeys="true" keyProperty="executionId" keyColumn="実行ID">
+        INSERT INTO public."BAT_バッチ実行履歴情報"
+            ("バッチコード", "バッチ種別", "起動種別", "状態", "要求内容",
+             "依頼者アカウントID", "依頼元コード",
+             "予定時刻", "開始時刻", "終了時刻", "処理時間ms",
+             "メッセージ", "エラー詳細", "元実行ID", "登録日時", "更新日時")
+        VALUES
+            (#{batchCode}, #{batchType}, #{triggerType}, #{status}, NULL::jsonb,
+             NULL, #{requestedByCode},
+             #{scheduleTime}::timestamp, NULL, NULL, NULL,
+             #{message}, NULL, #{sourceExecutionId}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT ("元実行ID") WHERE "元実行ID" IS NOT NULL DO NOTHING
     </insert>
 
     <update id="markRunning">
@@ -107,6 +127,53 @@
           FROM public."BAT_バッチ実行履歴情報"
          WHERE "状態" IN ('QUEUED','RUNNING')
          ORDER BY "実行ID" ASC
+    </select>
+
+    <!--
+      再起動の復旧: **起動の境界まで**の未完了の実行を古い順に返す。
+      境界より新しい実行はこのプロセス自身が作ったものなので、復旧の対象にしない
+      （実行中の自分の実行を「落ちた実行」と誤解すると、二重に走らせてしまう）。
+    -->
+    <select id="findUnfinishedBefore" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "状態" IN ('QUEUED','RUNNING')
+           AND "実行ID" &lt;= #{boundaryExecutionId}
+         ORDER BY "実行ID" ASC
+    </select>
+
+    <!-- 起動の境界（そのときの最大の実行ID。1 件も無ければ 0）。 -->
+    <select id="findMaxExecutionId" resultType="long">
+        SELECT COALESCE(MAX("実行ID"), 0)
+          FROM public."BAT_バッチ実行履歴情報"
+    </select>
+
+    <!--
+      復旧の**条件つきの確保**: 未完了のときだけ閉じる。
+      2 つの復旧が同時に同じ実行を扱っても、閉じられるのは 1 つだけ
+      （行ロックで直列化され、後から来た方は 0 件になる）。
+    -->
+    <update id="closeIfUnfinished">
+        UPDATE public."BAT_バッチ実行履歴情報"
+           SET "状態" = #{status},
+               <!-- 終了状態（FAILED など）は 開始時刻 が必須（CHECK 制約） -->
+               "開始時刻" = COALESCE("開始時刻", "登録日時"),
+               "終了時刻" = CURRENT_TIMESTAMP,
+               "処理時間ms" = COALESCE("処理時間ms", 0),
+               "メッセージ" = #{message},
+               "エラー詳細" = #{message},
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "実行ID" = #{executionId}
+           AND "状態" IN ('QUEUED','RUNNING')
+    </update>
+
+    <!-- ある実行のやり直し（元実行ID が一致する実行）。無ければ null。 -->
+    <select id="findBySourceExecutionId" resultMap="ExecutionMap">
+        SELECT <include refid="ExecutionColumns"/>
+          FROM public."BAT_バッチ実行履歴情報"
+         WHERE "元実行ID" = #{sourceExecutionId}
+         ORDER BY "実行ID" ASC
+         LIMIT 1
     </select>
 
     <!--

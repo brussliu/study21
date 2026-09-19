@@ -369,30 +369,12 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/japanese/JapaneseWordView.vue'),
         meta: { title: '単語情報管理', layout: 'user' }
       },
-      // 単語情報管理の**デモ**（画面確認用。本番 API を呼ばず、仮データだけで動く）
+      // 単語情報管理（画面確認用。仮データだけで動き、本番 API は呼ばない）
       {
         path: 'japanese-demo',
         name: 'student-japanese-demo',
         component: () => import('@/views/japanese/demo/DemoWordListView.vue'),
-        meta: { title: '単語情報管理（デモ）', layout: 'user' }
-      },
-      {
-        path: 'japanese-demo/new',
-        name: 'student-japanese-demo-new',
-        component: () => import('@/views/japanese/demo/DemoWordNewView.vue'),
-        meta: { title: '単語の新規登録（デモ）', layout: 'user' }
-      },
-      {
-        path: 'japanese-demo/edit/:wordId',
-        name: 'student-japanese-demo-edit',
-        component: () => import('@/views/japanese/demo/DemoWordEditPage.vue'),
-        meta: { title: '詳細編集（デモ）', layout: 'user' }
-      },
-      {
-        path: 'japanese-demo/study/:wordId',
-        name: 'student-japanese-demo-study',
-        component: () => import('@/views/japanese/demo/DemoWordStudyPage.vue'),
-        meta: { title: '学習画面の確認（デモ）', layout: 'user' }
+        meta: { title: '単語情報管理', layout: 'user' }
       },
       {
         path: 'japanese-test',
@@ -614,6 +596,21 @@ export const routes: RouteRecordRaw[] = [
     component: () => import('@/views/error/ServerErrorView.vue'),
     meta: { title: '500', layout: 'blank' }
   },
+  // 2.0 と同じく**別ウィンドウ**で開く画面（共通の枠を出さない content-only）。
+  // 認証は必要なので requiresAuth を付ける（開いた時点の画面セッションで判定する）。
+  {
+    path: '/student/japanese-demo/edit',
+    name: 'student-japanese-demo-edit',
+    component: () => import('@/views/japanese/demo/DemoWordEditPage.vue'),
+    meta: { title: '詳細編集', layout: 'blank', requiresAuth: true }
+  },
+  {
+    path: '/student/japanese-demo/study',
+    name: 'student-japanese-demo-study',
+    component: () => import('@/views/japanese/demo/DemoWordStudyPage.vue'),
+    meta: { title: 'A. 勉強', layout: 'blank', requiresAuth: true }
+  },
+
   { path: '/:pathMatch(.*)*', redirect: '/404' }
 ]
 

@@ -57,6 +57,17 @@ public interface GeometryAiRequestMapper {
                         @Param("version") int version);
 
     /**
+     * タスクを一覧から消す（状態を取消にする。**行は残す**。楽観的ロック）。
+     *
+     * <p>図形として保存済み（図形ID が入っている）行は対象にしない
+     * （消すと図形との紐付けが分からなくなる）。</p>
+     */
+    int updateDiscarded(@Param("requestId") long requestId,
+                        @Param("operator") Long operator,
+                        @Param("sourceCode") String sourceCode,
+                        @Param("version") int version);
+
+    /**
      * 条件を直して送り直す（**同じ要求行を使い回す**）。
      *
      * <p>読み取る範囲・作図方法・結果種別・補充・補足要求を更新し、AI の成果物（コマンド・提案・

@@ -1,5 +1,6 @@
 package com.study21.admin.controller;
 
+import com.study21.admin.schedule.BatchExecutionRecovery;
 import com.study21.admin.schedule.BatchScheduleExecutor;
 import com.study21.admin.schedule.BatchScheduleScheduler;
 import com.study21.admin.schedule.ScheduleConfigReport;
@@ -32,15 +33,19 @@ public class BatchScheduleController {
     private final ScheduledTriggerStore triggerStore;
     private final BatchScheduleExecutor executor;
     private final BatchScheduleScheduler scheduler;
+    /** 再起動の復旧の進み具合（保留のまま残っていないか）。 */
+    private final BatchExecutionRecovery recovery;
 
     public BatchScheduleController(ScheduleConfigService configService,
                                    ScheduledTriggerStore triggerStore,
                                    BatchScheduleExecutor executor,
-                                   BatchScheduleScheduler scheduler) {
+                                   BatchScheduleScheduler scheduler,
+                                   BatchExecutionRecovery recovery) {
         this.configService = configService;
         this.triggerStore = triggerStore;
         this.executor = executor;
         this.scheduler = scheduler;
+        this.recovery = recovery;
     }
 
     /** いまの実行スケジュール（メモリの設定。DB は読まない）。 */
@@ -60,6 +65,11 @@ public class BatchScheduleController {
         ScheduleConfigService.RefreshResult result = configService.refresh("管理者の再読み込み");
         // 計画状態（最後に確保した計画実行点）も読み直す
         triggerStore.reloadPlans();
+        // 設定を直した直後は、保留している再起動の復旧もその場で判定し直す
+        // （完了していれば中で即 return。DB は引かない）
+        if (result.published()) {
+            recovery.retryPendingRecoveryNow("設定の再読み込み");
+        }
         Map<String, Object> payload = payload();
         payload.put("refreshPublished", result.published());
         payload.put("refreshError", result.error());
@@ -82,6 +92,12 @@ public class BatchScheduleController {
         payload.put("nextRetryAt", report.nextRetryAt());
         payload.put("configMissing", report.configMissing());
         payload.put("configMissingMessage", report.configMissingMessage());
+        // 再起動の復旧の進み具合（未確認 / 判定待ち / 完了）と、保留のままの件数
+        BatchExecutionRecovery.RecoveryStatus recoveryStatus = recovery.status();
+        payload.put("recoveryPhase", recoveryStatus.phase().name());
+        payload.put("recoveryPhaseLabel", recoveryStatus.phaseLabel());
+        payload.put("recoveryPendingCount", recoveryStatus.pendingCount());
+        payload.put("pendingSubmissions", executor.pendingSubmissionCount());
         payload.put("checkIntervalSeconds", 30);
         payload.put("runningWorkers", executor.activeCount());
         payload.put("queuedWorkers", executor.queuedCount());

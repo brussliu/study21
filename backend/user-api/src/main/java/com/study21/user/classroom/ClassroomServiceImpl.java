@@ -218,20 +218,40 @@ public class ClassroomServiceImpl implements ClassroomService {
                                                          MultipartFile file, MultipartFile sttAudio,
                                                          java.math.BigDecimal startSeconds,
                                                          java.math.BigDecimal endSeconds) {
-        ClassroomRecordEntity record = requireOwner(user, recordId);
+        // **記録の行を押さえてから**状態を読み直す（収尾と同じ行を押さえる＝後から来た側が新しい状態を見る）
+        ClassroomRecordEntity record = lockOwner(user, recordId);
         ClassroomAiSettings.Snapshot snapshot = settings.load();
         requireEnabled(snapshot);
-        // 終了直後に届いた最後の分塊は**受け入れる**（音声を残すため。isLateChunkAllowed を参照）
+        /*
+         * 終了直後に届いた最後の分塊は**受け入れる**（音声を残すため。isLateChunkAllowed を参照）。
+         * 押さえたあとの状態で判断するので、「状態を確かめた直後に収尾が確定する」競合は起きない
+         * （収尾の更新はこのトランザクションのコミットを待つ）。
+         */
         boolean lateChunk = false;
         if (!ClassroomModels.STATUS_RECORDING.equals(record.getStatus())) {
             if (!isLateChunkAllowed(record)) {
                 throw new ConflictException("この録音は録音中ではありません（"
-                        + statusLabel(record.getStatus()) + "）。");
+                        + statusLabel(record.getStatus()) + "）。"
+                        + (ClassroomModels.STATUS_TRANSCRIBING.equals(record.getStatus())
+                                ? "いま終了処理中です。少し待ってからもう一度お試しください。" : ""));
             }
             lateChunk = true;
         }
         if (seq < 1) {
             throw ClassroomApiException.invalid("連番は 1 以上で指定してください。");
+        }
+        /*
+         * **終わったあとの分塊は「宣言された範囲」だけ**受け入れる。
+         *
+         * <p>終了は<b>最終分塊一覧を確定させる</b>操作なので、そのあとに新しい連番が入ると
+         * 確定した一覧と実体が食い違う（詳細画面が「全部そろっています」と言ったまま音が増える）。
+         * 停止直後に届いた**宣言済みの分塊**（取りこぼしの救済）は受け入れるが、一覧に無い
+         * 新しい連番は断る（利用者は録音をやり直すか、その回を別の録音として残す）。</p>
+         */
+        if (lateChunk && seq > declaredLastSeq(record)) {
+            throw new ConflictException("この録音は終了しています。"
+                    + "終了したあとに新しい音声（連番 " + seq + "）は追加できません。"
+                    + "録音をもう一度行ってください。");
         }
 
         int chunkSeconds = settings.chunkSeconds(snapshot);
@@ -507,6 +527,20 @@ public class ClassroomServiceImpl implements ClassroomService {
         return position;
     }
 
+    /** 分塊の長さ（秒。設定の現在値）。終了時の許容差のように**設定を引く 1 か所**で使う。 */
+    private int chunkSecondsOf() {
+        return settings.chunkSeconds(settings.load());
+    }
+
+    /**
+     * 「録音の終わりの位置」を比べるときの許容差（秒）。
+     *
+     * <p>単位は統一時間軸のサンプル数（16kHz）。画面は最後の `dataavailable` のあとに止めるので、
+     * 最後の分塊の終わりと**わずかに**ずれる。ただし分塊 1 つ（既定 20 秒）ぶんのずれは
+     * 「録れた範囲の申告が間違っている」ということなので、端数だけを許す。</p>
+     */
+    private static final double END_SAMPLE_TOLERANCE_SECONDS = 2.0;
+
     /** 分塊のバイト列の照合に使う SHA-256（16 進 64 文字）。 */
     private static String sha256(byte[] bytes) {
         try {
@@ -678,7 +712,14 @@ public class ClassroomServiceImpl implements ClassroomService {
     @Transactional
     public ClassroomModels.EndResult end(UserPrincipal user, long recordId, boolean force,
                                          ClassroomModels.ChunkManifest manifest) {
-        ClassroomRecordEntity record = requireOwner(user, recordId);
+        /*
+         * **記録の行を押さえてから**状態を読む（分塊の受け入れと同じ行を押さえる）。
+         *
+         * <p>押さえる前の状態で「録音中」と判断すると、そのあとで届いた分塊が確定した範囲に
+         * 入り込む（または入り損ねる）。押さえておけば、同時に走っているアップロードの
+         * コミットを待ってから確かめられる（長い処理はこのトランザクションの中で走らせない）。</p>
+         */
+        ClassroomRecordEntity record = lockOwner(user, recordId);
         ClassroomAiSettings.Snapshot snapshot = settings.load();
         if (!ClassroomModels.STATUS_RECORDING.equals(record.getStatus())) {
             throw new ConflictException("この録音は録音中ではありません（" + statusLabel(record.getStatus()) + "）。");
@@ -728,8 +769,24 @@ public class ClassroomServiceImpl implements ClassroomService {
         }
         int claimedVersion = versionOf(record) + 1;
         int durationSeconds = durationSecondsOf(record, snapshot);
+        /*
+         * **確定した「録れた範囲」と、失った範囲を残す**。
+         *
+         * <p>終了は最終分塊一覧を確定させる操作なので、そのあとに届いた分塊が一覧を動かさない
+         * ように、確定した範囲を DB に書く。旧い画面（録れた範囲を送らない）は 0 のままにする
+         * （0 = 「最後の分塊まで届いたことは証明していない」）。</p>
+         */
+        Integer recordedLastSeq = checklist.expectedLastSeq() > 0 ? checklist.expectedLastSeq() : null;
+        Integer recordedCount = recordedLastSeq;
+        boolean forcedLoss = !checklist.complete();
+        String lostSeqs = forcedLoss && !checklist.missingSeqs().isEmpty()
+                ? checklist.missingSeqs().stream().map(String::valueOf)
+                        .collect(java.util.stream.Collectors.joining(","))
+                : null;
         if (recordMapper.markFinalized(recordId, durationSeconds, settings.retentionDays(snapshot),
-                user.accountId(), claimedVersion) == 0) {
+                user.accountId(), claimedVersion, recordedLastSeq, recordedCount,
+                manifest == null ? null : manifest.expectedEndSample(),
+                checklist.complete(), lostSeqs) == 0) {
             throw new ConflictException("他の操作で先に更新されました。再読み込みしてください。");
         }
         ClassroomModels.ChunkChecklist latest = checklist;
@@ -774,10 +831,18 @@ public class ClassroomServiceImpl implements ClassroomService {
          * を後から読める（{@link #assembly}）。</p>
          */
         scheduleAssemblyAfterCommit(recordId);
+        /*
+         * **失った範囲を値として返す**（一度きりの通知にしない）。
+         *
+         * <p>不完全なまま終えた回は、どの連番の音が残っていないかを詳細画面に出し続ける。
+         * 「一部が保存できていません」だけでは、後から見た人に何が失われたか分からない。</p>
+         */
+        List<Integer> lossSeqs = force && !latest.complete() ? List.copyOf(latest.missingSeqs()) : List.of();
         return new ClassroomModels.EndResult(recordId, ClassroomModels.STATUS_STOPPED,
                 statusLabel(ClassroomModels.STATUS_STOPPED), finalNoteId,
                 finalNoteId == null ? null : ClassroomModels.noteRunPath(finalNoteId), notice,
-                latest.complete(), latest.missingSeqs(), force && !latest.complete());
+                latest.complete(), latest.missingSeqs(), !lossSeqs.isEmpty(),
+                latest.expectedLastSeq(), lossSeqs, lossSeqs.isEmpty() ? null : latest.reasonCode());
     }
 
     /**
@@ -845,16 +910,17 @@ public class ClassroomServiceImpl implements ClassroomService {
             return ClassroomModels.ChunkChecklist.ready(rows.size());
         }
         /*
-         * 一覧そのものが矛盾していないか（`lastSeq` / `totalCount` / `uploadedSeqs` の整合）。
-         * 矛盾した一覧を受け取ると、最後の分塊が届いていないのに「そろっている」と見てしまう。
+         * 一覧そのものが矛盾していないかを**調べる前に**見る。矛盾した一覧を受け取ると、
+         * 最後の分塊が届いていないのに「そろっている」と見てしまう。
          */
         if (manifest != null) {
-            String inconsistency = manifest.inconsistency();
-            if (inconsistency != null) {
-                return new ClassroomModels.ChunkChecklist(false, List.of(), rows.size(), 0,
-                        "音声の一覧が正しくありません（" + inconsistency + "）。"
+            String contradiction = manifest.mismatch();
+            if (contradiction != null) {
+                return refuse(ClassroomModels.CHECK_MANIFEST_CONTRADICTION,
+                        "音声の一覧が正しくありません（" + contradiction + "）。"
                                 + "画面を開き直して、もう一度送ってください。",
-                        List.of(), List.of());
+                        rows.size(), 0, List.of(), List.of(), List.of(), List.of(),
+                        manifest.expectedEndSample());
             }
         }
         /*
@@ -867,60 +933,91 @@ public class ClassroomServiceImpl implements ClassroomService {
                 bySeq.put(row.getSeq(), row);
             }
         }
-        List<Integer> missing = new ArrayList<>();
-        List<Integer> broken = new ArrayList<>();
         if (bySeq.isEmpty()) {
-            return new ClassroomModels.ChunkChecklist(false, List.of(), 0, 0,
+            if (manifest != null && manifest.declaresRecordedRange()) {
+                // 画面は「録れた」と言っているのに 1 つも届いていない（全部送り直す）
+                List<Integer> all = new ArrayList<>();
+                for (int seq = 1; seq <= manifest.expectedLastSeq(); seq += 1) {
+                    all.add(seq);
+                }
+                return refuse(ClassroomModels.CHECK_MISSING,
+                        "録音の音声（分塊）が 1 つも保存されていません。"
+                                + "通信の状態を確かめて、録音画面からもう一度送ってから終了してください。",
+                        0, manifest.expectedLastSeq(), all, List.of(), List.of(), List.of(),
+                        manifest.expectedEndSample());
+            }
+            return refuse(ClassroomModels.CHECK_NO_CHUNKS,
                     "録音の音声（分塊）が 1 つも保存されていません。"
                             + "通信の状態を確かめて、録音画面からもう一度送ってから終了してください。",
-                    List.of(), List.of());
+                    0, 0, List.of(), List.of(), List.of(), List.of(),
+                    manifest == null ? null : manifest.expectedEndSample());
         }
-        int expected = manifest != null && manifest.lastSeq() > 0
-                ? manifest.lastSeq() : bySeq.isEmpty() ? 0 : bySeq.keySet().stream()
-                        .mapToInt(Integer::intValue).max().orElse(0);
-        List<Integer> declared = manifest == null ? null : manifest.uploaded();
-        for (int seq = 1; seq <= expected; seq += 1) {
+        int savedLast = bySeq.keySet().stream().mapToInt(Integer::intValue).max().orElse(0);
+        /*
+         * **調べる範囲**を決める。
+         *
+         * <p>画面が「実際に録れた範囲」を送ってきたら、それが正（録れたのに送れていない分塊を
+         * 見つけられる唯一の情報）。送ってこない旧い画面では、保存済みの範囲でしか調べられない
+         * （＝最後の分塊まで届いたことは**証明できない**。expectedLastSeq=0 で返し、
+         * 画面は「保証された完了」と読み替えない）。</p>
+         */
+        int expectedLast = manifest != null && manifest.declaresRecordedRange()
+                ? manifest.expectedLastSeq() : savedLast;
+        List<Integer> unrecoverable = manifest == null ? List.of() : manifest.unrecoverable();
+        List<Integer> missing = new ArrayList<>();
+        List<Integer> broken = new ArrayList<>();
+        List<Integer> saved = new ArrayList<>();
+        for (int seq = 1; seq <= expectedLast; seq += 1) {
             ClassroomRecordingChunkEntity row = bySeq.get(seq);
             if (row == null) {
                 missing.add(seq);
                 continue;
             }
-            if (declared != null && !declared.contains(seq)) {
-                // 画面は「送れていない」と言っているのに保存されている（食い違い）
-                missing.add(seq);
-                continue;
-            }
             // **実体を確かめる**（行がそろっていても、音が無い・壊れていることがある）
-            java.nio.file.Path path = storage.resolve(
-                    row.getStorageDir() == null ? record.getAudioPath() : row.getStorageDir(),
-                    row.getFileName());
-            if (path == null || !java.nio.file.Files.isRegularFile(path)) {
+            if (!fileIsIntact(record, row)) {
                 broken.add(seq);
                 continue;
             }
-            long size;
-            try {
-                size = java.nio.file.Files.size(path);
-            } catch (java.io.IOException cause) {
-                broken.add(seq);
-                continue;
-            }
-            if (row.getByteSize() != null && row.getByteSize() > 0 && size != row.getByteSize()) {
-                broken.add(seq);
-            }
+            saved.add(seq);
         }
         /*
-         * 宣言していないのに保存されている分塊（例: 3 は在るが画面は 1・2 と言っている）。
+         * 録れた範囲の**外**に保存されている分塊（例: 3 番までしか録れていないのに 4 番が在る）。
          * 「在るから使う」と勝手に足さない（一覧と実体の食い違いは直してもらう）。
          */
         List<Integer> extra = new ArrayList<>();
         for (Integer seq : bySeq.keySet()) {
-            if (seq > expected || (declared != null && !declared.contains(seq))) {
+            if (seq > expectedLast) {
                 extra.add(seq);
             }
         }
-        if (missing.isEmpty() && broken.isEmpty() && extra.isEmpty()) {
-            return ClassroomModels.ChunkChecklist.ready(rows.size());
+        // 終わりの位置（画面が申告した録音の終わり）が、実際の分塊の終わりと食い違っていないか
+        String endSampleMismatch = endSampleMismatchOf(bySeq, expectedLast, manifest);
+        /*
+         * 画面に返す「足りない連番」は、**音が残っていない連番の全部**（行が無い・実体が無い・
+         * 一覧の外）をまとめたもの。種類（{@code reasonCode}）で「送り直せば直るのか」を出す。
+         */
+        List<Integer> lost = new ArrayList<>();
+        for (List<Integer> group : List.of(missing, broken, extra)) {
+            for (Integer seq : group) {
+                if (!lost.contains(seq)) {
+                    lost.add(seq);
+                }
+            }
+        }
+        if (unrecoverable != null) {
+            for (Integer seq : unrecoverable) {
+                if (!lost.contains(seq)) {
+                    lost.add(seq);
+                }
+            }
+        }
+        java.util.Collections.sort(lost);
+        if (lost.isEmpty() && endSampleMismatch == null) {
+            // どの連番が保存できているかを返す（画面が「送れた」の取りこぼしを照合できる）
+            return new ClassroomModels.ChunkChecklist(true, List.of(), rows.size(), expectedLast, null,
+                    List.of(), List.of(), ClassroomModels.CHECK_OK,
+                    manifest != null && manifest.declaresRecordedRange() ? expectedLast : 0,
+                    saved, manifest == null ? null : manifest.expectedEndSample());
         }
         List<String> reasons = new ArrayList<>();
         if (!missing.isEmpty()) {
@@ -930,23 +1027,84 @@ public class ClassroomServiceImpl implements ClassroomService {
             reasons.add("音声の実体が無い・壊れている連番 " + broken);
         }
         if (!extra.isEmpty()) {
-            reasons.add("一覧に無いのに保存されている連番 " + extra);
+            reasons.add("録れた範囲の外に保存されている連番 " + extra);
         }
-        List<Integer> all = new ArrayList<>(missing);
-        for (Integer seq : broken) {
-            if (!all.contains(seq)) {
-                all.add(seq);
-            }
+        if (endSampleMismatch != null) {
+            reasons.add(endSampleMismatch);
         }
-        for (Integer seq : extra) {
-            if (!all.contains(seq)) {
-                all.add(seq);
-            }
+        // **利用者ができること**が違うので、種類を分ける（送り直せるのか、諦めるしかないのか）
+        String code;
+        if (!missing.isEmpty()) {
+            code = ClassroomModels.CHECK_MISSING;
+        } else if (!broken.isEmpty()) {
+            code = ClassroomModels.CHECK_BROKEN;
+        } else if (!extra.isEmpty()) {
+            code = ClassroomModels.CHECK_EXTRA;
+        } else {
+            code = ClassroomModels.CHECK_END_SAMPLE_MISMATCH;
         }
-        java.util.Collections.sort(all);
-        return new ClassroomModels.ChunkChecklist(false, all, rows.size(), expected,
+        return refuse(code,
                 "録音の音声（分塊）がそろっていません（" + String.join("・", reasons) + "）。",
-                broken, extra);
+                rows.size(), expectedLast, lost, broken, extra, saved,
+                manifest == null ? null : manifest.expectedEndSample());
+    }
+
+    /** 断りの形を 1 か所で作る（欄の詰め方を間違えないため）。 */
+    private static ClassroomModels.ChunkChecklist refuse(String code, String reason, int storedChunks,
+                                                         int expectedLastSeq, List<Integer> missing,
+                                                         List<Integer> broken, List<Integer> extra,
+                                                         List<Integer> saved, Long endSample) {
+        return new ClassroomModels.ChunkChecklist(false, missing, storedChunks, expectedLastSeq, reason,
+                broken, extra, code,
+                // 「録れた範囲」は画面が申告した値だけを返す（保存済みの最大で代用しない）
+                expectedLastSeq, saved, endSample);
+    }
+
+    /** 分塊の行が指す実体が、記録したとおりにあるか（大きさまで見る）。 */
+    private boolean fileIsIntact(ClassroomRecordEntity record, ClassroomRecordingChunkEntity row) {
+        java.nio.file.Path path = storage.resolve(
+                row.getStorageDir() == null ? record.getAudioPath() : row.getStorageDir(),
+                row.getFileName());
+        if (path == null || !java.nio.file.Files.isRegularFile(path)) {
+            return false;
+        }
+        try {
+            long size = java.nio.file.Files.size(path);
+            if (size <= 0) {
+                return false;
+            }
+            return row.getByteSize() == null || row.getByteSize() <= 0 || size == row.getByteSize();
+        } catch (java.io.IOException cause) {
+            return false;
+        }
+    }
+
+    /**
+     * 画面が申告した**録音の終わりの位置**（16kHz のサンプル数）と、実際の分塊の終わりを比べる。
+     *
+     * <p>単位は**統一時間軸のサンプル数**（16kHz）。許容差は**分塊 1 つぶん**（端数のため。
+     * 画面は最後の `dataavailable` のあとに止めるので、最後の分塊の終わりとわずかにずれる）。</p>
+     *
+     * @return 食い違っていれば理由（日本語）。比べられない・合っていれば null
+     */
+    private String endSampleMismatchOf(java.util.Map<Integer, ClassroomRecordingChunkEntity> bySeq,
+                                       int expectedLast, ClassroomModels.ChunkManifest manifest) {
+        if (manifest == null || manifest.expectedEndSample() == null || expectedLast < 1) {
+            return null;
+        }
+        ClassroomRecordingChunkEntity last = bySeq.get(expectedLast);
+        if (last == null || last.getEndOffsetSeconds() == null) {
+            return null;
+        }
+        long declared = manifest.expectedEndSample();
+        long actual = last.getEndOffsetSeconds()
+                .multiply(java.math.BigDecimal.valueOf(ClassroomModels.TIMELINE_SAMPLE_RATE)).longValue();
+        long tolerance = (long) (END_SAMPLE_TOLERANCE_SECONDS * ClassroomModels.TIMELINE_SAMPLE_RATE);
+        if (Math.abs(declared - actual) > tolerance) {
+            return "録音の終わりの位置（" + declared + " サンプル）が、最後の分塊の終わり（"
+                    + actual + " サンプル）と合いません";
+        }
+        return null;
     }
 
     /** 知らせを足す（空は無視して連結する）。 */
@@ -1000,9 +1158,25 @@ public class ClassroomServiceImpl implements ClassroomService {
     @Override
     public ClassroomModels.AssemblyView retryAssembly(UserPrincipal user, long recordId) {
         ClassroomRecordEntity record = requireOwner(user, recordId);
-        // 手で頼まれた回は**いま作り直す**（画面が結果を持って待てるように）
+        /*
+         * 手で頼まれた回は**必ず作る**。忘れてから走らせるのは、前回の状態（READY・FAILED）が
+         * 残っていると「作り直す必要が無い」と見て何もしないため。
+         *
+         * <p>ただし**HTTP の応答を長く待たせない**: 分塊が多い回は ffmpeg が数十秒かかる。
+         * 受け付けだけして（QUEUED を残す）、実際の結合は背景で走らせ、画面は状態を見に来る。</p>
+         */
         assembler.forget(recordId);
-        assembleQuietly(record);
+        if (!assembler.statusIsCurrent(record, chunkMapper.findByRecord(recordId))) {
+            persistAssemblyState(recordId, ClassroomAssembly.of(ClassroomAssembly.State.QUEUED,
+                    false, 0, null, List.of(), null), chunkDigestOf(chunkMapper.findByRecord(recordId)));
+            runAssemblyInBackground(recordId);
+            // 受け付けた直後の状態を返す（画面はポーリングで READY／FAILED を読む）
+            return ClassroomModels.AssemblyView.of(ClassroomAssembly.State.QUEUED.name(), false,
+                    chunkMapper.countByRecord(recordId), null, List.of(),
+                    "再生用の音声の作成を受け付けました。");
+        }
+        assembler.restore(recordId, ClassroomAssembly.of(ClassroomAssembly.State.READY, true, 0,
+                null, List.of(), null));
         return assemblyViewOf(record);
     }
 
@@ -1014,8 +1188,141 @@ public class ClassroomServiceImpl implements ClassroomService {
                     ClassroomAssembly.State.NONE.name(), false, stored, null, List.of(), null);
         }
         ClassroomAssembly status = assembler.statusOf(record.getRecordId());
+        if (status.state() == ClassroomAssembly.State.NONE) {
+            // メモリに何も無い（起動直後・再起動後）: **DB の状態を復帰する**
+            status = restoreAssemblyFromDb(record, stored);
+        }
         return ClassroomModels.AssemblyView.of(status.stateCode(), status.complete(), stored,
                 status.durationSeconds(), status.missingSeqs(), status.reason());
+    }
+
+    /**
+     * DB に残した結合の状態から、いまの状態を組み立て直す（**再起動後も「作成中」で止まらない**）。
+     *
+     * <p>見る順:</p>
+     * <ol>
+     *   <li>DB に状態が無い（この改修より前の記録）: 分塊から**作り直せるかだけ**を見て、
+     *       作れるなら「まだ作っていない」、作れないなら「欠落」を返す。</li>
+     *   <li>`READY` でも、**いまの分塊と出力が食い違っていれば** READY とは言わない
+     *       （内容の要約＝ダイジェストを比べ、ファイルの実在と大きさも見る）。</li>
+     *   <li>`PROCESSING` が残っていて、**このプロセスが始めたのではない**なら
+     *       「途中で止まった」＝やり直せる失敗にする（永久に「作成中」を出さない）。</li>
+     *   <li>作れるのに `NOT_STARTED`／`QUEUED` のままなら、**受け付け直す**（やり直しの入口を作る）。</li>
+     * </ol>
+     */
+    private ClassroomAssembly restoreAssemblyFromDb(ClassroomRecordEntity record, int storedChunks) {
+        List<ClassroomRecordingChunkEntity> rows = chunkMapper.findByRecord(record.getRecordId());
+        String digest = chunkDigestOf(rows);
+        boolean buildable = assembler.statusIsCurrent(record, rows)
+                || ClassroomRecordingSessionPlanner.plan(storage, record.getRecordId(),
+                        record.getAudioPath(), rows).complete();
+        String state = record.getAssemblyState();
+        if (state == null) {
+            ClassroomAssembly none = ClassroomAssembly.none();
+            assembler.restore(record.getRecordId(), none);
+            return none;
+        }
+        ClassroomAssembly restored = switch (state) {
+            case "READY" -> {
+                boolean outputMatches = digest != null && digest.equals(record.getAssemblyDigest())
+                        && outputFileIsIntact(record);
+                yield outputMatches
+                        ? ClassroomAssembly.of(ClassroomAssembly.State.READY, true, 0,
+                                toDouble(record.getAssemblyDuration()), List.of(), null)
+                        : ClassroomAssembly.of(ClassroomAssembly.State.FAILED, false, 0, null, List.of(),
+                                "再生用の音声を作り直す必要があります（結合したあとに音声が変わっています）。"
+                                        + "【再試行】で作り直せます。");
+            }
+            case "PROCESSING" -> assembler.isClaimedHere(record.getRecordId())
+                    ? ClassroomAssembly.of(ClassroomAssembly.State.PROCESSING, false, 0, null, List.of(),
+                            "再生用の音声を作成しています…")
+                    : ClassroomAssembly.of(ClassroomAssembly.State.FAILED, false, 0, null, List.of(),
+                            "再生用の音声の作成が途中で止まりました（サーバーが再起動しました）。"
+                                    + "【再試行】で作り直せます。");
+            case "QUEUED" -> ClassroomAssembly.of(ClassroomAssembly.State.QUEUED, false, 0, null, List.of(),
+                    "再生用の音声の作成を受け付けました。");
+            case "INCOMPLETE" -> ClassroomAssembly.of(ClassroomAssembly.State.INCOMPLETE, false,
+                    storedChunks, null, missingSeqsOf(record),
+                    record.getAssemblyReason() == null
+                            ? "音声が欠けているため、再生用の音声を作りません（音は分塊として残っています）。"
+                            : record.getAssemblyReason());
+            case "FAILED" -> ClassroomAssembly.of(ClassroomAssembly.State.FAILED, false, 0, null, List.of(),
+                    record.getAssemblyReason() == null
+                            ? "再生用の音声を作れませんでした。【再試行】で作り直せます。"
+                            : record.getAssemblyReason());
+            default -> ClassroomAssembly.none();
+        };
+        if (restored.state() == ClassroomAssembly.State.NONE && buildable) {
+            // 「まだ作っていない」だけ。作る入口は終了後の背景か【再試行】にある
+            restored = ClassroomAssembly.none();
+        }
+        assembler.restore(record.getRecordId(), restored);
+        return restored;
+    }
+
+    /** 記録が指す再生用の 1 本が実在し、大きさも記録どおりか。 */
+    private boolean outputFileIsIntact(ClassroomRecordEntity record) {
+        java.nio.file.Path path = storage.resolve(record.getAudioPath(), record.getAudioName());
+        if (path == null || !java.nio.file.Files.isRegularFile(path)) {
+            return false;
+        }
+        try {
+            long size = java.nio.file.Files.size(path);
+            return record.getAudioSize() == null || record.getAudioSize() <= 0 || size > 0;
+        } catch (java.io.IOException cause) {
+            return false;
+        }
+    }
+
+    /** 欠落として残した連番（カンマ区切り）を読み直す。 */
+    private static List<Integer> missingSeqsOf(ClassroomRecordEntity record) {
+        String raw = record.getLostSeqs();
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<Integer> seqs = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            try {
+                seqs.add(Integer.parseInt(part.trim()));
+            } catch (NumberFormatException ignored) {
+                // 壊れた値は無視する（画面は「欠落がある」ことだけを出す）
+            }
+        }
+        return seqs;
+    }
+
+    /**
+     * 分塊の**内容の要約**（連番・バイト数・チェックサムから作る SHA-256）。
+     *
+     * <p>「この 1 本は、いまある分塊の全部から作られているか」を**時刻ではなく中身**で
+     * 判断するために使う（ファイルの更新時刻だけでは、差し替えや巻き戻しを見分けられない）。</p>
+     */
+    private static String chunkDigestOf(List<ClassroomRecordingChunkEntity> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return null;
+        }
+        List<ClassroomRecordingChunkEntity> sorted = new ArrayList<>(rows);
+        sorted.sort(java.util.Comparator.comparingInt(ClassroomRecordingChunkEntity::getSeq));
+        StringBuilder builder = new StringBuilder();
+        for (ClassroomRecordingChunkEntity row : sorted) {
+            builder.append(row.getSeq()).append(':')
+                    .append(row.getByteSize() == null ? 0 : row.getByteSize()).append(':')
+                    .append(row.getChecksum() == null ? "" : row.getChecksum()).append('\n');
+        }
+        return sha256(builder.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    /** 結合の状態を DB に書く（書けなくても処理は続ける。**画面の状態が少し古くなるだけ**）。 */
+    private void persistAssemblyState(long recordId, ClassroomAssembly state, String digest) {
+        try {
+            recordMapper.updateAssemblyState(recordId, state.stateCode(), digest,
+                    state.durationSeconds() == null ? null
+                            : java.math.BigDecimal.valueOf(state.durationSeconds()),
+                    state.reason() == null ? null
+                            : state.reason().substring(0, Math.min(500, state.reason().length())));
+        } catch (RuntimeException cause) {
+            log.warn("結合の状態を保存できませんでした（処理は続けます）。recordId={}", recordId, cause);
+        }
     }
 
     /**
@@ -1049,13 +1356,35 @@ public class ClassroomServiceImpl implements ClassroomService {
             }
         };
         try {
-            Thread.startVirtualThread(task);
+            backgroundRunner.accept(task);
         } catch (RuntimeException cause) {
-            // 仮想スレッドが使えない環境（古い JVM・テスト）: その場で走らせる（結果は同じ）
-            log.debug("仮想スレッドを使えないため、その場で組立てます。recordId={}", recordId);
+            // 背景の仕組みが使えない環境（古い JVM・停止中の実行器）: その場で走らせる（結果は同じ）
+            log.debug("背景で走らせられないため、その場で組立てます。recordId={}", recordId);
             task.run();
         }
     }
+
+    /**
+     * 背景の実行器を差し替える（**試験で待ち合わせるため**。本番は仮想スレッド）。
+     *
+     * <p>既定は「仮想スレッドで走らせる」。試験では「その場で走らせる」に替えて、
+     * 組立てが終わった状態から確かめる（別スレッドのまま確かめると、結果が出る前に検査して
+     * しまう＝不安定な試験になる）。</p>
+     */
+    void setBackgroundRunner(java.util.function.Consumer<Runnable> runner) {
+        this.backgroundRunner = runner == null ? DEFAULT_BACKGROUND_RUNNER : runner;
+    }
+
+    /** 仮想スレッドで走らせる（既定。使えなければその場で走らせる）。 */
+    private static final java.util.function.Consumer<Runnable> DEFAULT_BACKGROUND_RUNNER = task -> {
+        try {
+            Thread.startVirtualThread(task);
+        } catch (RuntimeException cause) {
+            task.run();
+        }
+    };
+
+    private volatile java.util.function.Consumer<Runnable> backgroundRunner = DEFAULT_BACKGROUND_RUNNER;
 
     /**
      * 分塊があれば再生用の 1 本を組立て直す（理由はログに残す。例外は投げない）。
@@ -1067,11 +1396,38 @@ public class ClassroomServiceImpl implements ClassroomService {
         if (assembler == null) {
             return;
         }
+        long recordId = record.getRecordId();
         try {
-            assembler.assembleIfNeeded(record, chunkMapper.findByRecord(record.getRecordId()));
+            List<ClassroomRecordingChunkEntity> rows = chunkMapper.findByRecord(recordId);
+            String digest = chunkDigestOf(rows);
+            /*
+             * **始める前に「受け付けた」を残す**。
+             *
+             * <p>プロセスが落ちても DB に痕跡が残り、次の起動が「途中で止まった」と判断できる
+             * （メモリだけだと、落ちた瞬間に「まだ何もしていない」に見えて永久に待たされる）。
+             * 実際に走り出したら {@link ClassroomAssembly.State#PROCESSING}、終わったら
+             * READY／FAILED／INCOMPLETE を書く。</p>
+             */
+            persistAssemblyState(recordId, ClassroomAssembly.of(ClassroomAssembly.State.QUEUED,
+                    false, 0, null, List.of(), null), digest);
+            assembler.assembleIfNeeded(record, rows);
+            /*
+             * 走らなかった（既に新しい）ときは、**受け付けた印を戻す**。
+             * 「作成中」のまま残すと、画面が永久に待ってしまう。
+             */
+            if (assembler.statusOf(recordId).state() == ClassroomAssembly.State.NONE) {
+                persistAssemblyState(recordId, ClassroomAssembly.of(ClassroomAssembly.State.READY, true, 0,
+                        null, List.of(), null), digest);
+                return;
+            }
+            persistAssemblyState(recordId, assembler.statusOf(recordId), digest);
         } catch (RuntimeException cause) {
             log.warn("授業録音の組立てに失敗しました（分塊は残っています）。recordId={}",
-                    record.getRecordId(), cause);
+                    recordId, cause);
+            // 失敗を DB に残す（画面が「作成中」のままにならない）
+            persistAssemblyState(recordId, ClassroomAssembly.of(ClassroomAssembly.State.FAILED, false,
+                    0, null, List.of(), "再生用の音声を作れませんでした。【再試行】で作り直せます。"),
+                    null);
         }
     }
 
@@ -1448,6 +1804,19 @@ public class ClassroomServiceImpl implements ClassroomService {
         return entity;
     }
 
+    /**
+     * 所有者の記録を**排他で押さえて**返す（分塊の受け入れと収尾が同じ行を押さえる）。
+     *
+     * <p>権限の判定は**押さえる前**と同じ（見えない・自分のものでないなら、押さえずに断る）。
+     * 押さえたあとに状態を読み直すので、収尾とアップロードが同時に来ても、後から来た側は
+     * **新しい状態**を見る（押さえる前の状態で判断しない）。</p>
+     */
+    private ClassroomRecordEntity lockOwner(UserPrincipal user, long recordId) {
+        ClassroomRecordEntity peeked = requireOwner(user, recordId);
+        ClassroomRecordEntity locked = recordMapper.lockById(recordId);
+        return locked == null ? peeked : locked;
+    }
+
     private void requireEnabled(ClassroomAiSettings.Snapshot snapshot) {
         if (!settings.enabled(snapshot)) {
             throw new ConflictException("「授業録音 / AI 授業記録」は現在ご利用いただけません"
@@ -1512,6 +1881,21 @@ public class ClassroomServiceImpl implements ClassroomService {
      * **その回の音声が丸ごと残らない**（実測: 短い録音で音声 0 バイト。24 秒の録音も最初の分塊だけ）。
      * 受け入れるのは「停止直後（既定 10 分以内）」だけで、古い記録への誤った追記は防ぐ。</p>
      */
+    /**
+     * 収尾のときに**確定した「録れた分塊」の最後の連番**（分からなければ 0）。
+     *
+     * <p>終了後の遅れて届いた分塊を「受け入れてよいか」の境目に使う。旧い画面が送った回
+     * （{@code recordedLastSeq} が無い）は、そのとき保存できていた最大の連番を使う
+     * （新しい音を足さない、という目的は同じ）。</p>
+     */
+    private int declaredLastSeq(ClassroomRecordEntity record) {
+        Integer recorded = record.getRecordedLastSeq();
+        if (recorded != null && recorded > 0) {
+            return recorded;
+        }
+        return maxSeqOf(record.getRecordId());
+    }
+
     private boolean isLateChunkAllowed(ClassroomRecordEntity record) {
         if (!ClassroomModels.STATUS_STOPPED.equals(record.getStatus())) {
             return false;

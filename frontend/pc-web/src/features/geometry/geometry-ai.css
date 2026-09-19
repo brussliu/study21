@@ -1047,6 +1047,14 @@
   flex: 1 1 100%;
 }
 
+/* カードの操作（アイコンだけ。意味は title と aria-label で伝える） */
+.gm-ai-task__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
 /* タスクを取得できなかったときの案内（図形一覧はそのまま使える） */
 .gm-ai-tasks__note {
   margin: 0;

@@ -390,7 +390,7 @@ export function displayFailureReason(word: DemoWord, state: DemoDisplayState): s
   if (status !== 'FAILED') {
     return null
   }
-  return word.failureReason ?? '生成サービスが応答しませんでした（デモ表示設定による再現）。時間をおいて再試行してください。'
+  return word.failureReason ?? '生成サービスが応答しませんでした。時間をおいて再試行してください。'
 }
 
 /**

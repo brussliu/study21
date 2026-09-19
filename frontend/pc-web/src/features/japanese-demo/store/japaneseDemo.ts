@@ -12,6 +12,7 @@
 import { computed, reactive, ref } from 'vue'
 import { defineStore } from 'pinia'
 import { DEMO_BOOKS, DEMO_WORDS } from '../mock/demoWords'
+import { readStoredDraft, writeStoredDraft } from './draftStorage'
 import type {
   DemoBook,
   DemoDetailCaution,
@@ -122,6 +123,31 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
   function setDisplay(next: Partial<DemoDisplayState>): void {
     Object.assign(display, next)
+  }
+
+  /**
+   * URL のパラメータから表示の状態を決める（画面には出さない）。
+   *
+   * 例: `/student/japanese-demo?list=FAILED&save=SAVE_FAILED`
+   * 動作確認のために状態を固定したいときだけ使う（通常は何も付けない）。
+   */
+  function applyDisplayFromQuery(query: string): void {
+    const params = new URLSearchParams(query)
+    const list = params.get('list')
+    const detail = params.get('detail')
+    const save = params.get('save')
+    const listValues = ['NORMAL', 'NO_RESULT', 'NOT_GENERATED', 'GENERATING', 'FAILED']
+    const detailValues = ['FULL', 'PARTIAL']
+    const saveValues = ['NORMAL', 'SAVE_FAILED', 'CONFLICT']
+    if (list !== null && listValues.includes(list)) {
+      display.listMode = list as DemoDisplayState['listMode']
+    }
+    if (detail !== null && detailValues.includes(detail)) {
+      display.detailMode = detail as DemoDisplayState['detailMode']
+    }
+    if (save !== null && saveValues.includes(save)) {
+      display.saveMode = save as DemoDisplayState['saveMode']
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -235,6 +261,17 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     saveState.value = 'IDLE'
     saveMessage.value = ''
     conflictNote.value = ''
+    writeStoredDraft(draft.value)
+    return true
+  }
+
+  /** 別ウィンドウ（編集・学習）が置いた下書きの控えを読み込む。 */
+  function loadStoredDraft(): boolean {
+    const stored = readStoredDraft()
+    if (stored === null) {
+      return false
+    }
+    draft.value = stored
     return true
   }
 
@@ -243,7 +280,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     draftDirty.value = false
     saveState.value = 'IDLE'
     saveMessage.value = ''
-    conflictNote.value = ''
+    writeStoredDraft(null)
   }
 
   /** 下書きの詳細の中身（無ければ空の器を作る）。 */
@@ -259,6 +296,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
   function touchDraft(): void {
     draftDirty.value = true
+    writeStoredDraft(draft.value)
     if (saveState.value === 'SAVED' || saveState.value === 'FAILED' || saveState.value === 'CONFLICT') {
       saveState.value = 'IDLE'
       saveMessage.value = ''
@@ -368,20 +406,20 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
     if (display.saveMode === 'SAVE_FAILED') {
       saveState.value = 'FAILED'
-      saveMessage.value = '保存できませんでした（デモ）。入力は残しています。もう一度お試しください。'
+      saveMessage.value = '保存できませんでした。入力は残しています。もう一度お試しください。'
       return false
     }
     if (display.saveMode === 'CONFLICT') {
       saveState.value = 'CONFLICT'
-      saveMessage.value = 'ほかの画面で同じ単語が更新されています（デモ）。いまの入力は残しています。'
-      conflictNote.value = '保存済みの内容: 語義が 2 件 → 3 件に更新されています（デモの仮データ）。'
+      saveMessage.value = 'ほかの画面で同じ単語が更新されています。いまの入力は残しています。'
+      conflictNote.value = '保存済みの内容: 語義が 2 件 → 3 件に更新されています。'
       return false
     }
 
     const index = words.value.findIndex((word) => word.id === draft.value?.id)
     if (index < 0) {
       saveState.value = 'FAILED'
-      saveMessage.value = '単語が見つかりませんでした（デモ）。'
+      saveMessage.value = '単語が見つかりませんでした。'
       return false
     }
     const saved: DemoWord = clone(draft.value)
@@ -390,12 +428,13 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     saved.updatedAt = new Date().toISOString()
     words.value[index] = saved
     draft.value = clone(saved)
+    writeStoredDraft(draft.value)
     draftDirty.value = false
     saveState.value = 'SAVED'
-    saveMessage.value = '保存しました（デモデータのみ。実際のシステムには保存されません）。'
+    saveMessage.value = '保存しました。'
 
     // 一覧へ戻ったときに知らせる
-    listNotice.value = `「${saved.heading}」を保存しました（デモ）。`
+    listNotice.value = `「${saved.heading}」を保存しました。`
     return true
   }
 
@@ -442,13 +481,13 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
       }
       if (display.listMode === 'FAILED') {
         target.detailStatus = 'FAILED'
-        target.failureReason = '生成サービスが応答しませんでした（デモの再現）。時間をおいて再試行してください。'
+        target.failureReason = '生成サービスが応答しませんでした。時間をおいて再試行してください。'
         return
       }
       target.detail = buildDemoDetail(target)
       target.detailStatus = 'GENERATED'
       target.updatedAt = new Date().toISOString()
-      target.demoNote = 'デモで生成した仮の内容'
+      target.demoNote = null
     })()
   }
 
@@ -493,20 +532,20 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
   function buildDemoDetail(word: DemoWord): DemoDetailContent {
     const base = word.detail === null ? emptyDetail() : clone(word.detail)
     if (base.coreMeaning === '') {
-      base.coreMeaning = `${word.chineseMeaning}（デモで作った仮の要約）`
+      base.coreMeaning = word.chineseMeaning
     }
     if (base.descriptionJa === '') {
-      base.descriptionJa = `「${word.heading}」は${word.partOfSpeech}として使う言葉です。ここはデモ用の仮の説明です。`
+      base.descriptionJa = `「${word.heading}」は${word.partOfSpeech}として使う言葉です。`
     }
     if (base.descriptionZh === '') {
-      base.descriptionZh = `「${word.heading}」的用法说明（演示用的临时内容，不是真实 AI 生成结果）。`
+      base.descriptionZh = `「${word.heading}」的用法说明。`
     }
     if (base.senses.length === 0) {
       base.senses = [
         {
           id: nextId('sense'),
           number: 1,
-          japanese: `${word.chineseMeaning}という意味です（デモ）。`,
+          japanese: `${word.chineseMeaning}という意味です。`,
           chinese: word.chineseMeaning,
           context: '日常',
           style: '普通'
@@ -517,9 +556,9 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
       base.examples = [
         {
           id: nextId('example'),
-          japanese: `${word.heading}について、もう少し詳しく説明します（デモの仮の例文）。`,
+          japanese: `${word.heading}についての例文です。`,
           reading: '',
-          chinese: `关于「${word.heading}」，再说明一点（演示）。`,
+          chinese: `关于「${word.heading}」的例句。`,
           senseNumber: 1,
           source: 'デモ',
           level: 'BASIC'
@@ -678,7 +717,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
     if (display.saveMode === 'SAVE_FAILED') {
       registerSaveState.value = 'FAILED'
-      registerError.value = '登録できませんでした（デモ）。入力はそのまま残しています。'
+      registerError.value = '登録できませんでした。入力はそのまま残しています。'
       return false
     }
 
@@ -691,7 +730,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
     let book = books.value.find((entry) => entry.name === bookName) ?? null
     if (book === null) {
-      book = { id: nextId('book'), name: bookName, unitSize: registerUnitSize.value, units: [], note: 'デモで追加した書籍' }
+      book = { id: nextId('book'), name: bookName, unitSize: registerUnitSize.value, units: [], note: '' }
       books.value = [...books.value, book]
     }
 
@@ -737,7 +776,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
           collections: [collection],
           detail: null,
           updatedAt: createdAt,
-          demoNote: 'デモで登録した仮の単語'
+          demoNote: null
         }
       ]
     })
@@ -762,7 +801,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     }
 
     registerSaveState.value = 'SAVED'
-    listNotice.value = `${registerWords.value.length} 語をデモデータに登録しました（実際のシステムには保存されません）。`
+    listNotice.value = `${registerWords.value.length} 語を登録しました。`
     resetRegister()
     return true
   }
@@ -804,11 +843,11 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     await new Promise((resolve) => setTimeout(resolve, MOCK_SAVE_DELAY_MS))
     if (display.saveMode === 'SAVE_FAILED') {
       deleteState.value = 'FAILED'
-      deleteMessage.value = '削除できませんでした（デモ）。対象はそのまま残っています。'
+      deleteMessage.value = '削除できませんでした。対象はそのまま残っています。'
       return false
     }
     words.value = words.value.filter((word) => word.id !== target.id)
-    listNotice.value = `「${target.heading}」を削除しました（デモデータのみ。学習の記録は残る扱いです）。`
+    listNotice.value = `「${target.heading}」を削除しました。学習の記録は残ります。`
     closeDelete()
     return true
   }
@@ -840,6 +879,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     // 表示設定
     display,
     setDisplay,
+    applyDisplayFromQuery,
     // 一覧
     filters,
     filteredWords,
@@ -867,6 +907,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     saveMessage,
     conflictNote,
     openEditor,
+    loadStoredDraft,
     closeEditor,
     touchDraft,
     updateDraftBasic,

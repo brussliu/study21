@@ -34,17 +34,17 @@ class SchedulePlanGuardTest {
     /** 2026-09-20 09:00 JST。 */
     private static final Instant MORNING = Instant.parse("2026-09-20T00:00:00Z");
 
-    private ScheduleConfigService configService;
     private ScheduledTriggerStore triggerStore;
     private ScheduleRuleCatalog catalog;
     private SchedulePlanGuard guard;
+    /** 直近に作ったスナップショット（判定にはこれを渡す）。 */
+    private ScheduleConfigSnapshot snapshot;
 
     @BeforeEach
     void setUp() {
-        configService = mock(ScheduleConfigService.class);
         triggerStore = mock(ScheduledTriggerStore.class);
         catalog = new ScheduleRuleCatalog();
-        guard = new SchedulePlanGuard(configService, catalog, triggerStore);
+        guard = new SchedulePlanGuard(catalog, triggerStore);
     }
 
     private void config(TaskSchedule... schedules) {
@@ -57,13 +57,19 @@ class SchedulePlanGuardTest {
             tasks.put(schedule.taskCode(), schedule);
             statuses.put(schedule.taskCode(), TaskConfigStatus.LOADED);
         }
-        when(configService.snapshot()).thenReturn(new ScheduleConfigSnapshot(9, MORNING, ZONE,
-                tasks, statuses, Map.of("batR03", 3L, "batR04", 1L), null));
+        snapshot = new ScheduleConfigSnapshot(9, MORNING, ZONE,
+                tasks, statuses, Map.of("batR03", 3L, "batR04", 1L), null);
     }
 
     private SchedulePlanGuard.PlanDecision decide(String taskCode, LocalDateTime plannedAt,
                                                   SchedulePlanGuard.Stage stage) {
-        return guard.decide(taskCode, plannedAt, MORNING, stage);
+        return guard.decide(snapshot, taskCode, plannedAt, MORNING, stage);
+    }
+
+    /** 渡したスナップショットをそのまま使う（判定の途中で取り直さない）。 */
+    private SchedulePlanGuard.PlanDecision decideWith(ScheduleConfigSnapshot given, String taskCode,
+                                                      LocalDateTime plannedAt, SchedulePlanGuard.Stage stage) {
+        return guard.decide(given, taskCode, plannedAt, MORNING, stage);
     }
 
     @Test
@@ -92,12 +98,12 @@ class SchedulePlanGuardTest {
                 TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
 
         // 23:50（停止直後）は停止が有効
-        assertThat(guard.decide("batR03", LocalDateTime.of(2026, 9, 19, 23, 30), Instant.parse("2026-09-19T14:50:00Z"),
+        assertThat(guard.decide(snapshot, "batR03", LocalDateTime.of(2026, 9, 19, 23, 30), Instant.parse("2026-09-19T14:50:00Z"),
                 SchedulePlanGuard.Stage.BEFORE_RUN).allowed()).isTrue();
         // 07:00（開始後）は開始だけが有効
-        assertThat(guard.decide("batR04", LocalDateTime.of(2026, 9, 20, 6, 30), MORNING,
+        assertThat(guard.decide(snapshot, "batR04", LocalDateTime.of(2026, 9, 20, 6, 30), MORNING,
                 SchedulePlanGuard.Stage.BEFORE_RUN).allowed()).isTrue();
-        assertThat(guard.decide("batR03", LocalDateTime.of(2026, 9, 19, 23, 30), MORNING,
+        assertThat(guard.decide(snapshot, "batR03", LocalDateTime.of(2026, 9, 19, 23, 30), MORNING,
                 SchedulePlanGuard.Stage.BEFORE_RUN).allowed()).isFalse();
     }
 
@@ -148,6 +154,12 @@ class SchedulePlanGuardTest {
         assertThat(missing.allowed()).isFalse();
         assertThat(missing.reason()).contains("実行設定が無い");
 
+        // 復旧では「設定が無い」を**閉じない**（保留）。設定を直せば実行できるため
+        SchedulePlanGuard.PlanDecision missingInRecovery =
+                decide("batR03", LocalDateTime.of(2026, 9, 19, 23, 30), SchedulePlanGuard.Stage.RECOVERY);
+        assertThat(missingInRecovery.allowed()).isFalse();
+        assertThat(missingInRecovery.deferred()).isTrue();
+
         // 適用時刻（08:58）より前の点は実行しない
         SchedulePlanGuard.PlanDecision beforeEffective =
                 decide("batL02", LocalDateTime.of(2026, 9, 20, 8, 56), SchedulePlanGuard.Stage.BEFORE_RUN);
@@ -170,6 +182,55 @@ class SchedulePlanGuardTest {
         // 実行直前では「いま有効なはずの状態」を適用する（見送らない）
         assertThat(decide("batR04", LocalDateTime.of(2026, 9, 20, 6, 30),
                 SchedulePlanGuard.Stage.BEFORE_RUN).allowed()).isTrue();
+    }
+
+    @Test
+    @DisplayName("判定の途中でメモリのスナップショットが入れ替わっても、渡した 1 枚だけで判定する")
+    void usesOnlyTheGivenSnapshot() {
+        config(TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        ScheduleConfigSnapshot older = snapshot;
+
+        // メモリのスナップショットが「無効」に入れ替わった（別のスレッドの保存）
+        Map<String, TaskSchedule> changed = new LinkedHashMap<>();
+        changed.put("batR04", TaskSchedule.daily("batR04", false, LocalTime.of(6, 30)));
+        Map<String, TaskConfigStatus> statuses = new LinkedHashMap<>();
+        for (String code : catalog.taskCodes()) {
+            statuses.put(code, TaskConfigStatus.MISSING);
+        }
+        statuses.put("batR04", TaskConfigStatus.LOADED);
+        ScheduleConfigSnapshot newer = new ScheduleConfigSnapshot(10, MORNING, ZONE, changed, statuses, Map.of(), null);
+
+        // 古い方（渡した方）で判定 → 有効として実行してよい
+        SchedulePlanGuard.PlanDecision decision = decideWith(older, "batR04",
+                LocalDateTime.of(2026, 9, 20, 6, 30), SchedulePlanGuard.Stage.BEFORE_RUN);
+        assertThat(decision.allowed()).isTrue();
+        assertThat(decision.configVersion()).isEqualTo(older.version());   // 版は渡したスナップショットのもの
+
+        // 新しい方で判定すれば無効（次の判定は新しいスナップショットを使う）
+        assertThat(decideWith(newer, "batR04", LocalDateTime.of(2026, 9, 20, 6, 30),
+                SchedulePlanGuard.Stage.BEFORE_RUN).allowed()).isFalse();
+        assertThat(decideWith(newer, "batR04", LocalDateTime.of(2026, 9, 20, 6, 30),
+                SchedulePlanGuard.Stage.BEFORE_RUN).configVersion()).isEqualTo(newer.version());
+    }
+
+    @Test
+    @DisplayName("R の判定も L の判定も、渡した 1 枚だけで計算する")
+    void networkAndIntervalDecisionsUseTheGivenSnapshot() {
+        // R: 渡したスナップショットに batR03 / batR04 が入っている
+        config(TaskSchedule.daily("batR03", true, LocalTime.of(23, 30)),
+                TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+        ScheduleConfigSnapshot network = snapshot;
+        assertThat(decideWith(network, "batR04", LocalDateTime.of(2026, 9, 20, 6, 30),
+                SchedulePlanGuard.Stage.SCHEDULING).allowed()).isTrue();
+
+        // L: 渡したスナップショットに batL02 だけが入っている（他のタスクは未設定のまま）
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        ScheduleConfigSnapshot interval = snapshot;
+        assertThat(decideWith(interval, "batL02", LocalDateTime.of(2026, 9, 20, 8, 56),
+                SchedulePlanGuard.Stage.SCHEDULING).allowed()).isTrue();
+        // 渡した方に batR04 は入っていない → 「設定なし」として扱う（メモリの別スナップショットを見ない）
+        assertThat(decideWith(interval, "batR04", LocalDateTime.of(2026, 9, 20, 6, 30),
+                SchedulePlanGuard.Stage.BEFORE_RUN).reason()).contains("実行設定が無い");
     }
 
     @Test

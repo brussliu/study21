@@ -234,8 +234,14 @@ function sameSegment(left: ClassroomSegment, right: ClassroomSegment): boolean {
  * <p>`FAILED` / `INCOMPLETE` でも `storedChunks` の分だけ音は残っている（やり直せる）。</p>
  */
 export interface ClassroomAssemblyView {
-  /** `NONE`（まだ作っていない）/ `READY` / `INCOMPLETE`（欠落）/ `FAILED`（作れなかった）。 */
-  state: 'NONE' | 'READY' | 'INCOMPLETE' | 'FAILED'
+  /**
+   * `NOT_STARTED`（まだ作っていない）/ `QUEUED`（受け付けた）/ `PROCESSING`（作成中）/
+   * `READY`（できた）/ `INCOMPLETE`（欠落があり作らない）/ `FAILED`（作れなかった・やり直せる）。
+   *
+   * <p>「作成中」と言ってよいのは `QUEUED` / `PROCESSING` **だけ**。`NOT_STARTED` を
+   * 「作成中」と読むと、永久に待ち続ける画面になる。</p>
+   */
+  state: 'NOT_STARTED' | 'QUEUED' | 'PROCESSING' | 'READY' | 'INCOMPLETE' | 'FAILED'
   /** いまある分塊の**全部**を含んだ 1 本があるか。 */
   complete: boolean
   /** 保存できている分塊の数（**音は残っている**ことの根拠）。 */
@@ -425,11 +431,16 @@ export interface ClassroomChunkManifest {
   expectedLastSeq: number
   /** **実際に録れた**分塊の数（分塊を作った時点で数える）。 */
   expectedCount: number
-  /** **送信が成功した**連番（1 から連続しているはず）。 */
+  /**
+   * **送信の応答を受け取れた**連番（**補助情報**）。
+   *
+   * <p>保存の事実ではない: 応答だけ失われた回はここから抜けるが、後端には保存されている。
+   * だから後端はこの欄を**欠落の判断に使わない**（代わりに後端が保存済みの連番を返す）。</p>
+   */
   uploadedSeqs: number[]
-  /** 送信が成功した最後の連番（1 つも無ければ 0）。 */
+  /** 旧い画面との互換: 送信の応答を受け取れた最後の連番（新しい画面は使わない）。 */
   lastSeq: number
-  /** **送信が成功した**分塊の数（分塊を作った数ではない）。 */
+  /** 旧い画面との互換: 送信の応答を受け取れた件数（新しい画面は使わない）。 */
   totalCount: number
   /** 最後に**録れた**分塊が終わる録音回放の時間軸の位置（16kHz のサンプル数）。 */
   endSample?: number
@@ -440,6 +451,13 @@ export interface ClassroomChunkManifest {
    * 不完全なまま終われるようにする。</p>
    */
   unrecoverableSeqs?: number[]
+  /**
+   * その分塊を送れなかった**理由**（連番 → 後端が返した日本語のメッセージ）。
+   *
+   * <p>「保存できなかった連番: 3」だけでは、利用者は何が起きたか分からない。
+   * 「同じ連番に違う内容の音声が届きました。」のように**理由**まで出すために残す。</p>
+   */
+  unrecoverableReasons?: Record<string, string>
 }
 
 /**
@@ -469,6 +487,12 @@ export interface ClassroomEndResult {
   missingSeqs?: number[]
   /** 明示の「不完全なまま終了」で終えたか。 */
   forced?: boolean
+  /** 画面が申告した**実際に録れた**最後の連番（旧い画面は 0）。 */
+  expectedLastSeq?: number
+  /** 明示の不完全終了で**失った**連番（詳細画面に出し続ける）。 */
+  lossSeqs?: number[]
+  /** 失った範囲の理由の種類。 */
+  lossReasonCode?: string | null
 }
 
 export interface ClassroomDeleteResult {

@@ -11,7 +11,8 @@
 - DDL: `database/バッチ/TBL_BAT_スケジュール状態情報.sql`
 - 移行: `database/移行/MIG_BAT_スケジュール設定_20260919.sql`、
   `database/移行/MIG_BAT_スケジュール設定適用時刻_20260919.sql`（設定の適用時刻の列）、
-  `database/移行/MIG_BAT_スケジュール設定版_20260919.sql`（計画バージョンの列）
+  `database/移行/MIG_BAT_スケジュール設定版_20260919.sql`（計画バージョンの列）、
+  `database/移行/MIG_BAT_実行履歴_元実行ID_20260920.sql`（復旧のやり直し関係の列と一意索引）
 - 業務（ハンドラ）: `com.study21.admin.network`（batR03 / batR04）、
   `com.study21.admin.studymonitor`（batL02 / batL03）
 
@@ -61,6 +62,15 @@
 - **読み込みは何も書かない。** 適用時刻と計画バージョンは設定値の保存と**同じトランザクション**で
   書く（下の「設定の適用時刻」）。読み込みの途中で補って書くと、書けたかどうか分からないまま
   「新しい設定＋古い適用時刻」が残り、過去の計画実行点を実行しかねない。
+- **3 つの表は 1 つのスナップショットで読む**（`MyBatisScheduleConfigLoader#load` は
+  `@Transactional(readOnly = true, isolation = REPEATABLE_READ)`）。設定値・有効／無効・適用時刻は
+  別の表にあり、読み込みの途中で設定の保存（コミット）が入ると、既定の `READ COMMITTED` では
+  **文ごと**にスナップショットを取るため「設定値は新しい・適用時刻は古い」という混ざった版を
+  読みうる。PostgreSQL の `REPEATABLE READ` はトランザクションで 1 つのスナップショットなので、
+  3 クエリでも混ざらない（単一 SQL にしない理由: 種類の違う行を UNION して Java で振り分ける形になり、
+  既存の Mapper と SQL ログの形を崩すため）。
+- **1 回の判断は 1 枚のスナップショット**（`SchedulePlanGuard#decide` はスナップショットを引数で受ける）。
+  検査は「その回に固定した 1 枚」、復旧は「そのパスの 1 枚」、実行直前は「そのとき最新の 1 枚」。
 - 失敗したときは**前の有効なスナップショットを残す**（消さない）。再試行は
   **30 秒 → 60 秒 → 120 秒 → 240 秒 → 300 秒（上限）**の退避。退避中は DB を引かない。
   失敗が続く間のログは抑止する（1 回目だけ WARN、以降は DEBUG と件数）。
@@ -178,7 +188,9 @@
 - もう一方のネット切替が**実行中**なら検査では `WAIT`（点を確保しない＝次の検査で再挑戦）。
   実行直前では「いま有効なはずの状態」を適用する（古い逆向きの操作の結果を残さない）。
 - 設定を**まだ読めていない**とき（起動直後・DB を読めなかった）は `WAIT`。
-  **無効と決めつけて実行記録を閉じない**（次の起動・托底のあとにもう一度判定する）。
+  **無効と決めつけて実行記録を閉じない**（設定が読めたあとにもう一度判定する）。
+  復旧（`Stage.RECOVERY`）では**設定が無い・不正も `WAIT`**（閉じない）: 「いま実行できない」だけで、
+  設定を直せば実行できるため。無効・適用時刻より前・新しい点に追い越された、は `SKIP`（閉じる）。
 
 ### 二重実行を防ぐ（永続的な確保）
 
@@ -197,11 +209,37 @@
 同じタスクの前回がまだ未完了なら、**重ねて実行せず**、その回を**スキップ**として記録する
 （`前回の実行（実行ID=…）が終わっていないためスキップしました。`）。積み上げない。
 
-### 再起動の復旧
+### 再起動の復旧（`BatchExecutionRecovery`）
 
-起動時に、**未完了（待機中・実行中）の実行を復旧する**（`BatchExecutionRecovery`、
-`BatchStartupRunner` より先に走る）。残したままだと次の実行が「前回が実行中」と見なされて
-永久に走らない。**待機中（QUEUED）と実行中（RUNNING）で扱いを分ける**。
+起動時に、**未完了（待機中・実行中）の実行を復旧する**。残したままだと次の実行が
+「前回が実行中」と見なされて永久に走らない。**待機中（QUEUED）と実行中（RUNNING）で扱いを分ける**。
+
+#### 段階を持ち、**再起動しなくても自動で続く**
+
+| 段階 | 意味 | すること |
+|---|---|---|
+| `PENDING_DISCOVERY` | 起動の**遺留リストと境界**をまだ読めていない（DB が読めない等） | 30 秒の検査のたびに、退避（30→60→120→240→300 秒）しながら読み直す |
+| `PENDING_REVIEW` | 遺留リストは読めた（**この時点で固定**）。設定が読めない等でまだ判定できない行が残っている | 30 秒の検査のたびに、**同じリスト**を判定し直す |
+| `COMPLETED` | すべて処理した | **以後は DB を引かない**（無駄な問い合わせをしない） |
+
+- 続きを進める入口は 2 つ: **30 秒の検査**（`BatchScheduleScheduler#runOnce` の先頭）と、
+  **設定が読めるようになった直後**（設定の保存・管理者の再読み込み。`retryPendingRecoveryNow`）。
+  後者は退避を待たずにその場で判定し直す（「設定を直したのに最大 5 分待たされる」を避ける）。
+- 処理は**1 本に直列化**し（起動イベント・周期検査・再読み込みが同時に来ても 1 件ずつ）、
+  処理が確定した行はリストから外す（**同じ行を 2 回処理しない**）。
+- 起動の順序は **設定の読み込み → この復旧 → 起動時バッチ**（`@Order` で明示）。
+  逆にすると「設定が読めていない」で判定を保留してしまい、読み込みも 2 回になる。
+
+#### 復旧の境界（**このプロセスの実行を拾わない**）
+
+- 対象は「**このプロセスが始まる前に作られた実行**」だけ。起動時にそのときの
+  **最大の実行ID**（`findMaxExecutionId`）を読み、それを**境界**として遺留リストを確定する
+  （`findUnfinishedBefore`）。境界より新しい実行はこのプロセス自身が作ったものなので
+  **復旧の対象にしない**（実行中の自分の実行を「落ちた実行」と誤解すると二重に走らせてしまう）。
+- 境界と遺留リストは**最初に読めた値で固定**する。途中で読み直しても変えない
+  （初回の読み込みが失敗しても、次の読み直しで「自分の実行」が混ざらない）。
+- DB が読めない間は自分の実行も作れない（同じ DB を使う）ため、最初に成功した境界が
+  「起動前の実行」の上限として正しい。
 
 | 復旧前の状態 | 何が起きていたか | 復旧のしかた |
 |---|---|---|
@@ -209,12 +247,28 @@
 | `RUNNING`（業務の途中で落ちた） | 業務が途中まで進んだ可能性がある | **無条件に再実行しない**。まず `FAILED` として閉じ、**`RUN` のときだけ**（＝その点がいま有効な計画）、**新しい実行記録**（`起動種別=RETRY`）で 1 回だけやり直す。`SKIP` なら閉じるだけ（結果不明のままやり直さない） |
 | カタログに無いタスク（旧バッチ・手動実行） | — | `FAILED` として閉じるだけ（勝手に再実行しない） |
 
-- 判定は**スケジューラと同じ `SchedulePlanGuard`**（現在時刻・設定の版・適用時刻・有効／無効・
-  実行状態）。**設定を読んでから**判定する（起動直後に空のスナップショットで判定しない）。
+- 判定は**スケジューラと同じ `SchedulePlanGuard`**。ただし 1 パスでは**1 枚のスナップショット**を
+  使う（行ごとに設定を取り直さない）。
 - **計画実行点の新しい順**に処理する。R の未完了が両方あるときは、**新しい方だけ**が `RUN` になり、
   古い方（逆向きの操作）は `SKIPPED` として閉じる。
-- 実行の直前にも**もう一度**判定する（`BatchScheduleExecutor`）。起動処理や待ち行列の間に
-  設定が変わった・計画が古くなった実行は、理由を残して**スキップ**する（実行記録は残す）。
+- 実行の直前にも**もう一度**判定する（`BatchScheduleExecutor`）。このときは
+  **そのとき最新の 1 枚**を取り直す（待機中に設定が変わっていれば新しい設定で判断する）。
+  無効なら理由を残して**スキップ**する（実行記録は残す）。
+
+#### 「閉じる＋やり直しを作る」は**1 トランザクション**（`ScheduledTriggerStore#recoverRunningExecution`）
+
+1. 旧実行を**未完了のときだけ**閉じる（条件つき UPDATE。他の復旧と同時でも閉じられるのは 1 つ）
+2. 既にやり直しがあればそれを使う（**元実行ID** で引く）
+3. 無ければやり直し（`QUEUED`・`元実行ID` つき）を作る
+4. 計画表への紐付け（`最終実行ID`）を更新する
+5. **コミット後**に実行器へ投入する（コミット前に投入すると、ロールバックしたのに実行が始まる）
+
+- 二重の防止は DB 側で 2 段: 条件つき UPDATE ＋ **`元実行ID` の部分一意索引**
+  （`INSERT ... ON CONFLICT DO NOTHING`）。**メモリのロックだけに依存しない**。
+- コミット後・投入前に落ちても、やり直しは `QUEUED` のまま残るので**次の起動の復旧が拾う**。
+- 投入（待ち行列）があふれたときは**記録を閉じない**。次の検査で入り直しを試し、上限まで
+  入らなければ失敗として閉じる（`BatchScheduleExecutor#retryPendingSubmissions`。
+  入り直しを待っている間に落ちても、記録は `QUEUED` のまま残るので次の起動が拾う）。
 
 再実行してよい根拠は**業務の冪等性**である: batR03 / batR04 は端末モードの**設定**（同じモードを
 二度書いても同じ）、batL02 は取込済みファイルの**重複除外**（`alreadyImported` と `ON CONFLICT`）、
@@ -315,6 +369,17 @@ batL03 は `最新版フラグ` の張り替え。**同じ計画実行点が二�
 | 4-12 | 計画バージョンは再起動しても同じ値が読める | `SchedulePlanMapperTest#configEffectiveFromIsSavedWithoutTouchingThePlan`（実 DB）・実機（保存→再起動→照会） |
 | 4-13 | 設定が無いタスクの退避は**30→60→120→240→300 秒**で伸び、**読み込みに成功しても消えない**（使えるようになったタスクだけ消える） | `ScheduleConfigServiceTest#missingConfigBackoffGrowsAndIsKeptAfterSuccessfulLoads`・`#readFailureBackoffIsSeparateFromMissingConfig` |
 | 4-14 | 設定が無いタスクが複数あっても、托底の読み込みは**1 回にまとめる** | `ScheduleConfigServiceTest#fallbackLoadsOnceForSeveralMissingTasks`・`#fallbackLoadsOnceForConcurrentMisses` |
+| 4-16 | 起動時に**遺留リストが読めない**ときも、退避して読み直す（境界は同じものを使う） | `BatchExecutionRecoveryTest#discoveryFailureIsRetriedWithTheSameBoundary` |
+| 4-17 | 起動時に**設定が読めない**ときは保留し、**再起動なしで**設定が読めた時点で判定して実行する | `BatchExecutionRecoveryTest#keepsAndRetriesWhenTheConfigIsNotLoadedYet`・`#missingConfigIsKeptWaitingDuringRecovery`、実機（保留→再読み込みで完了） |
+| 4-18 | 保留の間に**無効・新しい点に追い越された**実行は、次の判定で理由つきで閉じる | `BatchExecutionRecoveryTest#disabledWhileWaitingIsClosedOnTheNextPass`・`#supersededWhileWaitingIsClosedOnTheNextPass` |
+| 4-19 | 復旧が**このプロセスの実行**を拾わない（起動の境界） | `BatchExecutionRecoveryTest#executionsCreatedByThisProcessAreNotRecovered`、実機（境界=起動時の最大実行ID） |
+| 4-20 | 同じ遺留の行を 2 回処理しない（周期検査から何度呼んでも投入は 1 回）／完了後は DB を引かない | `BatchExecutionRecoveryTest#eachLeftoverIsProcessedOnce`・`#doesNothingWhenNothingIsUnfinished`、実機（SQL ログの件数が増えない） |
+| 4-21 | 「閉じる＋やり直しを作る」が**1 トランザクション**（挿入失敗で全部巻き戻る） | `ScheduleRecoveryTransactionTest#insertFailureRollsBackTheClose`（実 DB） |
+| 4-22 | 2 つの復旧が同時でもやり直しは 1 つ（DB の一意性） | `ScheduleRecoveryTransactionTest#concurrentRecoveriesCreateOnlyOneRetry`（実 DB） |
+| 4-23 | コミット後・投入前に落ちても、やり直しは次の復旧が拾える | `ScheduleRecoveryTransactionTest#retryRowSurvivesBeforeBeingDispatched`・`BatchExecutionRecoveryTest#retryRowCreatedByRecoveryIsPickedUpByTheNextStart` |
+| 4-24 | 待ち行列があふれても記録を閉じず、入り直す（漏執行にしない） | `BatchScheduleExecutorTest#rejectedSubmissionIsRetriedInsteadOfFailing` |
+| 4-25 | 設定の読み込みは**1 つのスナップショット**（途中で保存がコミットされても混ざらない） | `ScheduleConfigSnapshotConsistencyTest`（実 DB・同期バリア。`REPEATABLE_READ` が効いていることも見る） |
+| 4-26 | 1 回の判断が**1 枚のスナップショット**だけを使う（途中で入れ替わっても混ざらない） | `SchedulePlanGuardTest#usesOnlyTheGivenSnapshot`・`#networkAndIntervalDecisionsUseTheGivenSnapshot`、`BatchScheduleExecutorTest#beforeRunUsesTheLatestSnapshot` |
 | 4-15 | 設定が無い・不正のときは、画面に**理由と次に確認する時刻**を出す | `ScheduleConfigServiceTest`（`fallbackMessage` / `configMissingMessage`）・`batch-schedule-panel.spec.ts`（`task-fallback` / `schedule-config-missing`）、実機（設定画面） |
 | 5 | メモリ欠落時に DB から托底して回填する | `ScheduleConfigServiceTest#fallbackLoadsOnceForConcurrentMisses` |
 | 6 | 同時に欠落しても読み込みは 1 回 | 同上（ロック内で再確認。`loads == 1`） |

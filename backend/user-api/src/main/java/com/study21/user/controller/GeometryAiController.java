@@ -157,6 +157,20 @@ public class GeometryAiController {
                 "AI 生図を取り消しました。");
     }
 
+    /**
+     * タスクを一覧から消す（状態を取消にする。行は監査のため残る）。
+     *
+     * <p>【取消】と違ってどの状態でも消せる（生成済み・失敗・追加入力待ちを片付けられる）。</p>
+     */
+    @PostMapping("/requests/{requestId}/discard")
+    public ApiResponse<GeometryAiModels.RequestStatus> discard(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long requestId,
+            @RequestBody GeometryAiModels.VersionRequest request) {
+        return ApiResponse.ok(geometryAiService.discard(user, requestId,
+                request == null ? null : request.version()), "AI 生図のタスクを一覧から消しました。");
+    }
+
     /** 図形として保存（作図画面で確認・調整したあと。登録元コード = 'AI'）。 */
     @PostMapping("/requests/{requestId}/confirm")
     public ApiResponse<GeometryAiModels.ConfirmResult> confirm(

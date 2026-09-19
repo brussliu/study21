@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.study21.admin.ai.AiConnectionTester;
 import com.study21.admin.ai.SttConnectionTester;
 import com.study21.admin.geometryai.dto.AiResponseSchemaService;
+import com.study21.admin.schedule.BatchExecutionRecovery;
 import com.study21.admin.schedule.ScheduleConfigService;
 import com.study21.admin.schedule.ScheduleSettingValidator;
 import com.study21.admin.setting.SettingsService;
@@ -43,6 +44,7 @@ class SettingPageControllerTest {
     private SettingsService settingsService;
 
     private ScheduleConfigService scheduleConfigService;
+    private BatchExecutionRecovery recovery;
 
     @BeforeEach
     void setUp() {
@@ -53,12 +55,27 @@ class SettingPageControllerTest {
         // 保存後にスケジュールのメモリを更新する（既定は「反映できた」）
         when(scheduleConfigService.refresh(any()))
                 .thenReturn(new ScheduleConfigService.RefreshResult(true, 2L, null, null));
+        recovery = mock(BatchExecutionRecovery.class);
         SettingPageController controller = new SettingPageController(
                 settingsService, new AiResponseSchemaService(new ObjectMapper()), connectionTester,
-                sttConnectionTester, scheduleConfigService, new ScheduleSettingValidator());
+                sttConnectionTester, scheduleConfigService, new ScheduleSettingValidator(), recovery);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+    }
+
+    @Test
+    void 設定の保存が成功したら保留している再起動の復旧を判定し直す() throws Exception {
+        when(settingsService.saveGlobalSettingFields(any(), any()))
+                .thenReturn(java.util.Map.of("netControlEndTime", "23:30"));
+
+        mockMvc.perform(post("/api/admin/setting/saveSettings")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"userId\":\"tester\",\"settings\":{\"netControlEndTime\":\"23:30\"}}"))
+                .andExpect(status().isOk());
+
+        // 設定が読めるようになった → 退避を待たずに復旧を判定し直す
+        verify(recovery).retryPendingRecoveryNow(any());
     }
 
     @Test

@@ -26,8 +26,17 @@ public record ClassroomAssembly(
 
     /** 結合の状態。 */
     public enum State {
-        /** まだ結合していない（分塊が無い・必要が無い）。 */
+        /**
+         * まだ結合していない（分塊が無い・必要が無い）。
+         *
+         * <p>画面はこれを「作成中」と読まない（{@link #QUEUED}／{@link #PROCESSING} と区別する）。
+         * 作る必要があるのに {@code NONE} のままなら、画面は【再試行】を出す。</p>
+         */
         NONE,
+        /** 作成を**受け付けた**（背景の順番待ち。まだ始まっていない）。 */
+        QUEUED,
+        /** **このプロセスが**作成中（背景で走っている）。 */
+        PROCESSING,
         /** 結合が済んだ。 */
         READY,
         /** 結合を試みて失敗した（分塊は残っている。もう一度試せる）。 */
@@ -52,9 +61,11 @@ public record ClassroomAssembly(
     public String stateCode() {
         return switch (state) {
             case READY -> "READY";
+            case QUEUED -> "QUEUED";
+            case PROCESSING -> "PROCESSING";
             case FAILED -> "FAILED";
             case INCOMPLETE -> "INCOMPLETE";
-            case NONE -> "NONE";
+            case NONE -> "NOT_STARTED";
         };
     }
 

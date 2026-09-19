@@ -279,6 +279,38 @@ public final class ClassroomModels {
     public static final String CHUNK_TRANSCRIBED = "TRANSCRIBED";
     public static final String CHUNK_SKIPPED = "SKIPPED";
 
+    /**
+     * 1 つの記録が持ち得る分塊の数の上限。
+     *
+     * <p>録音の最大時間（既定 120 分）と分塊の長さ（既定 20 秒）から 360 個ほど。上限を
+     * 大きく超える一覧が届いたら、**調べる前に**断る（数だけを申告して大量の行を作らせない）。</p>
+     */
+    public static final int MAX_CHUNKS = 7_200;
+
+    /**
+     * 終了前の確認で断った**理由の種類**（画面は文面ではなくこの値で分岐する）。
+     *
+     * <p>`MISSING`（まだ送っていない・行が無い）と `BROKEN`（行はあるが実体が無い）は
+     * **利用者ができることが違う**: 前者は送り直せば直る。後者は送り直しても直らないので、
+     * 「失うことを確認して終える」しかない。</p>
+     */
+    public static final String CHECK_OK = "OK";
+    public static final String CHECK_MISSING = "MISSING";
+    public static final String CHECK_BROKEN = "BROKEN";
+    public static final String CHECK_EXTRA = "EXTRA";
+    public static final String CHECK_MANIFEST_CONTRADICTION = "MANIFEST_CONTRADICTION";
+    public static final String CHECK_END_SAMPLE_MISMATCH = "END_SAMPLE_MISMATCH";
+    public static final String CHECK_NO_CHUNKS = "NO_CHUNKS";
+    public static final String CHECK_FINALIZE_LOCKED = "FINALIZE_LOCKED";
+
+    /**
+     * 統一時間軸のサンプル率（Hz）。
+     *
+     * <p>画面（`frontend/pc-web/src/features/classroom/pcm.ts` の `TIMELINE_SAMPLE_RATE`）と
+     * **同じ値**。終了時の確認で「録音の終わりの位置」を比べるときの単位。</p>
+     */
+    public static final int TIMELINE_SAMPLE_RATE = 16_000;
+
     /** 分塊 1 つの状態（画面が「次に送る連番」と録音の位置を知るために読む）。 */
     public record ChunkView(
             int seq,
@@ -337,76 +369,173 @@ public final class ClassroomModels {
             /** **実体が無い／壊れている**連番（行はあるが音が無い）。 */
             List<Integer> brokenSeqs,
             /** **宣言していないのに保存されている**連番（画面の一覧と食い違い）。 */
-            List<Integer> extraSeqs) {
+            List<Integer> extraSeqs,
+            /**
+             * **断った理由の種類**（{@link ClassroomModels#CHECK_MISSING} など）。
+             *
+             * <p>文面（日本語）で判断させない: 画面は種類で「送り直せるのか」「失うしかないのか」を
+             * 決める。文言を変えた瞬間に画面の分岐が壊れるのを防ぐ。</p>
+             */
+            String reasonCode,
+            /** **実際に録れた**最後の連番（画面が宣言した値。分からなければ 0）。 */
+            int expectedLastSeq,
+            /** **後端に保存できている**連番（画面が照合できるように返す）。 */
+            List<Integer> savedSeqs,
+            /** 画面が申告した「録音の終わりの位置」（16kHz のサンプル数。無ければ null）。 */
+            Long endSample) {
 
         /** 終了できるときの形。 */
         public static ChunkChecklist ready(int stored) {
-            return new ChunkChecklist(true, List.of(), stored, stored, null, List.of(), List.of());
+            return new ChunkChecklist(true, List.of(), stored, stored, null, List.of(), List.of(),
+                    ClassroomModels.CHECK_OK, 0, List.of(), null);
         }
     }
 
     /**
-     * 画面が停止のあとに送る「**実際に送れた**分塊の一覧」（終了前の確認に使う）。
+     * 画面が停止のあとに送る「**実際に録れた分塊**と、そのうち送信の応答を受け取れた分塊」。
      *
-     * <p><b>3 つの欄の意味を固定する</b>（食い違う一覧は受け付けない）:</p>
+     * <p><b>欄の意味を固定する</b>（食い違う一覧は受け付けない）:</p>
      * <ul>
-     *   <li>`uploadedSeqs` … **送信が成功した**連番（1 から連続しているはず）。</li>
-     *   <li>`lastSeq` … `uploadedSeqs` の最大（送れた最後の連番）。</li>
-     *   <li>`totalCount` … `uploadedSeqs` の**件数**（分塊を作った数ではない）。</li>
-     *   <li>`endSample` … 最後に送れた分塊が終わる**録音回放の時間軸**（16kHz。任意）。</li>
+     *   <li>`expectedLastSeq` … **実際に録れた**最後の連番（分塊を作った時点で決まる。
+     *       **送れたかどうかとは別**）。</li>
+     *   <li>`expectedCount` … **実際に録れた**分塊の数（`1..expectedLastSeq` の件数）。</li>
+     *   <li>`uploadedSeqs` … **送信の応答を受け取れた**連番（**補助情報**。保存の事実ではない）。</li>
+     *   <li>`expectedEndSample` … 最後に**録れた**分塊が終わる**録音回放の時間軸**の位置
+     *       （16kHz のサンプル数）。</li>
+     *   <li>`unrecoverableSeqs` … 送り直しても直らないと画面が判断した連番
+     *       （4xx の内容エラーなど。**黙って捨てない**ために申告する）。</li>
      * </ul>
      *
-     * <p>3 つが食い違う一覧（例: `lastSeq=3` なのに `uploadedSeqs.size()=1`）は
-     * **矛盾した一覧**として断る。画面が「作った数」を送ってしまうと、最後の分塊が
-     * 届いていないのに「そろっている」と見てしまう。</p>
+     * <p>`lastSeq` / `totalCount` は**旧い画面**（「送れた範囲」しか送らない）との互換のために
+     * 残す。意味は「送れた最後の連番」「送れた件数」で、**「録れた範囲」ではない**。</p>
      *
-     * @param lastSeq      送れた最後の連番（1 から連続）
-     * @param totalCount   送れた分塊の件数
-     * @param endSample    最後に送れた分塊の終わりの位置（16kHz のサンプル数。任意）
-     * @param uploadedSeqs **送れた連番そのもの**（任意。渡されれば対応表の正解として使う）
+     * <p><b>どちらを正とするか</b>: 保存の事実は後端（DB の行と実体のファイル）が正しい。
+     * `uploadedSeqs` は「応答を取りこぼした」ときにだけ欠けるので、**欠落の判断には使わない**
+     * （応答だけ失われた分塊を「欠けている」と誤判定すると、実際には残っている音を
+     * 利用者に諦めさせることになる）。</p>
+     *
+     * @param expectedLastSeq  実際に録れた最後の連番（旧い画面は 0）
+     * @param expectedCount    実際に録れた分塊の数（旧い画面は 0）
+     * @param uploadedSeqs     送信の応答を受け取れた連番（旧い画面は null/空）
+     * @param expectedEndSample 録音の終わりの位置（16kHz のサンプル数。任意）
+     * @param unrecoverableSeqs 送り直しても直らないと画面が判断した連番（任意）
      */
-    public record ChunkManifest(int lastSeq, int totalCount, Long endSample, List<Integer> uploadedSeqs) {
+    public record ChunkManifest(int expectedLastSeq, int expectedCount, List<Integer> uploadedSeqs,
+                                Long expectedEndSample, List<Integer> unrecoverableSeqs,
+                                /** 旧い画面が申告した「送れた最後の連番」（新しい画面は 0）。 */
+                                int lastSeq,
+                                /** 旧い画面が申告した「送れた件数」（新しい画面は 0）。 */
+                                int totalCount) {
 
-        /** 送れた連番の一覧（渡されていなければ `1..lastSeq` とみなす＝旧い画面）。 */
+        /** 新しい画面の形（録れた範囲と、送信の応答を受け取れた連番を分けて送る）。 */
+        public ChunkManifest(int expectedLastSeq, int expectedCount, List<Integer> uploadedSeqs,
+                             Long expectedEndSample, List<Integer> unrecoverableSeqs) {
+            this(expectedLastSeq, expectedCount, uploadedSeqs, expectedEndSample, unrecoverableSeqs,
+                    0, 0);
+        }
+
+        /**
+         * 旧い画面の形（「送れた範囲」だけ）。
+         *
+         * <p>「録れた範囲」は**分からない**（0 のまま）。後端は保存済みの範囲でしか調べられず、
+         * 最後の分塊まで届いたことは**証明できない**。</p>
+         *
+         * @param lastSeq      送れた最後の連番
+         * @param totalCount   送れた件数
+         * @param endSample    送れた最後の分塊の終わりの位置（16kHz のサンプル数。任意）
+         * @param uploadedSeqs 送れた連番そのもの（任意）
+         */
+        public ChunkManifest(int lastSeq, int totalCount, Long endSample, List<Integer> uploadedSeqs) {
+            this(0, 0, uploadedSeqs, endSample, List.of(), lastSeq, totalCount);
+        }
+
+        /** 送信の応答を受け取れた連番（**必須の欄**。無ければ空）。 */
+        public List<Integer> uploadedSeqs() {
+            return uploadedSeqs == null ? List.of() : uploadedSeqs;
+        }
+
+        /**
+         * 送信の応答を受け取れた連番。
+         *
+         * <p>旧い画面（{@link #uploadedSeqs()} が空）では `1..lastSeq` とみなす。</p>
+         */
         public List<Integer> uploaded() {
             if (uploadedSeqs != null && !uploadedSeqs.isEmpty()) {
                 return uploadedSeqs;
             }
-            List<Integer> derived = new java.util.ArrayList<>();
-            for (int seq = 1; seq <= Math.max(0, lastSeq); seq += 1) {
-                derived.add(seq);
+            if (lastSeq > 0) {
+                List<Integer> derived = new java.util.ArrayList<>();
+                for (int seq = 1; seq <= lastSeq; seq += 1) {
+                    derived.add(seq);
+                }
+                return derived;
             }
-            return derived;
+            return List.of();
+        }
+
+        /** 送り直しても直らないと画面が判断した連番（無ければ空）。 */
+        public List<Integer> unrecoverable() {
+            return unrecoverableSeqs == null ? List.of() : unrecoverableSeqs;
+        }
+
+        /** 「実際に録れた範囲」を送ってきた新しい画面か（旧い画面は false）。 */
+        public boolean declaresRecordedRange() {
+            return expectedLastSeq > 0;
         }
 
         /**
-         * 一覧そのものが矛盾していないか（`lastSeq`・`totalCount`・`uploadedSeqs` の整合）。
+         * 一覧そのものが矛盾していないか（**調べる前に**断るべき形か）。
          *
-         * <p>矛盾していれば**その理由**（日本語）を返す。問題なければ null。</p>
+         * <p>矛盾していれば**その理由**を返す。問題なければ null（＝{@link #mismatch}）。</p>
          */
         public String inconsistency() {
-            if (lastSeq < 0 || totalCount < 0) {
-                return "一覧の数が負の値になっています。";
+            return mismatch();
+        }
+
+        /**
+         * 一覧の矛盾を返す（無ければ null）。
+         *
+         * <p>見るもの: 負の値・**現実にあり得ない件数**・録れた数と最後の連番の不一致・
+         * 送れた連番の重複・録れた範囲の外を「送れた」と言っていないか。</p>
+         */
+        public String mismatch() {
+            if (expectedLastSeq < 0 || expectedCount < 0 || lastSeq < 0 || totalCount < 0) {
+                return "録れた数が負の値になっています。";
             }
-            if (uploadedSeqs == null || uploadedSeqs.isEmpty()) {
-                // 旧い画面（連番だけ）: 数は 1..lastSeq とみなす
-                return totalCount == lastSeq ? null
-                        : "送った数（" + totalCount + " 件）と最後の連番（" + lastSeq + "）が合いません。";
+            if (expectedLastSeq > MAX_CHUNKS) {
+                return "録れた分塊の数が上限（" + MAX_CHUNKS + " 件）を超えています。"
+                        + "録音を分けてください。";
             }
-            java.util.TreeSet<Integer> unique = new java.util.TreeSet<>(uploadedSeqs);
-            if (unique.size() != uploadedSeqs.size()) {
+            if (expectedLastSeq > 0 && expectedCount != expectedLastSeq) {
+                // 連番は 1 から連続するので、録れた数 = 最後の連番
+                return "録れた数（" + expectedCount + " 件）と最後の連番（" + expectedLastSeq
+                        + "）が合いません。";
+            }
+            if (expectedLastSeq == 0 && lastSeq > 0 && totalCount > 0 && totalCount != lastSeq) {
+                // 旧い画面: 「送れた最後の連番」と「送れた数」は一致しているはず
+                return "送れた数（" + totalCount + " 件）と最後の連番（" + lastSeq
+                        + "）が合いません。";
+            }
+            List<Integer> counted = uploaded();
+            if (counted.isEmpty()) {
+                return null;
+            }
+            java.util.TreeSet<Integer> unique = new java.util.TreeSet<>(counted);
+            if (unique.size() != counted.size()) {
                 return "送れた連番に重複があります。";
             }
-            if (!unique.isEmpty() && (unique.first() < 1 || unique.last() != lastSeq)) {
-                return "送れた連番の範囲（" + unique.first() + "〜" + unique.last()
-                        + "）と最後の連番（" + lastSeq + "）が合いません。";
+            if (unique.first() < 1) {
+                return "送れた連番に 1 未満の値があります。";
             }
-            if (uploadedSeqs.size() != totalCount) {
-                return "送れた連番の数（" + uploadedSeqs.size() + " 件）と一覧の数（"
-                        + totalCount + " 件）が合いません。";
+            int recordedLast = declaresRecordedRange() ? expectedLastSeq
+                    : Math.max(lastSeq, totalCount);
+            if (recordedLast > 0 && unique.last() > recordedLast) {
+                return "録れた範囲（1〜" + recordedLast + "）の外の連番（" + unique.last()
+                        + "）を送れたと申告しています。";
             }
             return null;
         }
+
     }
 
     /**
@@ -481,7 +610,22 @@ public final class ClassroomModels {
             /** 足りない分塊の連番（あれば。画面はこの連番を送り直す）。 */
             List<Integer> missingSeqs,
             /** 明示の「不完全なまま終了」で終えたか。 */
-            boolean forced) {
+            boolean forced,
+            /**
+             * 画面が申告した**実際に録れた**最後の連番（旧い画面は 0）。
+             *
+             * <p>0 は「最後の分塊まで届いたことを証明していない」の意味。画面はこれを
+             * 「保証された完了」と読み替えない。</p>
+             */
+            int expectedLastSeq,
+            /**
+             * 明示の不完全終了で**失った**連番（音声が残っていない範囲）。
+             *
+             * <p>詳細画面に出し続けるための値（一度きりの通知にしない）。</p>
+             */
+            List<Integer> lossSeqs,
+            /** 失った範囲の理由（種類）。{@link ClassroomModels#CHECK_MISSING} など。 */
+            String lossReasonCode) {
     }
 
     // ------------------------------------------------------------------ 削除

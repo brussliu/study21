@@ -57,6 +57,51 @@ public interface BatchExecutionMapper {
     List<BatchExecutionEntity> findUnfinished();
 
     /**
+     * **起動の境界まで**の未完了（待機中・実行中）の実行を古い順に返す。
+     *
+     * <p>再起動の復旧が対象にするのは「このプロセスが始まる前に作られた実行」だけ。
+     * 境界（{@link #findMaxExecutionId()} を起動時に読んだ値）より新しい実行は
+     * **このプロセス自身が作ったもの**なので、復旧の対象にしてはいけない
+     * （実行中の自分の実行を「落ちた実行」と誤解して、二重に走らせてしまう）。</p>
+     *
+     * @param boundaryExecutionId 起動時に読んだ「そのときの最大の実行ID」
+     */
+    List<BatchExecutionEntity> findUnfinishedBefore(@Param("boundaryExecutionId") long boundaryExecutionId);
+
+    /**
+     * いまの最大の実行ID（起動の境界を決めるために起動時に 1 回だけ読む）。
+     *
+     * <p>実行が 1 件も無ければ 0。</p>
+     */
+    long findMaxExecutionId();
+
+    /**
+     * 未完了（待機中・実行中）のときだけ閉じる（復旧の**条件つきの確保**）。
+     *
+     * <p>同じ実行を 2 つの復旧が同時に扱っても、閉じられるのは 1 つだけ
+     * （PostgreSQL の行ロックで直列化され、後から来た方は 0 件になる）。
+     * メモリのロックに依存しない。</p>
+     *
+     * @return 閉じた件数（0 = 既に他の復旧が処理した）
+     */
+    int closeIfUnfinished(@Param("executionId") long executionId,
+                          @Param("status") String status,
+                          @Param("message") String message);
+
+    /** ある実行の**やり直し**（元実行ID が一致する実行）を返す（無ければ null）。 */
+    BatchExecutionEntity findBySourceExecutionId(@Param("sourceExecutionId") long sourceExecutionId);
+
+    /**
+     * 復旧のやり直しの実行記録を作る（**元実行ID の一意性で守る**）。
+     *
+     * <p>既に同じ元実行のやり直しがあれば何も挿入しない（0 件）。呼び出し側は
+     * {@link #findBySourceExecutionId(long)} で既存の 1 件を読んで使う。</p>
+     *
+     * @return 挿入した件数（0 = 既にやり直しがある）
+     */
+    int insertRetryIfAbsent(BatchExecutionEntity entity);
+
+    /**
      * 要求内容（JSONB）の aiRequestId で実行履歴を引く（AI 生図の工程ごとの状況）。
      * 古い順（batC51 → 52 → 53 の順）に返す。
      */

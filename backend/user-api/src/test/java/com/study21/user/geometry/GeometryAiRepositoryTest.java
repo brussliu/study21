@@ -483,6 +483,56 @@ class GeometryAiRepositoryTest {
                 .orElseThrow().revision()).isEqualTo(2);
     }
 
+    /**
+     * 【削除】は状態を取消にし、**タスク一覧から消える**（行は監査のため残る）。
+     *
+     * <p>図形として保存済みのものは消せない（図形一覧から削除する）。</p>
+     */
+    @Test
+    void discardHidesTheTaskFromTheListButKeepsTheRow() {
+        UserPrincipal student = createStudent();
+        GeometryAiRequestEntity entity = insert(student, "READY");
+        assertThat(requestMapper.findTasks(student.accountId(), 50))
+                .extracting(GeometryAiRequestEntity::getRequestId)
+                .contains(entity.getRequestId());
+
+        GeometryAiModels.RequestStatus status = geometryAiService.discard(student, entity.getRequestId(),
+                entity.getVersion());
+
+        assertThat(status.status()).isEqualTo("CANCELLED");
+        // 行は残る（監査・AI 呼出履歴との紐付けを消さない）
+        assertThat(requestMapper.findById(entity.getRequestId()).getStatusCode()).isEqualTo("CANCELLED");
+        // 一覧には出ない（カードが戻ってこない）
+        assertThat(requestMapper.findTasks(student.accountId(), 50))
+                .extracting(GeometryAiRequestEntity::getRequestId)
+                .doesNotContain(entity.getRequestId());
+        // 2 回目は断る（他の端末で先に消えたときと同じ）
+        assertThatThrownBy(() -> geometryAiService.discard(student, entity.getRequestId(),
+                requestMapper.findById(entity.getRequestId()).getVersion()))
+                .isInstanceOf(com.study21.common.core.exception.ConflictException.class)
+                .hasMessageContaining("既に一覧から消えています");
+    }
+
+    /** 図形として保存済みのものは【削除】できない（図形側の削除に任せる）。 */
+    @Test
+    void discardRejectsSavedTasks() {
+        UserPrincipal student = createStudent();
+        GeometryAiRequestEntity entity = insert(student, "READY");
+        entity.setCommands("A = (0, 0)\nB = (5, 0)\nPolygon(A, B, C)");
+        entity.setCommandCount(3);
+        geometryAiService.confirm(student, entity.getRequestId(),
+                new GeometryAiModels.ConfirmRequest("検証の三角形", "geometry", "AI 生図から",
+                        List.of("三角形"), "<construction/>", "AAAA", entity.getVersion()));
+
+        GeometryAiRequestEntity saved = requestMapper.findById(entity.getRequestId());
+        assertThat(saved.getStatusCode()).isEqualTo("REGISTERED");
+
+        assertThatThrownBy(() -> geometryAiService.discard(student, saved.getRequestId(), saved.getVersion()))
+                .isInstanceOf(com.study21.common.core.exception.ConflictException.class)
+                .hasMessageContaining("図形として保存済み");
+        assertThat(requestMapper.findById(entity.getRequestId()).getStatusCode()).isEqualTo("REGISTERED");
+    }
+
     /** 【もう一度生成】でも、そのときの有効な設定で固定し直す。 */
     @Test
     void retryRepinsTheConfig() {

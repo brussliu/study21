@@ -307,3 +307,111 @@ describe('授業録音：停止 → 保存の完了 → 終了の判断', () => 
     expect(event.defaultPrevented).toBe(true)
   })
 })
+
+/**
+ * **離脱は「収尾の結果」で決める**（利用者の指摘②の検証）。
+ *
+ * <p>以前は「走っている収尾が終わるのを待って無条件に移動を許可」していた。収尾が
+ * **失敗しても**移動できてしまい、保存できていない音を置き去りにできた。ここでは
+ * 失敗のときに移動しないこと、成功のときに確認を繰り返さないことを固定する。</p>
+ */
+describe('授業録音：離脱は収尾の結果で決める', () => {
+  it('保存が失敗したときは移動せず、もう一度待つ・あきらめるの道を出す', async () => {
+    stubRecorder()
+    // 分塊の送信が 500 で失敗し続ける（保存できない）
+    vi.stubGlobal('fetch', failingChunkUpload())
+    const wrapper = await open()
+    await wrapper.get('[data-cr-stop-recording]').trigger('click')
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect(wrapper.find('[data-cr-retry-finalize]').exists()).toBe(true)
+    }, { timeout: 3000 })
+
+    // 【一覧へ戻る】で移動を試みる（站内の移動も守られる）
+    const router = wrapper.vm.$router as Router
+    const blocked = router.push('/student/classroom')
+    await flushPromises()
+
+    // 確認が出て、【保存が終わるのを待って移動】を押す
+    await wrapper.get('[data-cr-leave-wait]').trigger('click')
+    await flushPromises()
+
+    // **移動しない**（収尾が失敗しているのに「保存できた」ことにしない）
+    expect(router.currentRoute.value.path).toBe('/student/classroom/12/live')
+    // 失敗の理由と、次にできること（もう一度待つ・残る・あきらめる）を出す
+    const failed = wrapper.get('[data-cr-leave-failed]')
+    expect(failed.text()).toContain('もう一度待つ')
+    expect(failed.text()).toContain('あきらめて移動')
+
+    // 【この画面に残る】で案内だけ閉じる（移動しない）
+    await wrapper.get('[data-cr-leave-failed-stay]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-cr-leave-failed]').exists()).toBe(false)
+    expect(router.currentRoute.value.path).toBe('/student/classroom/12/live')
+
+    /*
+     * 「あきらめる」入口は、この案内の中には**置かない**。
+     * 音を捨てる判断は【不完全なまま終了】の確認（影響を見せてから押させる）に集約し、
+     * 移動の確認からは一発で捨てられないようにしている。
+     */
+    expect(wrapper.find('[data-cr-leave-failed-give-up]').exists()).toBe(false)
+    expect(wrapper.find('[data-cr-leave-failed-wait]').exists()).toBe(false)
+    blocked.catch(() => undefined)
+  })
+
+  it('収尾が済んでいれば、確認を出さずに移動できる（成功後に繰り返し聞かない）', async () => {
+    stubRecorder()
+    mockApi()
+    const wrapper = await open()
+    await wrapper.get('[data-cr-stop-recording]').trigger('click')
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect((wrapper.get('[data-cr-finish]').element as HTMLButtonElement).disabled).toBe(false)
+    }, { timeout: 3000 })
+
+    const router = wrapper.vm.$router as Router
+    const blocked = router.push('/student/classroom')
+    await flushPromises()
+
+    // 確認は出ない（保存も書き起こしの確定も済んでいる）
+    expect(wrapper.find('[data-cr-leave-confirm]').exists()).toBe(false)
+    blocked.catch(() => undefined)
+  })
+})
+
+/** 分塊の送信だけが失敗し続ける API（保存できない状況を作る）。 */
+function failingChunkUpload(): ReturnType<typeof vi.fn> {
+  return vi.fn(async (url: string, init?: RequestInit) => {
+    const method = (init?.method ?? 'GET').toUpperCase()
+    const ok = (data: unknown): Response => new Response(
+      JSON.stringify({ success: true, code: 'OK', message: 'OK', data, timestamp: '' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } })
+    const target = String(url)
+    if (target.includes('/chunks') && method === 'POST') {
+      return new Response(JSON.stringify({
+        success: false, code: 'INTERNAL_ERROR', message: '保存できませんでした', data: null
+      }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+    }
+    if (target.includes('/options')) {
+      return ok({
+        enabled: true, chunkSeconds: 20, maxRecordingMinutes: 120, retentionDays: 30,
+        dailyLimit: 0, usedToday: 0, notice: '', sttMode: 'SERVER', streamStt: true,
+        sttLanguageCodes: { ja: 'ja-JP' }, noteEnabled: false
+      })
+    }
+    if (target.includes('/chunks') && method === 'GET') {
+      return ok({
+        items: [], chunkCount: 0, maxSeq: 0, nextSeq: 1, totalBytes: 0, recordedSeconds: null,
+        finalizeCheck: { complete: false, missingSeqs: [], storedChunks: 0, expectedChunks: 0, reason: '' }
+      })
+    }
+    if (target.includes('/start')) {
+      return ok({ recordId: 12, recordNo: 'CR1', status: 'RECORDING', statusLabel: '録音中', version: 2 })
+    }
+    return ok({
+      recordId: 12, recordNo: 'CR1', title: '数学', languageMode: 'ja', status: 'RECORDING',
+      statusLabel: '録音中', startTime: null, segments: [], notes: [], summaryJson: null,
+      hasAudio: false, audioMime: null, version: 2
+    })
+  })
+}

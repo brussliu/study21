@@ -30,6 +30,17 @@
         <result property="updateSourceCode"  column="更新元コード"/>
         <result property="createdAt"         column="登録日時"/>
         <result property="updatedAt"         column="更新日時"/>
+        <result property="recordedLastSeq"   column="録音分塊最終連番"/>
+        <result property="recordedCount"     column="録音分塊宣言数"/>
+        <result property="recordedEndSample" column="録音終了サンプル"/>
+        <result property="recordedComplete"  column="録音完備"/>
+        <result property="lostSeqs"          column="録音欠落連番"/>
+        <result property="assemblyState"     column="結合状態"/>
+        <result property="assemblyDigest"    column="結合元ダイジェスト"/>
+        <result property="assemblyDuration"  column="結合長秒"/>
+        <result property="assemblyReason"    column="結合理由"/>
+        <result property="assemblyStartedAt" column="結合開始日時"/>
+        <result property="assemblyFinishedAt" column="結合終了日時"/>
     </resultMap>
 
     <!-- 一覧では重い列（最終まとめJSON・前置詞テキスト）を読まない -->
@@ -39,6 +50,8 @@
         "授業名", "科目", "言語モード", "前置詞ID", "状態", "開始時刻", "終了時刻",
         "録音ファイル保存先", "保存ファイル名", "録音MIME", "録音ファイルサイズ",
         "録音時間秒", "転写済み文字数", "保持期限",
+        "録音分塊最終連番", "録音分塊宣言数", "録音終了サンプル", "録音完備", "録音欠落連番",
+        "結合状態", "結合元ダイジェスト", "結合長秒", "結合理由", "結合開始日時", "結合終了日時",
         "バージョン", "更新者アカウントID", "登録元コード", "更新元コード", "登録日時", "更新日時"
     </sql>
 
@@ -64,6 +77,17 @@
         SELECT <include refid="AllColumns"/>
           FROM public."CR_授業記録情報"
          WHERE "授業記録ID" = #{recordId}
+    </select>
+
+    <!--
+      排他で押さえて読む（分塊の受け入れと収尾が**同じ行**を押さえる）。
+      押さえたまま長い処理をしない（AI 解析・FFmpeg はトランザクションの外）。
+    -->
+    <select id="lockById" resultMap="RecordMap">
+        SELECT <include refid="AllColumns"/>
+          FROM public."CR_授業記録情報"
+         WHERE "授業記録ID" = #{recordId}
+           FOR UPDATE
     </select>
 
     <select id="findByNo" resultMap="RecordMap">
@@ -173,13 +197,21 @@
            AND "状態"         = 'RECORDING'
     </update>
 
-    <!-- 収尾の完了（状態 = STOPPED。長さと保持期限はここで書く） -->
+    <!--
+      収尾の完了（状態 = STOPPED。長さと保持期限、**確定した録れた範囲**をここで書く）。
+      「録れた範囲」を残すのは、終了のあとに届いた分塊が確定した一覧を動かさないようにするため。
+    -->
     <update id="markFinalized">
         UPDATE public."CR_授業記録情報"
            SET "状態"             = 'STOPPED',
                "終了時刻"         = COALESCE("終了時刻", CURRENT_TIMESTAMP),
                "録音時間秒"       = #{durationSeconds},
                "保持期限"         = CURRENT_DATE + #{retentionDays},
+               "録音分塊最終連番" = #{recordedLastSeq},
+               "録音分塊宣言数"   = #{recordedCount},
+               "録音終了サンプル" = #{recordedEndSample},
+               "録音完備"         = #{recordedComplete},
+               "録音欠落連番"     = #{lostSeqs},
                "更新者アカウントID" = #{operator},
                "更新元コード"     = 'APP',
                "バージョン"       = "バージョン" + 1,
@@ -187,6 +219,26 @@
          WHERE "授業記録ID" = #{recordId}
            AND "バージョン"   = #{version}
            AND "状態"         = 'TRANSCRIBING'
+    </update>
+
+    <!--
+      結合（再生用の 1 本）の状態を書く。**処理中は「このプロセスが始めた」印**として
+      開始時刻を入れる（再起動後に残っていた PROCESSING は「途中で落ちた」と見分ける）。
+    -->
+    <update id="updateAssemblyState">
+        UPDATE public."CR_授業記録情報"
+           SET "結合状態"         = #{state},
+               "結合元ダイジェスト" = #{digest},
+               "結合長秒"         = #{durationSeconds},
+               "結合理由"         = #{reason},
+               "結合開始日時"     = CASE WHEN #{state} = 'PROCESSING'
+                                          THEN COALESCE("結合開始日時", CURRENT_TIMESTAMP)
+                                          ELSE "結合開始日時" END,
+               "結合終了日時"     = CASE WHEN #{state} IN ('READY', 'FAILED', 'INCOMPLETE')
+                                          THEN CURRENT_TIMESTAMP
+                                          ELSE "結合終了日時" END,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
     </update>
 
     <delete id="delete">

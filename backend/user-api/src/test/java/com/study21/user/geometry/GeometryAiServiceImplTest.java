@@ -6,6 +6,7 @@ import com.study21.common.core.exception.ValidationException;
 import com.study21.user.account.AccountType;
 import com.study21.user.security.UserPrincipal;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -415,6 +416,54 @@ class GeometryAiServiceImplTest {
                 ArgumentCaptor.forClass(GeometryAiRequestEntity.class);
         verify(requestMapper).updateRetried(retryCaptor.capture());
         assertThat(retryCaptor.getValue().getSettingsSnapshotJson()).isEqualTo(PINNED_CONFIG);
+    }
+
+    @Test
+    @DisplayName("【削除】は一覧から消す（生成中でも消せる。記録はサーバーに残る）")
+    void discardWorksInAnyStateExceptRegistered() {
+        // 生成中でも消せる（走っている働き手の書き込みは版数で弾かれる）
+        GeometryAiRequestEntity generating = request("GENERATING", 4);
+        when(requestMapper.findById(REQUEST_ID)).thenReturn(generating, request("CANCELLED", 5));
+        when(requestMapper.updateDiscarded(REQUEST_ID, ACCOUNT_ID, "BATCH", 4)).thenReturn(1);
+
+        GeometryAiModels.RequestStatus status = service.discard(student(), REQUEST_ID, 4);
+
+        assertThat(status.status()).isEqualTo("CANCELLED");
+        verify(requestMapper).updateDiscarded(REQUEST_ID, ACCOUNT_ID, "BATCH", 4);
+    }
+
+    @Test
+    @DisplayName("【削除】は図形として保存済みのものを断る（図形一覧から消す話）")
+    void discardRejectsRegisteredRequests() {
+        GeometryAiRequestEntity registered = request("REGISTERED", 5);
+        registered.setFigureId(900L);
+        when(requestMapper.findById(REQUEST_ID)).thenReturn(registered);
+
+        assertThatThrownBy(() -> service.discard(student(), REQUEST_ID, 5))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("図形として保存済み");
+        verify(requestMapper, never()).updateDiscarded(anyLong(), anyLong(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("【削除】は版数が違えば何も書かない（他の端末で先に消えた場合）")
+    void discardRespectsTheVersion() {
+        when(requestMapper.findById(REQUEST_ID)).thenReturn(request("READY", 3));
+
+        assertThatThrownBy(() -> service.discard(student(), REQUEST_ID, 2))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("他の操作で先に更新されました");
+        verify(requestMapper, never()).updateDiscarded(anyLong(), anyLong(), anyString(), anyInt());
+    }
+
+    @Test
+    @DisplayName("【削除】は既に消えているものを断る（画面は一覧を取り直す）")
+    void discardRejectsAlreadyCancelled() {
+        when(requestMapper.findById(REQUEST_ID)).thenReturn(request("CANCELLED", 6));
+
+        assertThatThrownBy(() -> service.discard(student(), REQUEST_ID, 6))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("既に一覧から消えています");
     }
 
     @Test

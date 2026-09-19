@@ -43,9 +43,27 @@ class BatchScheduleSchedulerTest {
     private ScheduleConfigService configService;
     private ScheduledTriggerStore triggerStore;
     private BatchScheduleExecutor executor;
+    private BatchScheduleRecoveryStub recovery;
     private ScheduleRuleCatalog catalog;
     private SchedulePlanGuard planGuard;
     private BatchScheduleScheduler scheduler;
+
+    /** 再起動の復旧の代役（周期検査から呼ばれることだけを確かめる）。 */
+    private static final class BatchScheduleRecoveryStub extends BatchExecutionRecovery {
+        private int retries;
+
+        BatchScheduleRecoveryStub(ScheduleRuleCatalog catalog, ScheduledTriggerStore triggerStore) {
+            super(mock(com.study21.admin.batch.BatchExecutionMapper.class), triggerStore,
+                    mock(BatchScheduleExecutor.class), catalog,
+                    new SchedulePlanGuard(catalog, triggerStore), mock(ScheduleConfigService.class),
+                    Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE));
+        }
+
+        @Override
+        public void retryPendingRecoveryIfDue() {
+            retries++;
+        }
+    }
 
     @BeforeEach
     void setUp() {
@@ -54,10 +72,11 @@ class BatchScheduleSchedulerTest {
         executor = mock(BatchScheduleExecutor.class);
         catalog = new ScheduleRuleCatalog();
         // 実行してよいかの判定は本物を使う（スケジューラ・復旧・実行前で同じ規則であることを確かめる）
-        planGuard = new SchedulePlanGuard(configService, catalog, triggerStore);
+        planGuard = new SchedulePlanGuard(catalog, triggerStore);
+        recovery = new BatchScheduleRecoveryStub(catalog, triggerStore);
         Clock clock = Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE);   // 2026-09-19 23:30 JST
         scheduler = new BatchScheduleScheduler(configService, triggerStore, executor,
-                catalog, planGuard, 20, clock);
+                catalog, planGuard, recovery, 20, clock);
     }
 
     /** タスクぶんのスナップショット（指定しなかったタスクは「未設定」になる）。 */

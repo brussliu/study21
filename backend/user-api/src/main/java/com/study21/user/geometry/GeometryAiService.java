@@ -50,6 +50,14 @@ public interface GeometryAiService {
 
     GeometryAiModels.RequestStatus cancel(UserPrincipal user, long requestId, Integer version);
 
+    /**
+     * **タスクを一覧から消す**（状態を取消にする。行は監査のため残す）。
+     *
+     * <p>【取消】と違って**どの状態でも消せる**（生成済みの作図・失敗したタスク・追加入力待ちを
+     * そのまま片付けられる）。図形として保存済みのものは消せない（図形一覧から削除する）。</p>
+     */
+    GeometryAiModels.RequestStatus discard(UserPrincipal user, long requestId, Integer version);
+
     /** 図形として登録する（作図画面で確認・調整したあとの保存。登録元コード = 'AI'）。 */
     GeometryAiModels.ConfirmResult confirm(UserPrincipal user, long requestId,
                                            GeometryAiModels.ConfirmRequest request);

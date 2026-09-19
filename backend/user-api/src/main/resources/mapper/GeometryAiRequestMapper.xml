@@ -151,6 +151,8 @@
                 AND "登録者アカウントID" = #{createdBy}
             </if>
             AND "状態コード" &lt;&gt; 'REGISTERED'
+            <!-- 一覧から消したもの（取消）は出さない（監査用に行は残る） -->
+            AND "状態コード" &lt;&gt; 'CANCELLED'
         </where>
          ORDER BY "登録日時" DESC, "生図リクエストID" DESC
          LIMIT #{limit}
@@ -176,6 +178,19 @@
                "更新日時"         = CURRENT_TIMESTAMP
          WHERE "生図リクエストID" = #{requestId}
            AND "バージョン" = #{version}
+    </update>
+
+    <!-- タスクを一覧から消す（状態を取消にする。行は監査のため残す。図形ID があるものは対象外） -->
+    <update id="updateDiscarded">
+        UPDATE public."GEO_AI生図リクエスト情報"
+           SET "状態コード"       = 'CANCELLED',
+               "更新者アカウントID" = #{operator},
+               "更新元コード"     = #{sourceCode},
+               "バージョン"       = "バージョン" + 1,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "生図リクエストID" = #{requestId}
+           AND "バージョン" = #{version}
+           AND "図形ID" IS NULL
     </update>
 
     <update id="updateCancelled">

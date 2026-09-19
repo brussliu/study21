@@ -501,6 +501,12 @@ interface PendingChunk {
   sttPcm: Blob | null
   offsets: { startSeconds: number; endSeconds: number }
   attempts: number
+  /**
+   * **利用者が「失うことを確認した」**分塊か（確認のあとは自動で送り直さない）。
+   *
+   * <p>確認した内容と、実際に終わる内容を食い違わせないための印。</p>
+   */
+  abandoned?: boolean
 }
 
 /** 送信待ちの分塊（古い順に送り直す）。 */
@@ -586,6 +592,23 @@ function sendChunk(blob: Blob, sttPcm: Blob | null = null): void {
   uploadChain = uploadChain.then(() => uploadOne(id, { seq, blob, sttPcm, offsets, attempts: 0 }))
 }
 
+/**
+ * **送り直しても直らない**失敗か（エラーコードで判断する。文面では判断しない）。
+ *
+ * <p>{@code CONFLICT}（同じ連番に違う中身）や {@code VALIDATION_ERROR}（長さ・形式）は
+ * 何度送っても同じ。逆に {@code UNAUTHORIZED}・{@code FORBIDDEN}・{@code NOT_FOUND}・
+ * {@code RATE_LIMITED}・{@code BUSINESS_ERROR}・ネットワークは**直り得る**ので、
+ * 音を持ったまま待つ（利用者に「失った」と言わない）。</p>
+ */
+function isPermanentChunkFailure(code: string | undefined, status?: number): boolean {
+  /*
+   * 409（同じ連番に違う内容・状態の競合）は、**同じ音を送り直しても直らない**。
+   * 本文の `code` が粗い（`ERROR` など）場合でも取りこぼさないよう、HTTP の状態でも判断する。
+   */
+  if (status === 409) return true
+  return code === 'CONFLICT' || code === 'VALIDATION_ERROR' || code === 'INVALID_PARAMETER'
+}
+
 /** 1 つの分塊を送る（失敗したら待ち行列へ入れて、あとで送り直す）。 */
 async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
   try {
@@ -614,14 +637,17 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
   } catch (caught) {
     const reason = messageOf(caught, '音声を送信できませんでした。')
     /*
-     * 4xx は内容の問題なので何度送っても通らない。ただし**黙って捨てない**:
-     * 「もう直らない分塊」として一覧に残し、画面は失う音声として出す
-     * （利用者が確認してから不完全なまま終われるようにする）。
+     * **送り直して直るかどうか**を分ける（4xx を一律に「もう直らない」と決めない）。
+     *
+     * <p>認証切れ・権限・状態の競合・一時的な制限は、**待つか入り直せば直る**。直るものを
+     * 「失った音声」に数えると、残っている音を利用者に諦めさせる（そして音は作り直せない）。
+     * 内容の問題（長さ・形式・連番）だけを「もう直らない」とする。</p>
      */
+    const code = caught instanceof ApiError ? caught.code : undefined
     const status = caught instanceof ApiError ? caught.status : undefined
-    if (status !== undefined && status >= 400 && status < 500) {
+    if (isPermanentChunkFailure(code, status)) {
       syncError.value = reason
-      markChunkUnrecoverable(chunk.seq)
+      markChunkUnrecoverable(chunk.seq, reason)
       return
     }
     const existing = pendingChunks.value.find((item) => item.seq === chunk.seq)
@@ -634,6 +660,24 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     syncError.value = ''
     schedulePendingRetry()
   }
+}
+
+/**
+ * 明示の確認で**失うと決めた**分塊を凍結する（自動の送り直しを止める）。
+ *
+ * <p>止めないと、確認したあとに届いた分塊で「確定する一覧」が動く。凍結した分塊は
+ * 送り直さず、**後端へ「送り直しても直らない」として申告**する（黙って捨てない）。</p>
+ */
+function freezeUnrecoverable(seqs: number[]): void {
+  if (seqs.length === 0) return
+  const frozen = new Set(seqs)
+  pendingChunks.value = pendingChunks.value.filter((chunk) => !frozen.has(chunk.seq))
+  const manifest = currentManifest()
+  const unrecoverable = Array.from(new Set([...(manifest.unrecoverableSeqs ?? []), ...seqs]))
+    .sort((left, right) => left - right)
+  chunkManifest.value = { ...manifest, unrecoverableSeqs: unrecoverable }
+  saveChunkManifest()
+  syncError.value = ''
 }
 
 /** 送り直しを予約する（待ち行列が空なら何もしない）。 */
@@ -658,6 +702,7 @@ async function flushPendingChunks(): Promise<void> {
   if (id === null) return
   const waiting = [...pendingChunks.value]
   for (const chunk of waiting) {
+    if (chunk.abandoned) continue
     if (chunk.attempts > RETRY_MAX_ATTEMPTS) continue
     await uploadOne(id, chunk)
     if (pendingChunks.value.some((item) => item.seq === chunk.seq)) {
@@ -1014,11 +1059,22 @@ function loadChunkManifest(id: number): ClassroomChunkManifest | null {
       endSample: parsed.endSample,
       unrecoverableSeqs: Array.isArray(parsed.unrecoverableSeqs)
         ? parsed.unrecoverableSeqs.filter((value): value is number => typeof value === 'number')
-        : []
+        : [],
+      unrecoverableReasons: parseUnrecoverableReasons(parsed.unrecoverableReasons)
     }
   } catch {
     return null
   }
+}
+
+/** 保存してある「送れなかった理由」を読む（壊れていても落ちない）。 */
+function parseUnrecoverableReasons(value: unknown): Record<string, string> {
+  if (value === null || typeof value !== 'object') return {}
+  const result: Record<string, string> = {}
+  for (const [key, reason] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof reason === 'string' && reason !== '') result[key] = reason
+  }
+  return result
 }
 
 /** いまの一覧（無ければ空の一覧から始める）。 */
@@ -1061,12 +1117,23 @@ function rememberUploadedChunk(seq: number): void {
   saveChunkManifest()
 }
 
-/** もう送り直しても直らない分塊（4xx）を記録する（黙って捨てない）。 */
-function markChunkUnrecoverable(seq: number): void {
+/**
+ * もう送り直しても直らない分塊（4xx）を記録する（黙って捨てない）。
+ *
+ * <p>連番だけでなく**理由**も残す。後で「失う音声」として出すとき、
+ * 「保存できなかった連番: 3」だけでは利用者に何が起きたか伝わらない。</p>
+ */
+function markChunkUnrecoverable(seq: number, reason: string): void {
   const manifest = currentManifest()
   const unrecoverable = [...(manifest.unrecoverableSeqs ?? [])]
   if (!unrecoverable.includes(seq)) unrecoverable.push(seq)
-  chunkManifest.value = { ...manifest, unrecoverableSeqs: unrecoverable.sort((a, b) => a - b) }
+  const reasons = { ...(manifest.unrecoverableReasons ?? {}) }
+  if (reason !== '') reasons[String(seq)] = reason
+  chunkManifest.value = {
+    ...manifest,
+    unrecoverableSeqs: unrecoverable.sort((a, b) => a - b),
+    unrecoverableReasons: reasons
+  }
   saveChunkManifest()
 }
 
@@ -1249,6 +1316,33 @@ let finalizeProgress: FinalizeProgress = { recorderFlushed: false, recordEnd: nu
  * ボタンを止めるだけで、同じハンドラが 2 回呼ばれると `await` の先で両方とも進んでしまう。</p>
  */
 let finalizeRunning = false
+/**
+ * **いま走っている収尾の約束**（1 つだけ）。
+ *
+ * <p>停止・終了・「保存を待って移動」がどれも同じ約束を待つ。ブール値を 100ms ごとに
+ * 見に行くと、**結果（成功・失敗・未完了）が分からない**うえ、失敗を見落として
+ * 「保存できた」ことにしてしまう（実際に起きた）。</p>
+ */
+let finalizePromise: Promise<FinalizeResult> | null = null
+/**
+ * 収尾の**結果**（成功・失敗・未完了を値で返す）。
+ *
+ * <p>「走っていない＝成功」と読まない。収尾は</p>
+ * <ol>
+ *   <li>{@code completed} … 音声の送信と書き起こしの確定（＋終了なら記録の終了）まで済んだ</li>
+ *   <li>{@code incomplete} … 音を一部失うことを利用者が確認して終えた（記録は終わっている）</li>
+ *   <li>{@code failed} … 途中で止まった（理由つき。やり直せる）</li>
+ * </ol>
+ * <p>のいずれか。**タイムアウトは成功ではない**（{@code failed} として扱う）。</p>
+ */
+interface FinalizeResult {
+  kind: 'completed' | 'incomplete' | 'failed'
+  /** 失敗の理由（日本語。成功なら null）。 */
+  reason: string | null
+  /** 失った分塊の連番（不完全終了のときだけ）。 */
+  lossSeqs: number[]
+}
+
 /** 収尾の失敗の理由（日本語。空なら失敗していない）。 */
 const finalizeError = ref('')
 /** 止まった段（**失敗したときに、どの段で止まったか**を出す。{@link stopFinalize} が入れる）。 */
@@ -1860,7 +1954,7 @@ function stopRecording(): void {
 
 /** 授業を終了して詳細（最終整理結果）へ進む。 */
 function finishLesson(): void {
-  requestFinalize('finish')
+  void requestFinalize('finish')
 }
 
 /**
@@ -1870,10 +1964,16 @@ function finishLesson(): void {
  * ただし【授業を終了】だけは格上げする: 停止だけの収尾が走っている最中に終了を押したら、
  * 押した操作を黙って捨てず、その収尾の続きとして記録の終了まで進める。</p>
  */
-function requestFinalize(kind: FinalizeKind, force = false): void {
-  if (finalizeRunning) {
+function requestFinalize(kind: FinalizeKind, force = false): Promise<FinalizeResult> {
+  if (finalizePromise !== null) {
+    /*
+     * **すでに走っている収尾を待つ**（同じ約束を返す）。
+     *
+     * <p>「停止」の最中に「終了」を押したら、押した操作を黙って捨てない: 意図を
+     * 終了へ**格上げ**して、同じ約束の結果を両方に返す（2 本目の収尾は走らせない）。</p>
+     */
     if (kind === 'finish') finalizeKind.value = 'finish'
-    return
+    return finalizePromise
   }
   /*
    * **その場で**「収尾が走っている」印を立てる（`await` の前）。
@@ -1884,7 +1984,10 @@ function requestFinalize(kind: FinalizeKind, force = false): void {
    */
   finishing.value = true
   finalizeKind.value = kind
-  void runFinalize(kind, force)
+  finalizePromise = runFinalize(kind, force).finally(() => {
+    finalizePromise = null
+  })
+  return finalizePromise
 }
 
 /**
@@ -1914,10 +2017,38 @@ const incompleteImpact = computed(() => {
   const parts: string[] = []
   if (lastRefusalSeqs.value !== '') parts.push(lastRefusalSeqs.value)
   const unrecoverable = chunkManifest.value?.unrecoverableSeqs ?? []
-  if (unrecoverable.length > 0) parts.push(`保存できなかった連番: ${unrecoverable.join('、')}`)
+  if (unrecoverable.length > 0) {
+    /*
+     * 連番だけでなく**送れなかった理由**も出す（後端が返した日本語のメッセージ）。
+     * 何度送っても通らない分塊は待ち行列から外しているので、
+     * ここで理由を出さないと、利用者には「黙って消えた」ように見えてしまう。
+     */
+    const reasons = chunkManifest.value?.unrecoverableReasons ?? {}
+    const pair = unrecoverable.map((seq) => {
+      const reason = reasons[String(seq)] ?? ''
+      return reason === '' ? `${seq}` : `${seq}（${reason}）`
+    })
+    parts.push(`保存できなかった連番: ${pair.join('、')}`)
+  }
   const missing = finalizeCheck.value?.missingSeqs ?? []
   if (missing.length > 0) parts.push(`足りない連番: ${missing.join('、')}`)
   return parts.join(' / ')
+})
+
+/**
+ * 送れなかった分塊の 1 行（連番と理由）。
+ *
+ * <p>待ち行列から外した分塊は【再試行】では直らないので、状態欄にも理由を出す。</p>
+ */
+const lostChunkSummary = computed(() => {
+  const seqs = chunkManifest.value?.unrecoverableSeqs ?? []
+  if (seqs.length === 0) return ''
+  const reasons = chunkManifest.value?.unrecoverableReasons ?? {}
+  const detail = seqs.map((seq) => {
+    const reason = reasons[String(seq)] ?? ''
+    return reason === '' ? `${seq}` : `${seq}（${reason}）`
+  })
+  return `保存できなかった音声（連番 ${detail.join('、')}）は、もう一度送っても直りません。`
 })
 
 /** 「不完全なまま終了」を押したときの確認（押し間違いで音を失わない）。 */
@@ -1931,7 +2062,15 @@ function askFinishIncomplete(): void {
 /** 確認したうえで不完全なまま終える。 */
 function confirmFinishIncomplete(): void {
   confirmIncomplete.value = false
-  requestFinalize('finish', true)
+  /*
+   * **確認した「失う分塊」を凍結する**: 自動の送り直しを止め、いまから確定する一覧に載せる。
+   * 凍結しないと、確認したあとに届いた分塊で確定する範囲が動く（利用者が確認した内容と
+   * 実際に終わる内容が食い違う）。
+   */
+  freezeUnrecoverable(pendingChunks.value
+    .filter((chunk) => chunk.abandoned || chunk.attempts >= RETRY_MAX_ATTEMPTS)
+    .map((chunk) => chunk.seq))
+  void requestFinalize('finish', true)
 }
 
 /**
@@ -1948,9 +2087,11 @@ function confirmFinishIncomplete(): void {
  * <p>失敗したら**成功と言わない**（詳細へ進まない・最終まとめを起動しない・欠落の記録を消さない）。
  * 済んだ段は覚えているので、やり直し（{@link retryFinalize}）は**まだ済んでいない段だけ**を実行する。</p>
  */
-async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
+async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeResult> {
   // 二度押しはその場で止める（`await` より前に立てる）
-  if (finalizeRunning) return
+  if (finalizeRunning) {
+    return { kind: 'failed', reason: '終了処理がすでに走っています。', lossSeqs: [] }
+  }
   finalizeRunning = true
   finishing.value = true
   finalizeKind.value = kind
@@ -1966,10 +2107,18 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
       finishPhase.value = 'sending-tail'
       await flushUploadsOnce()
       const left = pendingChunks.value.length
-      if (left > 0) {
-        stopFinalize(`送れなかった音声が ${left} 件あります（尾句の文が残らないことがあります）。`)
-        return
+      /*
+       * **不完全なまま終えると利用者が確認した回は、送り残しで止めない**。
+       *
+       * <p>ここで止めると、確認まで済ませた利用者が終了へ進めない（実際に起きた）。
+       * 送れなかった分塊は凍結して一覧に載せ、損失として残す（黙って捨てない）。</p>
+       */
+      if (left > 0 && !force) {
+        const reason = `送れなかった音声が ${left} 件あります（尾句の文が残らないことがあります）。`
+        stopFinalize(reason)
+        return { kind: 'failed', reason, lossSeqs: [] }
       }
+      if (left > 0) freezeUnrecoverable(pendingChunks.value.map((chunk) => chunk.seq))
       finalizeProgress.recorderFlushed = true
     }
     // 2) 両方の音源の書き起こしの最終結果（尾部の確定文）を待つ
@@ -1977,18 +2126,18 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
     const sttReason = await finishSttOnce()
     if (sttReason !== null) {
       stopFinalize(sttReason)
-      return
+      return { kind: 'failed', reason: sttReason, lossSeqs: [] }
     }
     if (finalizeKind.value === 'stop') {
       finishPhase.value = 'done'
-      return
+      return { kind: 'completed', reason: null, lossSeqs: [] }
     }
     const id = recordId.value
     if (id === null) {
       // API の記録と結び付いていない（画面の流れだけ）ときは、そのまま詳細へ進む
       finishPhase.value = 'done'
       backToDetail()
-      return
+      return { kind: 'completed', reason: null, lossSeqs: [] }
     }
     // 3) 記録の終了（データベースへの保存）。済んでいれば送り直さない
     let outcome = finalizeProgress.recordEnd
@@ -1997,13 +2146,16 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
       // 失敗は覚えない（やり直しでもう一度だけ送る）
       if (outcome.kind !== 'failed') finalizeProgress.recordEnd = outcome
     }
-    if (outcome.kind === 'failed') return // 理由は endRecord（stopFinalize）が入れている
+    if (outcome.kind === 'failed') {
+      return { kind: 'failed', reason: finalizeError.value, lossSeqs: [] }
+    }
     if (outcome.kind === 'already') {
       finishPhase.value = 'done'
       backToDetail()
-      return
+      return { kind: 'completed', reason: null, lossSeqs: [] }
     }
     // 4) **保存が済んでから**最終まとめを起動する（先に作ると尾部の文がまとめに入らない）
+    const lossSeqs = outcome.result.lossSeqs ?? []
     const runPath = outcome.result.runPath
     if (runPath === null || runPath === '') {
       // 書き起こしが 1 件も無いとき（音声が送られなかった）は最終まとめを作らない。
@@ -2012,7 +2164,7 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
       finishPhase.value = 'done'
       toast.warning(finishNotice.value)
       backToDetail()
-      return
+      return { kind: lossSeqs.length > 0 ? 'incomplete' : 'completed', reason: null, lossSeqs }
     }
     if (!finalizeProgress.noteStarted) {
       finalizeProgress.noteStarted = true
@@ -2023,10 +2175,18 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
       })
     }
     finishPhase.value = 'done'
-    toast.success('録音を終了しました。')
+    if (lossSeqs.length > 0) {
+      // 音を一部失って終えた回は「終わりました」だけと言わない（失った範囲を残す）
+      toast.warning(`録音を終了しました。音声の一部（連番 ${lossSeqs.join('、')}）は保存できていません。`)
+    } else {
+      toast.success('録音を終了しました。')
+    }
     backToDetail()
+    return { kind: lossSeqs.length > 0 ? 'incomplete' : 'completed', reason: null, lossSeqs }
   } catch (cause) {
-    stopFinalize(messageOf(cause, '終了処理が途中で止まりました。'))
+    const reason = messageOf(cause, '終了処理が途中で止まりました。')
+    stopFinalize(reason)
+    return { kind: 'failed', reason, lossSeqs: [] }
   } finally {
     finishing.value = false
     finalizeRunning = false
@@ -2039,7 +2199,7 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<void> {
  * <p>押すたびに `requestFinalize` を通すので、二度押しで 2 つ走ることはない。</p>
  */
 function retryFinalize(): void {
-  requestFinalize(finalizeKind.value)
+  void requestFinalize(finalizeKind.value)
 }
 
 /* ---------- 画面の状態（1 か所にまとめる。利用者に推測させない） ---------- */
@@ -2298,6 +2458,20 @@ function stopFinalize(reason: string): void {
  */
 async function endRecord(id: number, force: boolean): Promise<EndOutcome> {
   try {
+    /*
+     * 送り残しが残っていても、**利用者が「失う」と確認した回（force）はそのまま終了を送る**。
+     * 送れなかった分塊は後端へ「送り直しても直らない」として申告し、損失として残す。
+     */
+    const pending = pendingChunks.value
+    if (pending.length > 0) {
+      if (!force) {
+        const reason = `送れなかった音声が ${pending.length} 件あります。`
+          + '電波の良い所でもう一度試すか、音声を一部失うことを確認してから終了してください。'
+        stopFinalize(reason)
+        return { kind: 'failed' }
+      }
+      freezeUnrecoverable(pending.map((chunk) => chunk.seq))
+    }
     // **送った分塊の一覧を添える**（サーバーはこれで最後の分塊の取りこぼしを見つける）
     const response = await endClassroomRecord(id, {
       force,
@@ -2501,6 +2675,13 @@ function needsLeaveConfirmation(): boolean {
   return !sttFinalized
 }
 
+/**
+ * 「保存を待って移動」が失敗した理由（日本語。空なら失敗していない）。
+ *
+ * <p>画面に残して、やり直す・待つ・あきらめるの道を出す（黙って元の画面に戻さない）。</p>
+ */
+const lastLeaveFailure = ref('')
+
 /** いま残っているものの説明（確認の 1 段に出す）。 */
 function leaveDetail(): string {
   const parts: string[] = []
@@ -2527,16 +2708,33 @@ function askLeave(): Promise<boolean> {
   })
 }
 
-/** 【保存が終わるのを待って移動】: 収尾を済ませてから移動する。 */
+/**
+ * 【保存が終わるのを待って移動】: **収尾の結果を見てから**移動する。
+ *
+ * <p>以前は「走っている収尾が終わるのを待って、無条件に移動を許可」していた。収尾が
+ * **失敗しても・タイムアウトしても**移動できてしまい、保存できていない音を置き去りに
+ * したまま画面を離れられた（実際に起きた）。いまは結果（成功・不完全・失敗）を見て、
+ * 失敗なら**この画面に残り**、やり直す・待ち続ける・あきらめる道を出す。</p>
+ */
 async function leaveAfterSaving(): Promise<void> {
   const request = leaveRequest.value
   if (request === null) return
   leaveRequest.value = null
   toast.info('音声の保存と書き起こしの仕上げを待ってから移動します。')
-  // 収尾（停止 → 送り切り → 書き起こしの確定）を済ませてから許可する
-  requestFinalize('stop')
-  await finalizeSettled()
-  request.resolve(true)
+  const result = await requestFinalize('stop')
+  if (result.kind === 'completed' || result.kind === 'incomplete') {
+    // 最後の分塊まで届いて、書き起こしの確定も済んだ（不完全終了でも「保存の続き」は無い）
+    request.resolve(true)
+    return
+  }
+  /*
+   * **失敗・未完了なら移動しない**。理由と、次にできること（やり直す・待つ・あきらめる）を
+   * 出し、利用者が明示したときだけ移動する（成功に見せかけない）。
+   */
+  lastLeaveFailure.value = result.reason ?? '音声の保存を完了できませんでした。'
+  for (const chunk of pendingChunks.value) chunk.abandoned = false
+  request.resolve(false)
+  toast.danger(lastLeaveFailure.value)
 }
 
 /** 【保存せずに移動】: 未送信の音声を捨てて移動する（利用者が明示したときだけ）。 */
@@ -2547,20 +2745,37 @@ function leaveWithoutSaving(): void {
   request.resolve(true)
 }
 
+/** 離脱の待ち合わせが失敗したあと、**もう一度待つ**（画面に残ったまま）。 */
+async function retryLeaveAfterSaving(): Promise<void> {
+  lastLeaveFailure.value = ''
+  const result = await requestFinalize('stop')
+  if (result.kind === 'completed' || result.kind === 'incomplete') {
+    // 今度は保存できた: もう一度【一覧へ戻る】を押せば確認は出ない
+    toast.success('音声の保存が終わりました。移動できます。')
+    return
+  }
+  lastLeaveFailure.value = result.reason ?? '音声の保存を完了できませんでした。'
+}
+
+/** 失敗の案内を閉じて、この画面に残る。 */
+function clearLeaveFailure(): void {
+  lastLeaveFailure.value = ''
+}
+
+/** 失敗を認めたうえで**あきらめて移動**する（利用者が明示したときだけ）。 */
+function leaveAfterGivingUp(): void {
+  lastLeaveFailure.value = ''
+  // 送れていない分塊は「失う」と確定させる（後端にも申告して損失として残す）
+  freezeUnrecoverable(pendingChunks.value.map((chunk) => chunk.seq))
+  router.push({ name: 'classroom-list' }).catch(() => undefined)
+}
+
 /** 【この画面に残る】。 */
 function stayOnPage(): void {
   const request = leaveRequest.value
   if (request === null) return
   leaveRequest.value = null
   request.resolve(false)
-}
-
-/** 走っている収尾が済むまで待つ（走っていなければすぐ返る）。 */
-async function finalizeSettled(): Promise<void> {
-  // 収尾は 1 つだけ走る（`finalizeRunning`）ので、終わるまで短く待つ
-  for (let attempt = 0; attempt < 600 && finalizeRunning; attempt += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 100))
-  }
 }
 
 /**
@@ -2660,6 +2875,13 @@ onBeforeUnmount(() => {
             {{ statusSummary.detail }}
           </span>
           <span v-if="statusSummary.hint !== ''" class="cr-status__hint">{{ statusSummary.hint }}</span>
+          <!--
+            何度送っても通らない分塊は、待ち行列から外すので【再試行】では直らない。
+            理由をここに出さないと、利用者には「黙って消えた」ように見える。
+          -->
+          <span v-if="lostChunkSummary !== ''" class="cr-status__lost" data-cr-lost-chunks>
+            {{ lostChunkSummary }}
+          </span>
         </div>
         <button
           v-if="statusSummary.retry" type="button" class="btn btn--secondary btn--sm"
@@ -2726,6 +2948,21 @@ onBeforeUnmount(() => {
             <dt>録れた／送れた分塊</dt>
             <dd data-cr-manifest-counts>
               {{ chunkManifest?.expectedCount ?? 0 }} 件 / {{ chunkManifest?.totalCount ?? 0 }} 件
+            </dd>
+          </div>
+          <!--
+            何度送っても通らない分塊は**理由**も残す（待ち行列から外すので、
+            ここに出さないと利用者には「黙って消えた」ように見える）。
+          -->
+          <div v-if="(chunkManifest?.unrecoverableSeqs ?? []).length > 0" data-cr-unrecoverable>
+            <dt>送れなかった分塊</dt>
+            <dd>
+              <span
+                v-for="seq in chunkManifest?.unrecoverableSeqs ?? []" :key="seq"
+                class="cr-manifest-lost"
+              >
+                連番 {{ seq }}<template v-if="chunkManifest?.unrecoverableReasons?.[String(seq)]">（{{ chunkManifest.unrecoverableReasons[String(seq)] }}）</template>
+              </span>
             </dd>
           </div>
           <div v-if="finalizeCheck !== null && finalizeCheck.missingSeqs.length > 0">
@@ -2944,6 +3181,39 @@ onBeforeUnmount(() => {
             @click="leaveWithoutSaving"
           >
             保存せずに移動
+          </button>
+        </div>
+      </div>
+
+      <!--
+        **「保存を待って移動」が失敗したとき**の確認。
+        移動を許可せず、やり直す・待ち続ける・あきらめるの 3 つから選ばせる
+        （失敗を「保存できた」ことにして移動させない）。
+      -->
+      <div v-if="lastLeaveFailure !== ''" class="cr-confirm" data-cr-leave-failed>
+        <p class="cr-confirm__title">音声の保存を完了できませんでした。移動しますか？</p>
+        <p class="cr-confirm__impact" data-cr-leave-failed-reason>{{ lastLeaveFailure }}</p>
+        <p class="cr-confirm__note">
+          もう一度待つと、送れていない音声を送り直します（電波が戻っていれば保存できます）。
+        </p>
+        <div class="cr-confirm__actions">
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-leave-failed-wait
+            @click="retryLeaveAfterSaving"
+          >
+            もう一度待つ
+          </button>
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-leave-failed-stay
+            @click="clearLeaveFailure"
+          >
+            この画面に残る
+          </button>
+          <button
+            type="button" class="btn btn--danger btn--sm" data-cr-leave-failed-give-up
+            @click="leaveAfterGivingUp"
+          >
+            音声をあきらめて移動
           </button>
         </div>
       </div>

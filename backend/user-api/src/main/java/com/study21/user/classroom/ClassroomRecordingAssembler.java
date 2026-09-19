@@ -52,6 +52,10 @@ public class ClassroomRecordingAssembler {
     private final Object[] locks = new Object[LOCK_STRIPES];
     /** 直近の結合の状態（記録ごと。画面と終了時の判断に使う）。 */
     private final Map<Long, ClassroomAssembly> statuses = new ConcurrentHashMap<>();
+    /**
+     * **このプロセスが**組立てを始めた記録（再起動後に残った {@code PROCESSING} と区別する）。
+     */
+    private final java.util.Set<Long> claimedHere = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     /** 本番の生成（Spring が使う口。外部コマンドは設定から作る）。 */
     @org.springframework.beans.factory.annotation.Autowired
@@ -76,6 +80,56 @@ public class ClassroomRecordingAssembler {
     /** 記録を消したときに状態も捨てる。 */
     public void forget(long recordId) {
         statuses.remove(recordId);
+        claimedHere.remove(recordId);
+    }
+
+    /**
+     * いまある分塊から見て、**この状態のままでよいか**（読むだけ。組立てはしない）。
+     *
+     * <p>user-api を起動し直すと、メモリには何も無い。「実は既にできている」回を
+     * {@code NONE}＝「作成中」と見せないために、DB の状態を復帰してよいかをここで判断する。</p>
+     *
+     * @return この状態のままでよいなら true（組立て直す必要は無い）
+     */
+    public boolean statusIsCurrent(ClassroomRecordEntity record,
+                                   List<ClassroomRecordingChunkEntity> chunks) {
+        if (record == null || record.getAudioPath() == null || record.getAudioName() == null) {
+            return true;
+        }
+        if (chunks == null || chunks.isEmpty()) {
+            return true;
+        }
+        ClassroomRecordingSessionPlanner.Plan plan =
+                ClassroomRecordingSessionPlanner.plan(storage, record.getRecordId(),
+                        record.getAudioPath(), chunks);
+        if (!plan.complete()) {
+            // 欠落している: 組立て直しても作れない（状態は INCOMPLETE が正しい）
+            return false;
+        }
+        List<Path> files = plan.sessions().stream()
+                .map(session -> session.chunks().get(session.chunks().size() - 1).path())
+                .toList();
+        return isUpToDate(storage.resolve(record.getAudioPath(), record.getAudioName()), files);
+    }
+
+    /**
+     * DB から読んだ状態を覚え直す（**再起動後の復帰**。組立てはしない）。
+     *
+     * <p>止めているあいだに「できていた」回は、メモリには何も無い。DB の状態をそのまま
+     * 覚え直し、画面が「作成中」を出し続けないようにする。</p>
+     */
+    public void restore(long recordId, ClassroomAssembly assembly) {
+        remember(recordId, assembly);
+    }
+
+    /**
+     * このプロセスが**本当に始めた**組立てか。
+     *
+     * <p>{@code PROCESSING} が DB に残っていても、それがこのプロセスのものとは限らない
+     * （前回の起動が途中で落ちた回）。区別できないと「作成中」のまま永久に待たされる。</p>
+     */
+    public boolean isClaimedHere(long recordId) {
+        return claimedHere.contains(recordId);
     }
 
     /**
@@ -126,6 +180,8 @@ public class ClassroomRecordingAssembler {
             return false;
         }
         synchronized (lockOf(record.getRecordId())) {
+            // ここから先は**このプロセスが**担当する（DB に PROCESSING を残す根拠）
+            claimedHere.add(record.getRecordId());
             // 待っている間に別の要求が組立て終えているかもしれない
             if (isUpToDate(target, files)) {
                 return false;

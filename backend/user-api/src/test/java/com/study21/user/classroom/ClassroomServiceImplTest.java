@@ -89,7 +89,7 @@ class ClassroomServiceImplTest {
         stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
 
@@ -109,7 +109,7 @@ class ClassroomServiceImplTest {
         stubContinuousChunks();
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(3);
         doAnswer(invocation -> {
@@ -227,7 +227,7 @@ class ClassroomServiceImplTest {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(4);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         // 分塊は 1 から連続している（分塊の確認で断らないように）
         stubContinuousChunks();
@@ -266,7 +266,7 @@ class ClassroomServiceImplTest {
         when(recordMapper.findById(RECORD_ID)).thenReturn(imported);
         when(settings.load()).thenReturn(snapshot);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(5);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         doAnswer(invocation -> {
             ((ClassroomNoteEntity) invocation.getArgument(0)).setNoteId(55L);
@@ -443,7 +443,7 @@ class ClassroomServiceImplTest {
         when(settings.load()).thenReturn(snapshot);
         when(settings.noteEnabled(snapshot)).thenReturn(false);
         when(settings.retentionDays(snapshot)).thenReturn(30);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
 
         ClassroomModels.EndResult result = service.end(student, RECORD_ID);
@@ -583,6 +583,8 @@ class ClassroomServiceImplTest {
         ClassroomRecordEntity record = recordingRecord();
         record.setStatus(ClassroomModels.STATUS_STOPPED);
         record.setEndTime(new java.sql.Timestamp(System.currentTimeMillis() - 5_000));
+        // 収尾で確定したのは「1 番まで」（この分塊は一覧に載っている＝取りこぼしの救済）
+        record.setRecordedLastSeq(1);
         when(recordMapper.findById(RECORD_ID)).thenReturn(record);
         when(settings.load()).thenReturn(snapshot);
         when(settings.enabled(snapshot)).thenReturn(true);
@@ -600,6 +602,31 @@ class ClassroomServiceImplTest {
         verify(segmentMapper, never()).insert(any());
         assertThat(result.appendedSegments()).isEmpty();
         assertThat(result.nextSeq()).isEqualTo(2);
+    }
+
+    /**
+     * 確定した一覧に**無い**連番（新しい音）は、停止直後でも受け入れない。
+     *
+     * <p>受け入れると、詳細画面が「音声は全部そろっています」と言ったまま実体が増える
+     * （終了は一覧を確定させる操作なので、あとから一覧を動かせない）。</p>
+     */
+    @Test
+    @DisplayName("終了のあとに届いた**一覧に無い**分塊は断る（確定した一覧を動かさない）")
+    void uploadChunkRejectsNewChunkAfterEnd() {
+        ClassroomRecordEntity record = recordingRecord();
+        record.setStatus(ClassroomModels.STATUS_STOPPED);
+        record.setEndTime(new java.sql.Timestamp(System.currentTimeMillis() - 5_000));
+        record.setRecordedLastSeq(1);
+        when(recordMapper.findById(RECORD_ID)).thenReturn(record);
+        when(settings.load()).thenReturn(snapshot);
+        when(settings.enabled(snapshot)).thenReturn(true);
+
+        assertThatThrownBy(() -> service.uploadChunk(student, RECORD_ID, 2, chunkFile(), null))
+                .isInstanceOf(ConflictException.class)
+                .hasMessageContaining("新しい音声");
+
+        // 実体も書かない
+        verify(storage, never()).writeChunkLocation(any(), any());
     }
 
     @Test
@@ -1133,13 +1160,16 @@ class ClassroomServiceImplTest {
     void endRefusesWhenLastChunkIsMissing() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        // 1・2 はあるが、画面は 3 まで送ったつもり（3 が届いていない）
+        // 1・2 はあるが、画面は 3 まで**録れた**と言っている（3 が届いていない）
         storedChunks(1, 2);
 
-        assertThatThrownBy(() -> service.end(student, RECORD_ID, false,
-                new ClassroomModels.ChunkManifest(3, 3, null, null)))
-                .isInstanceOf(ChunkChecklistException.class)
-                .hasMessageContaining("3");
+        ChunkChecklistException refusal = org.junit.jupiter.api.Assertions.assertThrows(
+                ChunkChecklistException.class, () -> service.end(student, RECORD_ID, false,
+                        new ClassroomModels.ChunkManifest(3, 3, List.of(1, 2), null, List.of())));
+
+        // **3 番が無い**と構造で返す（文面に頼らない）
+        assertThat(refusal.checklist().missingSeqs()).containsExactly(3);
+        assertThat(refusal.checklist().reasonCode()).isEqualTo(ClassroomModels.CHECK_MISSING);
     }
 
     @Test
@@ -1147,7 +1177,7 @@ class ClassroomServiceImplTest {
     void endAllowsWhenChunksAreContinuous() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
         storedChunks(1, 2);
@@ -1169,7 +1199,7 @@ class ClassroomServiceImplTest {
     void endAllowsExplicitIncompleteEnd() {
         when(recordMapper.findById(RECORD_ID)).thenReturn(recordingRecord());
         when(settings.load()).thenReturn(snapshot);
-        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt()))
+        when(recordMapper.markFinalized(eq(RECORD_ID), anyInt(), anyInt(), eq(ACCOUNT_ID), anyInt(), any(), any(), any(), any(), any()))
                 .thenReturn(1);
         when(segmentMapper.maxSeq(RECORD_ID)).thenReturn(null);
         storedChunks(1, 3);
@@ -1204,7 +1234,7 @@ class ClassroomServiceImplTest {
                 .hasMessageContaining("すでに終了処理に入っています");
 
         // 記録は終わらせない・最終まとめも作らない
-        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt(), any(), any(), any(), any(), any());
         verify(noteMapper, never()).insert(any());
     }
 
@@ -1231,7 +1261,7 @@ class ClassroomServiceImplTest {
                 .isInstanceOf(ChunkChecklistException.class)
                 .hasMessageContaining("もう一度");
 
-        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt());
+        verify(recordMapper, never()).markFinalized(anyLong(), anyInt(), anyInt(), anyLong(), anyInt(), any(), any(), any(), any(), any());
     }
 
     /**
@@ -1260,7 +1290,7 @@ class ClassroomServiceImplTest {
         lenient().when(recordMapper.claimFinalize(anyLong(), anyLong())).thenReturn(1);
         lenient().when(recordMapper.markFinalized(anyLong(), org.mockito.ArgumentMatchers.anyInt(),
                 org.mockito.ArgumentMatchers.anyInt(), anyLong(),
-                org.mockito.ArgumentMatchers.anyInt())).thenReturn(1);
+                org.mockito.ArgumentMatchers.anyInt(), any(), any(), any(), any(), any())).thenReturn(1);
         lenient().when(chunkMapper.countByRecord(anyLong())).thenReturn(0);
     }
 

@@ -6,7 +6,7 @@ import { useJapaneseDemoStore } from '@/features/japanese-demo/store/japaneseDem
 import type { DemoWord } from '@/features/japanese-demo/types'
 
 /**
- * 削除確認のダイアログ（§5）。
+ * 削除確認のダイアログ。
  *
  * 伝えること:
  * ・単語と読み
@@ -38,7 +38,7 @@ const sameHeading = computed(() => findSameHeading(store.words, props.word))
     >
       <div class="dialog__head">
         <h2 id="demoDeleteTitle" class="dialog__title">
-          <AppIcon name="trash" size="sm" /> 単語の削除（デモ）
+          <AppIcon name="trash" size="sm" /> 単語の削除
         </h2>
         <button type="button" class="dialog__close" aria-label="閉じる" data-demo-delete-close @click="emit('cancel')">
           <AppIcon name="x" size="sm" />
@@ -46,11 +46,6 @@ const sameHeading = computed(() => findSameHeading(store.words, props.word))
       </div>
 
       <div class="dialog__body">
-        <p class="jp-demo__notice">
-          <AppIcon name="info" size="sm" />
-          <span>この削除は<strong>デモの仮データだけ</strong>に効きます。実際のデータは消えません。</span>
-        </p>
-
         <div class="jp-demo-pair">
           <div class="jp-demo-pair__head">
             <span class="jp-demo-ja is-large">{{ word.heading }}</span>
@@ -83,8 +78,8 @@ const sameHeading = computed(() => findSameHeading(store.words, props.word))
         <section class="jp-demo-section">
           <h3 class="jp-demo-section__title">削除するとどうなるか</h3>
           <ul class="jp-demo-section__hint">
-            <li>単語の一覧から消えます（デモの仮データから消えるだけです）。</li>
-            <li>収録・詳細情報も一緒に消えます（実際の DB では CASCADE に相当します）。</li>
+            <li>単語の一覧から消えます。</li>
+            <li>収録・詳細情報も一緒に消えます。</li>
             <li><strong>これまでの学習の記録は残ります</strong>（学習した事実は消しません）。</li>
           </ul>
           <p v-if="sameHeading.length > 0" class="jp-demo-section__hint" data-demo-delete-same-heading>

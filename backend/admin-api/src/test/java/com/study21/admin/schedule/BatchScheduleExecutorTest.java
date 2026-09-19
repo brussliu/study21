@@ -48,9 +48,10 @@ class BatchScheduleExecutorTest {
         batchService = mock(BatchService.class);
         configService = mock(ScheduleConfigService.class);
         triggerStore = mock(ScheduledTriggerStore.class);
-        planGuard = new SchedulePlanGuard(configService, new ScheduleRuleCatalog(), triggerStore);
+        planGuard = new SchedulePlanGuard(new ScheduleRuleCatalog(), triggerStore);
         // 2026-09-20 07:00 JST
-        executor = new BatchScheduleExecutor(batchService, planGuard, 1,
+        executor = new BatchScheduleExecutor(batchService, planGuard, configService, 1,
+                BatchScheduleExecutor.DEFAULT_QUEUE_CAPACITY,
                 Clock.fixed(Instant.parse("2026-09-19T22:00:00Z"), ZONE));
     }
 
@@ -115,6 +116,70 @@ class BatchScheduleExecutorTest {
 
         org.assertj.core.api.Assertions.assertThat(ran).isFalse();
         verify(batchService).markQueuedAsSkipped(eq(903L), contains("古くなっている"));
+    }
+
+    @Test
+    @DisplayName("実行直前の再検証は**そのとき最新の**スナップショットを使う（待機中に設定が変わる）")
+    void beforeRunUsesTheLatestSnapshot() {
+        // 確保した時点では有効だった
+        config(TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
+
+        // 待機中に無効へ変わった（メモリのスナップショットが入れ替わる）
+        Map<String, TaskSchedule> changed = new LinkedHashMap<>();
+        changed.put("batR04", TaskSchedule.daily("batR04", false, LocalTime.of(6, 30)));
+        Map<String, TaskConfigStatus> statuses = new LinkedHashMap<>();
+        for (String code : new ScheduleRuleCatalog().taskCodes()) {
+            statuses.put(code, TaskConfigStatus.MISSING);
+        }
+        statuses.put("batR04", TaskConfigStatus.LOADED);
+        when(configService.snapshot()).thenReturn(new ScheduleConfigSnapshot(6,
+                Instant.parse("2026-09-19T22:00:00Z"), ZONE, changed, statuses, Map.of(), null));
+
+        boolean ran = executor.runVerified("batR04", 905L, LocalDateTime.of(2026, 9, 20, 6, 30));
+
+        org.assertj.core.api.Assertions.assertThat(ran).isFalse();
+        verify(batchService, never()).runQueued(anyLong());
+        verify(batchService).markQueuedAsSkipped(eq(905L), contains("無効"));
+    }
+
+    @Test
+    @DisplayName("待ち行列があふれても記録は閉じず、次の検査で入り直す（漏執行を作らない）")
+    void rejectedSubmissionIsRetriedInsteadOfFailing() throws Exception {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        // 待ち行列を 1 本にして、1 本目を止めたまま 2 本目を投入する（あふれさせる）
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        org.mockito.Mockito.doAnswer(invocation -> {
+            started.countDown();
+            release.await(5, java.util.concurrent.TimeUnit.SECONDS);
+            return java.util.Map.of();
+        }).when(batchService).runQueued(anyLong());
+        BatchScheduleExecutor small = new BatchScheduleExecutor(batchService, planGuard, configService, 1, 1,
+                Clock.fixed(Instant.parse("2026-09-19T22:00:00Z"), ZONE));
+        try {
+            small.submit("batL02", 910L, LocalDateTime.of(2026, 9, 20, 6, 56));
+            org.assertj.core.api.Assertions.assertThat(started.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            // 待ち行列が埋まる（1 本）→ 次はあふれる
+            small.submit("batL02", 911L, LocalDateTime.of(2026, 9, 20, 6, 56));
+            small.submit("batL02", 912L, LocalDateTime.of(2026, 9, 20, 6, 56));
+
+            org.assertj.core.api.Assertions.assertThat(small.pendingSubmissionCount()).isGreaterThanOrEqualTo(1);
+            // **失敗として閉じない**（漏執行にしない）
+            verify(batchService, never()).markQueuedAsFailed(anyLong(), anyString());
+        } finally {
+            release.countDown();
+            // あふれた分は入り直しで実行される
+            for (int i = 0; i < 8; i++) {
+                small.retryPendingSubmissions();
+                if (small.pendingSubmissionCount() == 0) {
+                    break;
+                }
+                Thread.sleep(50);
+            }
+            // 入り直した実行は**別スレッドで**走るので、呼ばれるまで待つ
+            verify(batchService, org.mockito.Mockito.timeout(5000)).runQueued(912L);
+            small.shutdown();
+        }
     }
 
     @Test

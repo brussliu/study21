@@ -11,17 +11,18 @@ import type { DemoDetailContent, DemoPracticeQuestion, DemoWord } from '@/featur
 import '@/features/japanese-demo/japanese-demo.css'
 
 /**
- * 日本語勉強【単語情報管理】デモ：学習画面の確認（A. 勉強）。
+ * 日本語勉強【単語情報管理】：学習画面（A. 勉強）。
  *
  * 参考にした 2.0: `japanese_test_a.jsp` → `part/japanese_test_runner.jsp` → `js/japanese_word_test.js` の
  * `renderA()`（音→読み→意味→例文の順で、5 つのタブに分けて見せる）。
+ *
+ * 2.0 と同じく**別ウィンドウ**で開く（`window.open` の popup）。
  *
  * 2.0 から変えたところ:
  * ・既定の画面で「単語・読み・発音・一言の意味・よく使う文型・代表例文 2 つ・重要な注意 1 つ」を先に見せ、
  *   残りは 5 つのタブに分ける（開いた瞬間に長文が並ばないように）。
  * ・日本語と中国語の階層を明確にし、中国語訳と読みは表示・非表示を切り替えられる。
  * ・誤りと修正はアイコンと文字の両方で示す（色だけに頼らない）。
- * ・音声は**音声ファイルが無い**ので、再生の状態だけを演示し「デモ音声」と明示する。
  * ・ミニ練習はこの画面の中で完結する（テストを作らない・学習回数を書かない）。
  */
 
@@ -116,7 +117,7 @@ const effectiveTab = computed(() =>
   visibleTabs.value.some((tab) => tab.key === activeTab.value) ? activeTab.value : 'meaning'
 )
 
-/* ---------- 音声のデモ（音声ファイルは無い） ---------- */
+/* ---------- 音声（音声ファイルが無いので、再生の状態だけを見せる） ---------- */
 
 /** いま「再生中」に見せている対象のキー。 */
 const playingKey = ref('')
@@ -157,7 +158,7 @@ onBeforeUnmount(() => {
 const answers = ref<Record<string, string>>({})
 /** 記述式の入力。 */
 const writings = ref<Record<string, string>>({})
-/** 記述式のデモフィードバックを出した問題 ID。 */
+/** 記述式の参考フィードバックを出した問題 ID。 */
 const feedbackShown = ref<string[]>([])
 
 function choose(question: DemoPracticeQuestion, value: string): void {
@@ -207,16 +208,19 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
     <p v-if="props.draft" class="jp-demo-draftband" data-demo-draft-band>
       <AppIcon name="info" size="sm" />
       <span>
-        <strong>未保存のプレビュー</strong>：詳細編集の内容を保存せずに表示しています。
-        閉じると編集画面に戻り、入力はそのまま残ります。
+        <strong>未保存の内容を表示しています。</strong>
+        この画面を閉じると編集画面に戻り、入力はそのまま残ります。
       </span>
     </p>
 
     <div class="jp-demo__head">
-      <span class="jp-demo__badge" data-demo-badge><AppIcon name="info" size="sm" /> デモ</span>
-      <span class="jp-demo-meta">
-        学習画面の確認（A. 勉強）。学習の回数・習得度・復習日はこの画面では変わりません。
-      </span>
+      <div class="jp-demo-study__title">
+        <h1 class="page-title">A. 勉強</h1>
+        <p class="page-sub">
+          {{ props.word.heading }}（{{ props.word.reading }}）
+          <template v-if="props.word.jlpt"> ／ {{ props.word.jlpt }}</template>
+        </p>
+      </div>
       <div class="jp-demo__actions">
         <!-- 補充・非表示の切り替え（読みやすさの確認用） -->
         <label class="filter-item">
@@ -231,20 +235,10 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
           <AppIcon name="edit" size="sm" /> 詳細編集へ
         </button>
         <button type="button" class="btn btn--secondary btn--sm" data-demo-study-close @click="emit('close')">
-          <AppIcon name="chevron-left" size="sm" /> 一覧へ戻る
+          <AppIcon name="x" size="sm" /> 閉じる
         </button>
       </div>
     </div>
-
-    <p class="jp-demo__notice">
-      <AppIcon name="alert" size="sm" />
-      <span>
-        <strong>デモの学習画面です。</strong>
-        音声は<strong>音声ファイルを持っていない</strong>ため、再生の状態だけを演示しています
-        （実際の発音の正しさを示すものではありません）。
-        ミニ練習の採点はこの画面の中だけで、学習の記録は更新しません。
-      </span>
-    </p>
 
     <!-- ============ 既定の画面（まず見せる内容） ============ -->
     <section class="card">
@@ -264,12 +258,12 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
           </p>
         </div>
 
-        <!-- 発音（デモ。音声ファイルは無い） -->
+        <!-- 発音（音声ファイルが無いので、状態だけを見せる） -->
         <div class="jp-demo-study__sound">
           <span class="jp-demo-audio">
             <button
               type="button" class="btn btn--secondary btn--sm" data-demo-study-sound
-              :aria-label="`${props.word.heading} の発音を再生（デモ）`" @click="playDemo('word')"
+              :aria-label="`${props.word.heading} の発音を再生`" @click="playDemo('word')"
             >
               <AppIcon name="play" size="sm" /> 発音
             </button>
@@ -277,7 +271,7 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
               class="jp-demo-audio__state" :class="{ 'is-playing': isPlaying('word') }"
               data-demo-study-sound-state
             >
-              {{ isPlaying('word') ? '再生中…（デモ・音声はありません）' : 'デモ音声' }}
+              {{ isPlaying('word') ? '再生中…' : '音声サンプルなし' }}
             </span>
           </span>
         </div>
@@ -441,14 +435,14 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
           </article>
           <p v-if="examples.length === 0" class="jp-hint">例文はまだありません。</p>
 
-          <!-- 会話（役ごとに見せる。デモの再生つき） -->
+          <!-- 会話（役ごとに見せる。1 文ずつ／通しの再生つき） -->
           <article v-for="dialog in dialogs" :key="dialog.id" class="jp-demo-pair" data-demo-study-dialog>
             <div class="jp-demo-pair__head">
               <span class="jp-demo-pair__label">会話：{{ dialog.scene }}</span>
               <button type="button" class="jp-demo-linkbtn" data-demo-dialog-play @click="playDialogAll(dialog.id)">
-                <AppIcon name="play" size="sm" /> 通しで再生（デモ）
+                <AppIcon name="play" size="sm" /> 通しで再生
               </button>
-              <span v-if="isPlaying(`${dialog.id}:all`)" class="jp-demo-audio__state is-playing">再生中…（デモ）</span>
+              <span v-if="isPlaying(`${dialog.id}:all`)" class="jp-demo-audio__state is-playing">再生中…</span>
             </div>
             <div class="jp-demo-dialog">
               <div v-for="line in dialog.lines" :key="line.id" class="jp-demo-dialog__line" data-demo-dialog-line>
@@ -459,7 +453,7 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
                 </div>
                 <span class="jp-demo-array-actions">
                   <button
-                    type="button" class="jp-demo-linkbtn" :aria-label="`${line.speaker} のせりふを再生（デモ）`"
+                    type="button" class="jp-demo-linkbtn" :aria-label="`${line.speaker} のせりふを再生`"
                     @click="playDialogLine(dialog.id, line.id)"
                   >
                     <AppIcon name="play" size="sm" />
@@ -470,7 +464,7 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
             </div>
           </article>
           <p v-if="dialogs.length === 0 && !partial" class="jp-hint">会話はまだありません。</p>
-          <p v-else-if="partial" class="jp-hint">（デモ表示設定で一部の内容を隠しています）</p>
+          <p v-else-if="partial" class="jp-hint">（一部の項目は未登録です）</p>
         </div>
       </div>
 
@@ -567,9 +561,9 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
               {{ pronunciation.reading }}
               <span class="jp-demo-array-actions">
                 <button type="button" class="jp-demo-linkbtn" data-demo-study-sound @click="playDemo('pron')">
-                  <AppIcon name="play" size="sm" /> 再生（デモ）
+                  <AppIcon name="play" size="sm" /> 再生
                 </button>
-                <span v-if="isPlaying('pron')" class="jp-demo-audio__state is-playing">再生中…（デモ）</span>
+                <span v-if="isPlaying('pron')" class="jp-demo-audio__state is-playing">再生中…</span>
               </span>
             </p>
             <!-- アクセントは確認できたものだけ出す。未確認は「未確認」と書く -->
@@ -580,13 +574,13 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
               </template>
               <template v-else>
                 <span class="badge badge--neutral">未確認</span>
-                この語のアクセントは確認できていないので、デモでは表示しません。
+                この語のアクセントは確認できていないため、表示していません。
               </template>
             </p>
             <p v-if="pronunciation.hint" class="jp-demo-zh">{{ pronunciation.hint }}</p>
           </article>
 
-          <p v-if="partial" class="jp-hint">（デモ表示設定で一部の内容を隠しています）</p>
+          <p v-if="partial" class="jp-hint">（一部の項目は未登録です）</p>
 
           <article v-if="collocations.length > 0" class="jp-demo-pair">
             <span class="jp-demo-pair__label">よく使う言い回し</span>
@@ -658,9 +652,9 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
                   type="button" class="jp-demo-linkbtn" data-demo-quiz-feedback
                   :disabled="feedbackShown.includes(question.id)" @click="showFeedback(question)"
                 >
-                  模擬フィードバックを見る（デモ）
+                  フィードバックを見る
                 </button>
-                <span class="jp-demo-meta">実際の添削は行いません（用意した見本を出します）</span>
+                <span class="jp-demo-meta">参考として、文法・自然さ・別の言い方を示します</span>
               </div>
               <div v-if="feedbackShown.includes(question.id) && question.demoFeedback" class="jp-demo-pair" data-demo-quiz-feedback-panel>
                 <p class="jp-demo-zh"><strong>文法：</strong>{{ question.demoFeedback.grammar }}</p>
@@ -673,13 +667,5 @@ function patternParts(pattern: string): { text: string; emphasis: boolean }[] {
         </div>
       </div>
     </section>
-
-    <p class="jp-demo__notice">
-      <AppIcon name="info" size="sm" />
-      <span>
-        この学習画面は<strong>確認用のプレビュー</strong>です。テストの作成、学習回数・習得度・復習日の記録は行いません
-        （正式開発では、学習画面の表示部分を共通部品として単語テストと共有する想定です）。
-      </span>
-    </p>
   </div>
 </template>

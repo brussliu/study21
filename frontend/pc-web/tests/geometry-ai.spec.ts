@@ -190,6 +190,7 @@ describe('図形管理の一覧に出す AI 生図のタスク', () => {
       errorMessage: null,
       hasCroppedImage: true,
       retryCount: 0,
+      version: 4,
       createdAt: '2026-09-14T12:00:00',
       updatedAt: '2026-09-14T12:05:00',
       ...overrides
@@ -251,6 +252,70 @@ describe('図形管理の一覧に出す AI 生図のタスク', () => {
   function tasksArea(wrapper: VueWrapper): string {
     return wrapper.get('[data-gm-ai-tasks]').text()
   }
+
+  it('カードの【削除】は確認してから消し、一覧を取り直す', async () => {
+    // window.confirm は引数を 1 つ取る（型は () => boolean なので、呼び出しの記録だけ見る）
+    const confirmMock = vi.fn((_message?: string) => true)
+    vi.stubGlobal('confirm', confirmMock)
+    const deleted: string[] = []
+    const { wrapper } = await setup({
+      tasks: [
+        task({ requestId: 31, status: 'READY', statusLabel: '生成済み・確認待ち', cardStatus: 'READY', cardStatusLabel: '生成済み・確認待ち', version: 7 }),
+        task({ requestId: 32, requestNo: 'AIG202609141200005678', status: 'FAILED', statusLabel: '失敗', cardStatus: 'FAILED', cardStatusLabel: '失敗', version: 3 })
+      ]
+    })
+    // 削除の API 呼び出しを記録する（http クライアントは fetch を通る）
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const target = String(url)
+      if (target.includes('/geometry/ai/requests/') && target.endsWith('/discard')) {
+        deleted.push(`${target} ${String(init?.body)}`)
+        return ok({ requestId: 31, requestNo: 'AIG202609141200001234', status: 'CANCELLED', statusLabel: '取消', version: 8, runPath: '' }, 'AI 生図のタスクを一覧から消しました。')
+      }
+      return ok({ count: 0, message: 'OK' })
+    })
+
+    const removeButton = wrapper.get('[data-gm-ai-task="31"] [data-gm-ai-task-delete]')
+    // アイコンだけ（意味は title と aria-label で伝える）
+    expect(removeButton.text()).toBe('')
+    expect(removeButton.attributes('title')).toContain('削除')
+    expect(removeButton.attributes('aria-label')).toContain('AIG202609141200001234')
+
+    await removeButton.trigger('click')
+    await flushPromises()
+
+    // 確認してから消す（図形の削除と同じ）
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(String(confirmMock.mock.calls[0][0])).toContain('AIG202609141200001234')
+    // 版数を付けて消す（楽観的ロック）
+    expect(deleted).toHaveLength(1)
+    expect(deleted[0]).toContain('/geometry/ai/requests/31/discard')
+    expect(deleted[0]).toContain('"version":7')
+    expect(useToast().items.map((item) => item.message).join(' ')).toContain('一覧から消しました')
+  })
+
+  it('確認をやめたら消さない', async () => {
+    const confirmMock = vi.fn((_message?: string) => false)
+    vi.stubGlobal('confirm', confirmMock)
+    const deleted: string[] = []
+    const { wrapper } = await setup({ tasks: [task({ status: 'READY', cardStatus: 'READY' })] })
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/discard')) deleted.push(String(url))
+      return ok({ count: 0, message: 'OK' })
+    })
+
+    await wrapper.get('[data-gm-ai-task-delete]').trigger('click')
+    await flushPromises()
+
+    expect(confirmMock).toHaveBeenCalledTimes(1)
+    expect(deleted).toHaveLength(0)
+  })
+
+  it('処理中のカードにも【削除】は出す（片付けられる）', async () => {
+    const { wrapper } = await setup({ tasks: [task({ status: 'GENERATING', cardStatus: 'GENERATING' })] })
+
+    expect(wrapper.find('[data-gm-ai-task="31"] [data-gm-ai-task-open]').exists()).toBe(false)
+    expect(wrapper.find('[data-gm-ai-task="31"] [data-gm-ai-task-delete]').exists()).toBe(true)
+  })
 
   beforeEach(() => {
     useToast().items.splice(0)
@@ -391,7 +456,7 @@ describe('図形管理の一覧に出す AI 生図のタスク', () => {
     expect(appRouter.currentRoute.value.query.requestId).toBe('42')
   })
 
-  it('生成できたカードは【作図を確認する】で作図画面を要求 ID つきで開く', async () => {
+  it('生成できたカードは【作図を確認する】アイコンで作図画面を要求 ID つきで開く', async () => {
     const { wrapper, appRouter } = await setup({
       tasks: [task({
         status: 'READY',
@@ -403,8 +468,11 @@ describe('図形管理の一覧に出す AI 生図のタスク', () => {
       })]
     })
 
+    // カードの操作はアイコンだけ（意味は title と aria-label で伝える）
     const open = wrapper.get('[data-gm-ai-task-open]')
-    expect(open.text()).toBe('作図を確認する')
+    expect(open.text()).toBe('')
+    expect(open.attributes('title')).toBe('作図を確認する')
+    expect(open.attributes('aria-label')).toBe('作図を確認する')
     // 保存完了ではないので success（緑）にはしない
     expect(wrapper.get('[data-gm-ai-task="31"] [data-gm-ai-task-status-label]').classes())
       .toContain('badge--info')

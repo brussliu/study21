@@ -24,6 +24,13 @@ public class BatchExecutionEntity {
     private Long durationMs;
     /** 異常終了時のスタックトレースなど */
     private String errorDetail;
+
+    /**
+     * 再起動の復旧で「この実行をやり直すために作った実行」の**元の実行ID**。
+     * 通常の実行では null。DB 側は部分一意索引（NULL 以外）で
+     * 「同じ元実行からやり直しは 1 つだけ」を保証する。
+     */
+    private Long sourceExecutionId;
     private String scheduleTime;
     private String startTime;
     private String endTime;
@@ -157,5 +164,14 @@ public class BatchExecutionEntity {
 
     public void setErrorDetail(String errorDetail) {
         this.errorDetail = errorDetail;
+    }
+
+    /** 再起動の復旧でやり直しを作ったときの元の実行ID（通常は null）。 */
+    public Long getSourceExecutionId() {
+        return sourceExecutionId;
+    }
+
+    public void setSourceExecutionId(Long sourceExecutionId) {
+        this.sourceExecutionId = sourceExecutionId;
     }
 }

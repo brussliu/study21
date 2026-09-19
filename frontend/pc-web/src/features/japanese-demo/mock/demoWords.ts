@@ -22,7 +22,7 @@ import type { DemoBook, DemoWord } from '../types'
 export const DEMO_BOOKS: DemoBook[] = [
   {
     id: 'book-demo-basic',
-    name: 'デモ日本語 初級',
+    name: 'みんなの日本語 初級',
     unitSize: 20,
     units: [
       { name: 'Unit001', count: 20, capacity: 20 },
@@ -70,7 +70,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-toshokan-col-1', book: 'デモ日本語 初級', unit: 'Unit001', seq: 5, listedWord: '図書館', listedReading: 'としょかん', listedChinese: '图书馆' },
+      { id: 'w-toshokan-col-1', book: 'みんなの日本語 初級', unit: 'Unit001', seq: 5, listedWord: '図書館', listedReading: 'としょかん', listedChinese: '图书馆' },
       { id: 'w-toshokan-col-2', book: '学校生活のことば', unit: 'Unit001', seq: 12, listedWord: '図書館', listedReading: 'としょかん', listedChinese: '图书馆；（学校的）图书室' }
     ],
     detail: {
@@ -172,7 +172,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-soudan-col-1', book: 'デモ日本語 初級', unit: 'Unit002', seq: 4, listedWord: '相談', listedReading: 'そうだん', listedChinese: '商量' }
+      { id: 'w-soudan-col-1', book: 'みんなの日本語 初級', unit: 'Unit002', seq: 4, listedWord: '相談', listedReading: 'そうだん', listedChinese: '商量' }
     ],
     detail: {
       coreMeaning: '困ったことや決められないことを人に話して、意見や助けを求めること。',
@@ -227,7 +227,7 @@ export const DEMO_WORDS: DemoWord[] = [
       ],
       conjugations: [],
       transitivityPair: null,
-      pronunciation: { reading: 'そうだん', accentType: null, accentNotation: null, hint: '「そうだん」は「そ・う・だ・ん」の4拍です。アクセントの型は資料によって扱いが分かれるため、このデモでは表示していません。単語だけで覚えず、「そうだんする」の形でリズムを取ると安定します。', hasAudioSample: false },
+      pronunciation: { reading: 'そうだん', accentType: null, accentNotation: null, hint: '「そうだん」は「そ・う・だ・ん」の4拍です。アクセントの型は資料によって扱いが分かれるため、ここでは表示していません。単語だけで覚えず、「そうだんする」の形でリズムを取ると安定します。', hasAudioSample: false },
       collocations: [
         { id: 'w-soudan-coll-1', expression: '相談に乗る', reading: 'そうだんに のる', chinese: '接受商量、帮忙出主意', usage: '人が悩んでいるとき' },
         { id: 'w-soudan-coll-2', expression: '相談がまとまる', reading: 'そうだんが まとまる', chinese: '商量出结果、谈妥', usage: '打ち合わせや交渉のあと' }
@@ -260,7 +260,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-junbi-col-1', book: 'デモ日本語 初級', unit: 'Unit002', seq: 11, listedWord: '準備', listedReading: 'じゅんび', listedChinese: '准备' },
+      { id: 'w-junbi-col-1', book: 'みんなの日本語 初級', unit: 'Unit002', seq: 11, listedWord: '準備', listedReading: 'じゅんび', listedChinese: '准备' },
       { id: 'w-junbi-col-2', book: '学校生活のことば', unit: 'Unit003', seq: 2, listedWord: '準備', listedReading: 'じゅんび', listedChinese: '准备（上课前）' }
     ],
     detail: null,
@@ -279,7 +279,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-shukudai-col-1', book: 'デモ日本語 初級', unit: 'Unit001', seq: 3, listedWord: '宿題', listedReading: 'しゅくだい', listedChinese: '作业' }
+      { id: 'w-shukudai-col-1', book: 'みんなの日本語 初級', unit: 'Unit001', seq: 3, listedWord: '宿題', listedReading: 'しゅくだい', listedChinese: '作业' }
     ],
     detail: {
       coreMeaning: '学校で出されて、家でやってくる課題。',
@@ -342,7 +342,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-benkyou-col-1', book: 'デモ日本語 初級', unit: 'Unit002', seq: 3, listedWord: '勉強', listedReading: 'べんきょう', listedChinese: '学习' },
+      { id: 'w-benkyou-col-1', book: 'みんなの日本語 初級', unit: 'Unit002', seq: 3, listedWord: '勉強', listedReading: 'べんきょう', listedChinese: '学习' },
       { id: 'w-benkyou-col-2', book: '学校生活のことば', unit: 'Unit001', seq: 1, listedWord: '勉強する', listedReading: 'べんきょうする', listedChinese: '学习；用功' },
       { id: 'w-benkyou-col-3', book: '日常会話ステップアップ', unit: 'Unit002', seq: 2, listedWord: '勉強', listedReading: 'べんきょう', listedChinese: '学习' }
     ],
@@ -438,7 +438,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-aku-col-1', book: 'デモ日本語 初級', unit: 'Unit003', seq: 6, listedWord: '開く', listedReading: 'あく', listedChinese: '开（门、窗）' },
+      { id: 'w-aku-col-1', book: 'みんなの日本語 初級', unit: 'Unit003', seq: 6, listedWord: '開く', listedReading: 'あく', listedChinese: '开（门、窗）' },
       { id: 'w-aku-col-2', book: '学校生活のことば', unit: 'Unit002', seq: 5, listedWord: '開く', listedReading: 'あく・ひらく', listedChinese: '开；打开（同一表记有两种读音）' }
     ],
     detail: {
@@ -522,7 +522,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-hiraku-col-1', book: 'デモ日本語 初級', unit: 'Unit004', seq: 2, listedWord: '開く', listedReading: 'ひらく', listedChinese: '翻开；举行' }
+      { id: 'w-hiraku-col-1', book: 'みんなの日本語 初級', unit: 'Unit004', seq: 2, listedWord: '開く', listedReading: 'ひらく', listedChinese: '翻开；举行' }
     ],
     detail: {
       coreMeaning: '閉じているものを広げたり、会や店などを始めたりすること。',
@@ -592,7 +592,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-akeru-col-1', book: 'デモ日本語 初級', unit: 'Unit002', seq: 17, listedWord: '開ける', listedReading: 'あける', listedChinese: '打开' },
+      { id: 'w-akeru-col-1', book: 'みんなの日本語 初級', unit: 'Unit002', seq: 17, listedWord: '開ける', listedReading: 'あける', listedChinese: '打开' },
       { id: 'w-akeru-col-2', book: '学校生活のことば', unit: 'Unit002', seq: 3, listedWord: '開ける', listedReading: 'あける', listedChinese: '打开（窗、门）' }
     ],
     detail: {
@@ -690,7 +690,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-narau-col-1', book: 'デモ日本語 初級', unit: 'Unit003', seq: 7, listedWord: '習う', listedReading: 'ならう', listedChinese: '学（跟人学）' }
+      { id: 'w-narau-col-1', book: 'みんなの日本語 初級', unit: 'Unit003', seq: 7, listedWord: '習う', listedReading: 'ならう', listedChinese: '学（跟人学）' }
     ],
     detail: {
       coreMeaning: '教えてくれる人から、やり方や知識を身につける。',
@@ -774,7 +774,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-manabu-col-1', book: 'デモ日本語 初級', unit: 'Unit004', seq: 5, listedWord: '学ぶ', listedReading: 'まなぶ', listedChinese: '学习（学到）' }
+      { id: 'w-manabu-col-1', book: 'みんなの日本語 初級', unit: 'Unit004', seq: 5, listedWord: '学ぶ', listedReading: 'まなぶ', listedChinese: '学习（学到）' }
     ],
     detail: {
       coreMeaning: '勉強や経験を通して、知識や考え方を身につける。',
@@ -844,7 +844,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-soudan-suru-col-1', book: 'デモ日本語 初級', unit: 'Unit003', seq: 9, listedWord: '相談する', listedReading: 'そうだんする', listedChinese: '商量' },
+      { id: 'w-soudan-suru-col-1', book: 'みんなの日本語 初級', unit: 'Unit003', seq: 9, listedWord: '相談する', listedReading: 'そうだんする', listedChinese: '商量' },
       { id: 'w-soudan-suru-col-2', book: '日常会話ステップアップ', unit: 'Unit002', seq: 1, listedWord: '相談する', listedReading: 'そうだんする', listedChinese: '商量一下；咨询' }
     ],
     detail: {
@@ -952,7 +952,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: '生成サービスが応答しませんでした。時間をおいて再試行してください。',
     manuallyEdited: false,
     collections: [
-      { id: 'w-maniau-col-1', book: 'デモ日本語 初級', unit: 'Unit003', seq: 14, listedWord: '間に合う', listedReading: 'まにあう', listedChinese: '赶得上；来得及' },
+      { id: 'w-maniau-col-1', book: 'みんなの日本語 初級', unit: 'Unit003', seq: 14, listedWord: '間に合う', listedReading: 'まにあう', listedChinese: '赶得上；来得及' },
       { id: 'w-maniau-col-2', book: '日常会話ステップアップ', unit: 'Unit001', seq: 6, listedWord: '間にあう', listedReading: 'まにあう', listedChinese: '来得及' }
     ],
     detail: null,
@@ -972,7 +972,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-isogashii-col-1', book: 'デモ日本語 初級', unit: 'Unit001', seq: 10, listedWord: '忙しい', listedReading: 'いそがしい', listedChinese: '忙' }
+      { id: 'w-isogashii-col-1', book: 'みんなの日本語 初級', unit: 'Unit001', seq: 10, listedWord: '忙しい', listedReading: 'いそがしい', listedChinese: '忙' }
     ],
     detail: {
       coreMeaning: 'やることが多くて、時間や心の余裕がない。',
@@ -1059,7 +1059,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-yasashii-col-1', book: 'デモ日本語 初級', unit: 'Unit001', seq: 14, listedWord: '優しい', listedReading: 'やさしい', listedChinese: '温柔' }
+      { id: 'w-yasashii-col-1', book: 'みんなの日本語 初級', unit: 'Unit001', seq: 14, listedWord: '優しい', listedReading: 'やさしい', listedChinese: '温柔' }
     ],
     detail: {
       coreMeaning: '相手を思いやって、穏やかに接する様子。',
@@ -1090,7 +1090,7 @@ export const DEMO_WORDS: DemoWord[] = [
       ],
       conjugations: [],
       transitivityPair: null,
-      pronunciation: { reading: 'やさしい', accentType: null, accentNotation: null, hint: '「やさしい」は4拍です。アクセントの型は資料によって扱いが分かれるため、このデモでは表示していません。「優しい」と「易しい」は同じ読みなので、文脈で区別します。', hasAudioSample: false },
+      pronunciation: { reading: 'やさしい', accentType: null, accentNotation: null, hint: '「やさしい」は4拍です。アクセントの型は資料によって扱いが分かれるため、ここでは表示していません。「優しい」と「易しい」は同じ読みなので、文脈で区別します。', hasAudioSample: false },
       collocations: [
         { id: 'w-yasashii-coll-1', expression: '人に優しい', reading: 'ひとに やさしい', chinese: '待人温柔', usage: '人物の紹介' },
         { id: 'w-yasashii-coll-2', expression: '優しい味', reading: 'やさしい あじ', chinese: '味道柔和、不刺激', usage: '料理の感想' }
@@ -1228,7 +1228,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-taisetsu-col-1', book: 'デモ日本語 初級', unit: 'Unit002', seq: 8, listedWord: '大切', listedReading: 'たいせつ', listedChinese: '重要' }
+      { id: 'w-taisetsu-col-1', book: 'みんなの日本語 初級', unit: 'Unit002', seq: 8, listedWord: '大切', listedReading: 'たいせつ', listedChinese: '重要' }
     ],
     detail: {
       coreMeaning: '価値が高く、いいかげんに扱えない様子。',
@@ -1258,7 +1258,7 @@ export const DEMO_WORDS: DemoWord[] = [
       ],
       conjugations: [],
       transitivityPair: null,
-      pronunciation: { reading: 'たいせつ', accentType: null, accentNotation: null, hint: '「たいせつ」は4拍です。アクセントの型は資料によって扱いが分かれるため、このデモでは表示していません。', hasAudioSample: false },
+      pronunciation: { reading: 'たいせつ', accentType: null, accentNotation: null, hint: '「たいせつ」は4拍です。アクセントの型は資料によって扱いが分かれるため、ここでは表示していません。', hasAudioSample: false },
       collocations: [
         { id: 'w-taisetsu-coll-1', expression: '大切にする', reading: 'たいせつに する', chinese: '珍惜、爱惜', usage: '物や人を大事に扱うとき' },
         { id: 'w-taisetsu-coll-2', expression: '大切な人', reading: 'たいせつな ひと', chinese: '重要的人、珍视的人', usage: '気持ちを伝えるとき' }
@@ -1400,7 +1400,7 @@ export const DEMO_WORDS: DemoWord[] = [
     failureReason: null,
     manuallyEdited: false,
     collections: [
-      { id: 'w-machiawaseru-col-1', book: 'デモ日本語 初級', unit: 'Unit004', seq: 18, listedWord: '待ち合わせる', listedReading: 'まちあわせる', listedChinese: '碰头' },
+      { id: 'w-machiawaseru-col-1', book: 'みんなの日本語 初級', unit: 'Unit004', seq: 18, listedWord: '待ち合わせる', listedReading: 'まちあわせる', listedChinese: '碰头' },
       { id: 'w-machiawaseru-col-2', book: '日常会話ステップアップ', unit: 'Unit002', seq: 5, listedWord: '待ち合わせる', listedReading: 'まちあわせる', listedChinese: '（约好）碰头、会合' }
     ],
     detail: null,
@@ -1423,4 +1423,4 @@ export const DEMO_PASTE_SAMPLE = `引っ越し\tひっこし\t搬家
 これはタブ区切りではありません`
 
 /** 「新規登録」のデモで使う新規書籍名の初期値 */
-export const DEMO_NEW_BOOK_NAME = 'デモ日本語 初中級'
+export const DEMO_NEW_BOOK_NAME = 'みんなの日本語 初中級'
