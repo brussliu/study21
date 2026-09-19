@@ -97,6 +97,8 @@ public class BatchScheduleController {
         payload.put("recoveryPhase", recoveryStatus.phase().name());
         payload.put("recoveryPhaseLabel", recoveryStatus.phaseLabel());
         payload.put("recoveryPendingCount", recoveryStatus.pendingCount());
+        // このプロセスの起動識別子（復旧の境界。実行記録の帰属と突き合わせる値）
+        payload.put("batchRunId", recoveryStatus.runId());
         payload.put("pendingSubmissions", executor.pendingSubmissionCount());
         payload.put("checkIntervalSeconds", 30);
         payload.put("runningWorkers", executor.activeCount());

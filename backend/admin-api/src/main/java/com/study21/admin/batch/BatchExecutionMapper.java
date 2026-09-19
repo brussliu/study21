@@ -57,23 +57,22 @@ public interface BatchExecutionMapper {
     List<BatchExecutionEntity> findUnfinished();
 
     /**
-     * **起動の境界まで**の未完了（待機中・実行中）の実行を古い順に返す。
+     * 再起動の復旧: **前のプロセスが残した**未完了（待機中・実行中）の実行を古い順に返す。
      *
-     * <p>再起動の復旧が対象にするのは「このプロセスが始まる前に作られた実行」だけ。
-     * 境界（{@link #findMaxExecutionId()} を起動時に読んだ値）より新しい実行は
-     * **このプロセス自身が作ったもの**なので、復旧の対象にしてはいけない
-     * （実行中の自分の実行を「落ちた実行」と誤解して、二重に走らせてしまう）。</p>
+     * <p>判定は実行ID の大小ではなく**実行記録の帰属**（{@code 起動識別子}）で行う。</p>
+     * <ul>
+     *   <li>{@code 起動識別子 <> runId} … 前のプロセスの遺留（復旧の対象）</li>
+     *   <li>{@code 起動識別子 IS NULL} … この列が無かった頃の行（互換規則。遺留として扱う）</li>
+     * </ul>
      *
-     * @param boundaryExecutionId 起動時に読んだ「そのときの最大の実行ID」
+     * <p>ID の大小で選ぶと、最初の読み込みが失敗して再試行する間に現在のプロセスが作った実行を
+     * 遺留と誤認し、**実行中の自分の実行を閉じたり二重に走らせたり**する。帰属で選べば、
+     * 読み直しを何度しても自分の実行は入らない。値は
+     * {@link BatchExecutionRunIdInterceptor} がすべての挿入に刻む。</p>
+     *
+     * @param runId このプロセスの起動識別子（{@link ProcessRunId#value()}）
      */
-    List<BatchExecutionEntity> findUnfinishedBefore(@Param("boundaryExecutionId") long boundaryExecutionId);
-
-    /**
-     * いまの最大の実行ID（起動の境界を決めるために起動時に 1 回だけ読む）。
-     *
-     * <p>実行が 1 件も無ければ 0。</p>
-     */
-    long findMaxExecutionId();
+    List<BatchExecutionEntity> findLeftoversExceptRunId(@Param("runId") String runId);
 
     /**
      * 未完了（待機中・実行中）のときだけ閉じる（復旧の**条件つきの確保**）。

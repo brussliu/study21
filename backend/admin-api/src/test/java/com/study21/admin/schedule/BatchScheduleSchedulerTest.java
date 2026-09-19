@@ -56,6 +56,8 @@ class BatchScheduleSchedulerTest {
             super(mock(com.study21.admin.batch.BatchExecutionMapper.class), triggerStore,
                     mock(BatchScheduleExecutor.class), catalog,
                     new SchedulePlanGuard(catalog, triggerStore), mock(ScheduleConfigService.class),
+                    new com.study21.admin.batch.ProcessRunId(
+                            Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE)),
                     Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE));
         }
 

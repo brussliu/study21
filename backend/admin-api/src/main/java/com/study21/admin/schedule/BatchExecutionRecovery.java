@@ -3,6 +3,7 @@ package com.study21.admin.schedule;
 import com.study21.admin.batch.BatchExecutionEntity;
 import com.study21.admin.batch.BatchExecutionMapper;
 import com.study21.admin.batch.BatchExecutionStatus;
+import com.study21.admin.batch.ProcessRunId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -52,20 +53,24 @@ import java.util.Set;
  * そこで段階を持つ:</p>
  *
  * <ol>
- *   <li>{@link Phase#PENDING_DISCOVERY} … 起動時に「遺留リスト」と**境界**をまだ読めていない。
+ *   <li>{@link Phase#PENDING_DISCOVERY} … 前のプロセスが残した実行（遺留）をまだ読めていない。
  *       30 秒の検査のたびに（退避しながら）読み直す。</li>
  *   <li>{@link Phase#PENDING_REVIEW} … 遺留リストは読めた（**この時点で固定**）。設定が読めない等で
  *       まだ判定できない行が残っている。30 秒の検査のたびに（退避しながら）同じリストを判定し直す。</li>
  *   <li>{@link Phase#COMPLETED} … すべて処理した。**以後は DB を引かない**（無駄な問い合わせをしない）。</li>
  * </ol>
  *
- * <p><b>復旧の境界</b>: 対象は「このプロセスが始まる前に作られた実行」だけ。起動時に
- * そのときの最大の実行ID を読み、それを**境界**として遺留リストを確定する
- * （{@link BatchExecutionMapper#findUnfinishedBefore(long)}）。境界より新しい実行は
- * このプロセス自身が作ったものなので、**復旧の対象にしない**（実行中の自分の実行を
- * 「落ちた実行」と誤解すると二重に走らせてしまう）。境界は**最初に読めた値で固定**し、
- * 途中で読み直しても変えない。DB が読めない間は自分の実行も作れない（同じ DB を使う）ため、
- * 最初に成功した境界が「起動前の実行」の上限として正しい。</p>
+ * <p><b>復旧の境界は「実行記録の帰属」で決める</b>: 対象は「**前のプロセスが残した実行**」だけ。
+ * 実行記録には作ったプロセスの起動識別子（{@link com.study21.admin.batch.ProcessRunId}）が
+ * 挿入時に自動で刻まれていて（{@code BatchExecutionRunIdInterceptor}）、復旧は
+ * {@link BatchExecutionMapper#findLeftoversExceptRunId(String)} で
+ * **現在の識別子と違う行だけ**を遺留として引く。</p>
+ *
+ * <p>「起動時に読んだ最大の実行ID より古い行」で選ばない理由: 最初の読み込みが失敗して
+ * 再試行する間に現在のプロセスが実行を作ると、その実行が境界の内側に入ってしまい、
+ * **実行中の自分の実行を遺留と誤認して閉じる／二重に走らせる**。帰属で選べば、
+ * 読み直しを何度しても自分の実行は入らない（境界を「固定」する必要も無い）。
+ * 履歴の 起動識別子 が NULL の行（この列が無かった頃の行）は互換のため遺留として扱う。</p>
  *
  * <p>同じ遺留の行を 2 回処理しないよう、処理は 1 本に直列化し（{@code synchronized}）、
  * 行は**処理が確定した時点でリストから外す**。加えて DB 側でも
@@ -87,7 +92,7 @@ public class BatchExecutionRecovery {
 
     /** 復旧の段階。 */
     public enum Phase {
-        /** 起動の遺留リスト（と境界）をまだ読めていない。 */
+        /** 前のプロセスが残した実行（遺留）をまだ読めていない。 */
         PENDING_DISCOVERY("遺留の確認待ち"),
         /** 遺留リストは読めたが、設定が読めない等でまだ判定できない行が残っている。 */
         PENDING_REVIEW("計画の判定待ち"),
@@ -130,13 +135,13 @@ public class BatchExecutionRecovery {
     private final ScheduleRuleCatalog catalog;
     private final SchedulePlanGuard planGuard;
     private final ScheduleConfigService configService;
+    private final ProcessRunId processRunId;
     private final Clock clock;
 
     /** 処理を 1 本に直列化する（起動イベント・周期検査・手動の再読み込みが同時に来ても 1 件ずつ）。 */
     private final Object lock = new Object();
     private final Set<Long> leftoverIds = new LinkedHashSet<>();
     private Phase phase = Phase.PENDING_DISCOVERY;
-    private Long boundaryExecutionId;
     private Instant nextAttemptAt = Instant.EPOCH;
     private int attempts;
     private int processed;
@@ -149,8 +154,9 @@ public class BatchExecutionRecovery {
                                   BatchScheduleExecutor executor,
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
-                                  ScheduleConfigService configService) {
-        this(executionMapper, triggerStore, executor, catalog, planGuard, configService,
+                                  ScheduleConfigService configService,
+                                  ProcessRunId processRunId) {
+        this(executionMapper, triggerStore, executor, catalog, planGuard, configService, processRunId,
                 Clock.system(ScheduleConfigService.ZONE));
     }
 
@@ -161,6 +167,7 @@ public class BatchExecutionRecovery {
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
                                   ScheduleConfigService configService,
+                                  ProcessRunId processRunId,
                                   Clock clock) {
         this.executionMapper = executionMapper;
         this.triggerStore = triggerStore;
@@ -168,6 +175,7 @@ public class BatchExecutionRecovery {
         this.catalog = catalog;
         this.planGuard = planGuard;
         this.configService = configService;
+        this.processRunId = processRunId;
         this.clock = clock;
     }
 
@@ -207,7 +215,7 @@ public class BatchExecutionRecovery {
     /** いまの復旧の状態（画面・ログ用）。 */
     public RecoveryStatus status() {
         synchronized (lock) {
-            return new RecoveryStatus(phase, phase.label(), boundaryExecutionId,
+            return new RecoveryStatus(phase, phase.label(), processRunId.value(),
                     leftoverIds.size(), processed, skipped, retried);
         }
     }
@@ -257,7 +265,13 @@ public class BatchExecutionRecovery {
     }
 
     /**
-     * 起動の遺留リストと境界を確定する（**1 回だけ**。失敗したら次の周期でやり直す）。
+     * 前のプロセスが残した実行（遺留）を確定する（失敗したら次の周期でやり直す）。
+     *
+     * <p><b>境界は「実行ID の大小」ではなく「実行記録の帰属」で決める</b>
+     * （{@code 起動識別子} が現在のプロセスと違う行だけを遺留とする）。ID の大小で選ぶと、
+     * 最初の読み込みが失敗して再試行する間に現在のプロセスが作った実行を遺留と誤認し、
+     * 実行中の自分の実行を閉じたり二重に走らせたりする。帰属で選べば、読み直しを何度しても
+     * **自分の実行は絶対に入らない**（境界の固定という概念が要らない）。</p>
      *
      * <p>設定も一緒に読んでおく（読めなければ判定は保留になる）。</p>
      */
@@ -265,21 +279,20 @@ public class BatchExecutionRecovery {
         // 設定は先に読んでおく（托底。読めなくても遺留リストは読む）
         configService.ensureUsableConfig();
 
-        long boundary = executionMapper.findMaxExecutionId();
-        List<BatchExecutionEntity> unfinished = executionMapper.findUnfinishedBefore(boundary);
-        boundaryExecutionId = boundary;
+        String runId = processRunId.value();
+        List<BatchExecutionEntity> leftovers = executionMapper.findLeftoversExceptRunId(runId);
         leftoverIds.clear();
-        for (BatchExecutionEntity row : unfinished) {
+        for (BatchExecutionEntity row : leftovers) {
             leftoverIds.add(row.getExecutionId());
         }
         if (leftoverIds.isEmpty()) {
             phase = Phase.COMPLETED;
-            log.info("再起動で復旧すべき実行はありません。boundary={} reason={}", boundary, reason);
+            log.info("再起動で復旧すべき実行はありません。runId={} reason={}", runId, reason);
             return;
         }
         phase = Phase.PENDING_REVIEW;
         log.warn("再起動で中断した実行が見つかりました（1 件ずつ判定します）。"
-                + "boundary={} count={} ids={} reason={}", boundary, leftoverIds.size(), leftoverIds, reason);
+                + "runId={} count={} ids={} reason={}", runId, leftoverIds.size(), leftoverIds, reason);
     }
 
     /**
@@ -315,9 +328,12 @@ public class BatchExecutionRecovery {
         List<Long> waiting = new ArrayList<>();
         for (BatchExecutionEntity row : ordered) {
             long executionId = row.getExecutionId();
-            if (boundaryExecutionId != null && executionId > boundaryExecutionId) {
-                // 起動の境界より新しい = このプロセス自身が作った実行。復旧の対象にしない
+            if (processRunId.value().equals(row.getRunId())) {
+                // **このプロセスが作った実行**（実行中・待機中）。復旧の対象にしない
+                // （読み直しの間に増えても、帰属で必ず外れる。二重実行・実行中の行を閉じる事故を防ぐ）
                 leftoverIds.remove(executionId);
+                log.info("このプロセスが作った実行は復旧しません。executionId={} taskCode={} 状態={}",
+                        executionId, row.getBatchCode(), row.getStatus());
                 continue;
             }
             String status = row.getStatus();
@@ -450,13 +466,13 @@ public class BatchExecutionRecovery {
      *
      * @param phase              いまの段階
      * @param phaseLabel         画面に出す日本語
-     * @param boundaryExecutionId 起動の境界（この値より新しい実行は復旧の対象外）
+     * @param runId このプロセスの起動識別子（この値と違う実行だけを遺留として扱う）
      * @param pendingCount       まだ処理が確定していない遺留の数
      * @param processed          処理が確定した数
      * @param skipped            実行せずに閉じた数
      * @param retried            実行し直した数
      */
-    public record RecoveryStatus(Phase phase, String phaseLabel, Long boundaryExecutionId,
+    public record RecoveryStatus(Phase phase, String phaseLabel, String runId,
                                  int pendingCount, int processed, int skipped, int retried) {
     }
 }

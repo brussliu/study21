@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS public."BAT_バッチ実行履歴情報" (
     -- 同じ元実行から 2 つやり直しを作らないよう、**部分一意索引**（下）で守る
     -- （復旧は「旧実行を閉じる＋やり直しを作る」を 1 トランザクションで行う）
     "元実行ID"           BIGINT       NULL,
+    -- **どのプロセス（admin-api の起動）が作った実行か**を示す起動識別子。
+    -- 再起動の復旧は「前のプロセスが残した実行」だけを扱う（この値が現在のプロセスと違う行）。
+    -- NULL は「この列が無かった頃の行」＝ 旧構造の遺留として扱う（復旧の対象にする）
+    "起動識別子"         VARCHAR(40)  NULL,
     "登録日時"           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "更新日時"           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -97,6 +101,12 @@ COMMENT ON TABLE public."BAT_バッチ実行履歴情報" IS
     'バッチの実行履歴（1 行 = 1 実行）。有効／無効は BAT_バッチコントロール情報 が持つ';
 COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."バッチコード" IS 'バッチ定義（BatchTaskRegistry）のコード。例: batS01 / batC04 / batR03';
 COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."元実行ID" IS '再起動の復旧でやり直しを作ったときの元の実行ID（同じ元実行から 1 つだけ）';
+COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."起動識別子" IS '実行記録を作ったプロセスの起動識別子。再起動の復旧は「現在と違う値（NULL を含む）」だけを遺留として扱う';
+
+-- 再起動の復旧が「前のプロセスの遺留」を引くための索引（未完了だけ）。
+CREATE INDEX IF NOT EXISTS idx_bat_history_leftover
+    ON public."BAT_バッチ実行履歴情報" ("状態", "起動識別子")
+    WHERE "状態" IN ('QUEUED', 'RUNNING');
 COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."バッチ種別" IS 'C=呼出（随時） / L=循環（一定間隔） / R=定時 / S=システム起動時';
 COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."起動種別" IS '起動のされ方（C/L/R/S）';
 COMMENT ON COLUMN public."BAT_バッチ実行履歴情報"."状態" IS

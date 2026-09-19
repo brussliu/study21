@@ -230,16 +230,20 @@
 - 起動の順序は **設定の読み込み → この復旧 → 起動時バッチ**（`@Order` で明示）。
   逆にすると「設定が読めていない」で判定を保留してしまい、読み込みも 2 回になる。
 
-#### 復旧の境界（**このプロセスの実行を拾わない**）
+#### 復旧の境界（**実行記録の帰属**で決める。**このプロセスの実行は絶対に拾わない**）
 
-- 対象は「**このプロセスが始まる前に作られた実行**」だけ。起動時にそのときの
-  **最大の実行ID**（`findMaxExecutionId`）を読み、それを**境界**として遺留リストを確定する
-  （`findUnfinishedBefore`）。境界より新しい実行はこのプロセス自身が作ったものなので
-  **復旧の対象にしない**（実行中の自分の実行を「落ちた実行」と誤解すると二重に走らせてしまう）。
-- 境界と遺留リストは**最初に読めた値で固定**する。途中で読み直しても変えない
-  （初回の読み込みが失敗しても、次の読み直しで「自分の実行」が混ざらない）。
-- DB が読めない間は自分の実行も作れない（同じ DB を使う）ため、最初に成功した境界が
-  「起動前の実行」の上限として正しい。
+- 実行記録には、**それを作ったプロセスの起動識別子**（`起動識別子` 列・
+  `ProcessRunId`）が入る。挿入の直前に `BatchExecutionRunIdInterceptor`（MyBatis）が
+  **すべての入口**（自動スケジューラの確保・起動時バッチ・画面の【再実行】・復旧のやり直し）に
+  自動で刻む（入口ごとに設定する書き方にしない。足し忘れると復旧が自分の実行を誤認する）。
+- 復旧は `findLeftoversExceptRunId(自分の識別子)` で
+  **「起動識別子が NULL（この列が無かった頃の行＝互換）または自分と違う」**未完了の実行だけを引く。
+- これにより「最初の読み込みが失敗し、その間に現在のプロセスが実行を作り、再試行でそれを
+  遺留と誤認する」「最大ID は読めたが遺留リストの読み込みが失敗し、境界が広がる」という
+  穴が**構造的に**ふさがる（ID の大小や時刻では判定しない）。
+  判定の直前にもう一度帰属を見て、自分の実行はリストから外す（二重の守り）。
+- 履歴の `起動識別子` が NULL の行は互換規則で遺留として扱う（この列を入れる前の記録）。
+  **移行（列の追加）を先に、新しいアプリを後に配備する**。
 
 | 復旧前の状態 | 何が起きていたか | 復旧のしかた |
 |---|---|---|
@@ -254,6 +258,15 @@
 - 実行の直前にも**もう一度**判定する（`BatchScheduleExecutor`）。このときは
   **そのとき最新の 1 枚**を取り直す（待機中に設定が変わっていれば新しい設定で判断する）。
   無効なら理由を残して**スキップ**する（実行記録は残す）。
+
+#### 実行記録の入口と、帰属の刻み方（すべて `BatchExecutionRunIdInterceptor` が刻む）
+
+| 入口 | 実装 | 実行記録の作り方 |
+|---|---|---|
+| 自動スケジューラ（30 秒） | `BatchScheduleScheduler#runOnce` → `ScheduledTriggerStore#claimAndRecord` | 計画実行点を確保して `QUEUED` を作る |
+| 起動時バッチ | `BatchStartupRunner` → `BatchServiceImpl#runOnStartup` → `execute` | `RUNNING` を作ってから業務を実行 |
+| 画面の【再実行】 | `BatchController#rerun` → `BatchServiceImpl#rerun` → `execute` | 同上（種別 C は不可） |
+| 復旧のやり直し | `BatchExecutionRecovery` → `ScheduledTriggerStore#recoverRunningExecution` | 旧実行を閉じて `QUEUED` を作る（1 トランザクション） |
 
 #### 「閉じる＋やり直しを作る」は**1 トランザクション**（`ScheduledTriggerStore#recoverRunningExecution`）
 
@@ -319,6 +332,25 @@ batL03 は `最新版フラグ` の張り替え。**同じ計画実行点が二�
 | batR03 の LINE 通知 | 2.1 は**LINE 送信そのものが未実装**（設定キー `LINE_MESSAGING_*` だけ）。文面は作ってログと実行履歴に残す（送信を実装するときにそのまま使える） |
 | batL03 の二次判定（精密） | 2.1 の設定カタログに二次判定のキーが無いため一次判定のみ（`二次判定要否='0'` / `二次分析状態コード='NOT_REQUIRED'`）。必要になったら設定キーと一緒に足す |
 
+## 7-2. 移行と配備の順序（実行記録の列）
+
+実行記録の復旧に必要な列は**移行スクリプトで足す**（`CREATE TABLE IF NOT EXISTS` は
+既にある表に列を足さない）。
+
+| 移行スクリプト | 足すもの | 何のため |
+|---|---|---|
+| `MIG_BAT_実行履歴_元実行ID_20260920.sql` | `元実行ID`（NULL 可）＋ **部分一意索引** `UQ_BAT_実行履歴_元実行ID` | 復旧のやり直しは 1 つだけ（`insertRetryIfAbsent` の `ON CONFLICT` が依存） |
+| `MIG_BAT_実行履歴_起動識別子_20260920.sql` | `起動識別子`（VARCHAR(40)・NULL 可）＋ 遺留検索の索引 | 復旧の境界（実行記録の帰属） |
+
+- どちらも**冪等**（`ADD COLUMN IF NOT EXISTS` / `CREATE ... INDEX IF NOT EXISTS`）。
+  既存の実行記録は**変更しない**（既存行の `起動識別子` は NULL のまま＝互換規則で遺留として扱う）。
+- `元実行ID` に**重複がある**ときは、一意索引を作る前に**中止して件数を報告**する
+  （履歴は削除も変更もしない。利用者が内容を確認してから再実行する）。
+- **配備順序**: ① 移行（列と索引を足す。アプリはまだ新しくなくてよい）→ ② 新しいアプリを配備
+  （`起動識別子` を書き始める）。逆順（先にアプリ）だと、列が無いため実行記録の挿入が失敗する。
+- 新規環境は `database/バッチ/TBL_BAT_バッチ実行履歴情報.sql` が同じ形を作る
+  （移行後と一致することをテストで確認: `BatchExecutionMigrationTest`）。
+
 ## 8. 運用
 
 - **確認**: バッチ一覧の「実行タイミング」と、設定画面の実行スケジュール表示
@@ -379,6 +411,12 @@ batL03 は `最新版フラグ` の張り替え。**同じ計画実行点が二�
 | 4-23 | コミット後・投入前に落ちても、やり直しは次の復旧が拾える | `ScheduleRecoveryTransactionTest#retryRowSurvivesBeforeBeingDispatched`・`BatchExecutionRecoveryTest#retryRowCreatedByRecoveryIsPickedUpByTheNextStart` |
 | 4-24 | 待ち行列があふれても記録を閉じず、入り直す（漏執行にしない） | `BatchScheduleExecutorTest#rejectedSubmissionIsRetriedInsteadOfFailing` |
 | 4-25 | 設定の読み込みは**1 つのスナップショット**（途中で保存がコミットされても混ざらない） | `ScheduleConfigSnapshotConsistencyTest`（実 DB・同期バリア。`REPEATABLE_READ` が効いていることも見る） |
+| 4-27 | 復旧は**実行記録の帰属**で遺留を選ぶ（最初の読み込みが失敗して自分の実行が増えても、自分の実行は遺留に入らない） | `BatchExecutionRecoveryTest#discoveryFailureIsRetriedWithTheSameOwnershipFilter`・`#executionsCreatedByThisProcessAreNotRecovered`・`#ownExecutionIsDroppedAgainAtReviewTime` |
+| 4-28 | **すべての実行入口**（自動・起動時・手動・復旧のやり直し）で起動識別子が刻まれる | `BatchExecutionRunIdTest`（実 DB・4 入口） |
+| 4-29 | 起動識別子が NULL の古い記録は互換規則で遺留として扱う | `BatchExecutionRunIdTest#legacyRowsWithoutRunIdAreLeftovers` |
+| 4-30 | 移行: 古い構造から列と索引が増え、**既存の実行記録は変わらない／繰り返し実行できる** | `BatchExecutionMigrationTest#migratesOldStructureAndKeepsTheRows`（実 DB・出荷スクリプトをそのまま実行） |
+| 4-31 | 移行: `元実行ID` に重複があれば**中止して報告**（履歴を消さない・直さない） | `BatchExecutionMigrationTest#abortsWhenSourceExecutionIdHasDuplicates` |
+| 4-32 | 新規作成と移行後で表の形が同じ（列と部分一意索引がそろっている） | `BatchExecutionMigrationTest#theRealTableHasTheColumnsAndTheUniqueIndex` |
 | 4-26 | 1 回の判断が**1 枚のスナップショット**だけを使う（途中で入れ替わっても混ざらない） | `SchedulePlanGuardTest#usesOnlyTheGivenSnapshot`・`#networkAndIntervalDecisionsUseTheGivenSnapshot`、`BatchScheduleExecutorTest#beforeRunUsesTheLatestSnapshot` |
 | 4-15 | 設定が無い・不正のときは、画面に**理由と次に確認する時刻**を出す | `ScheduleConfigServiceTest`（`fallbackMessage` / `configMissingMessage`）・`batch-schedule-panel.spec.ts`（`task-fallback` / `schedule-config-missing`）、実機（設定画面） |
 | 5 | メモリ欠落時に DB から托底して回填する | `ScheduleConfigServiceTest#fallbackLoadsOnceForConcurrentMisses` |

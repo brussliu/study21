@@ -48,7 +48,7 @@ class BatchScheduleControllerTest {
         executor = mock(BatchScheduleExecutor.class);
         BatchExecutionRecovery recovery = mock(BatchExecutionRecovery.class);
         when(recovery.status()).thenReturn(new BatchExecutionRecovery.RecoveryStatus(
-                BatchExecutionRecovery.Phase.COMPLETED, "完了", 1234L, 0, 2, 1, 1));
+                BatchExecutionRecovery.Phase.COMPLETED, "完了", "20260920T021530-3f9a1c2b", 0, 2, 1, 1));
         BatchScheduleController controller = new BatchScheduleController(
                 configService, triggerStore, executor, mock(BatchScheduleScheduler.class), recovery);
         mockMvc = MockMvcBuilders.standaloneSetup(controller)

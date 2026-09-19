@@ -3,6 +3,7 @@ package com.study21.admin.schedule;
 import com.study21.admin.batch.BatchExecutionEntity;
 import com.study21.admin.batch.BatchExecutionMapper;
 import com.study21.admin.batch.BatchExecutionStatus;
+import com.study21.admin.batch.ProcessRunId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -51,7 +52,11 @@ class BatchExecutionRecoveryTest {
     /** 2026-09-20 09:00 JST（前夜 23:30 の停止と当日 06:30 の開始の両方が過ぎている）。 */
     private static final Instant NOW = Instant.parse("2026-09-20T00:00:00Z");
 
-    private static final long BOUNDARY = 5000L;
+    /** テストのプロセスの起動識別子（復旧の境界）。 */
+    private static final String CURRENT_RUN_ID = "20260920T090000-aaaaaaaa";
+
+    /** 前のプロセスの起動識別子（遺留の目印）。 */
+    private static final String OLD_RUN_ID = "20260919T230000-bbbbbbbb";
 
     private BatchExecutionMapper executionMapper;
     private ScheduledTriggerStore triggerStore;
@@ -60,6 +65,21 @@ class BatchExecutionRecoveryTest {
     private ScheduleRuleCatalog catalog;
     private MutableClock clock;
     private BatchExecutionRecovery recovery;
+
+    /** テスト用の起動識別子（固定値）。 */
+    private static final class ProcessRunIdOf extends ProcessRunId {
+        private final String value;
+
+        ProcessRunIdOf(String value) {
+            super(Clock.fixed(NOW, ZONE));
+            this.value = value;
+        }
+
+        @Override
+        public String value() {
+            return value;
+        }
+    }
 
     /** テスト用の時計（進められる）。 */
     private static final class MutableClock extends Clock {
@@ -95,8 +115,7 @@ class BatchExecutionRecoveryTest {
         clock = new MutableClock();
         SchedulePlanGuard planGuard = new SchedulePlanGuard(catalog, triggerStore);
         recovery = new BatchExecutionRecovery(executionMapper, triggerStore, executor, catalog, planGuard,
-                configService, clock);
-        when(executionMapper.findMaxExecutionId()).thenReturn(BOUNDARY);
+                configService, new ProcessRunIdOf(CURRENT_RUN_ID), clock);
         when(triggerStore.closeLeftover(anyLong(), any(), anyString())).thenReturn(true);
     }
 
@@ -131,6 +150,7 @@ class BatchExecutionRecoveryTest {
                 TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)));
     }
 
+    /** 前のプロセスが作った実行（遺留）。 */
     private BatchExecutionEntity row(String taskCode, String status, Long id, String plannedAt) {
         BatchExecutionEntity entity = new BatchExecutionEntity();
         entity.setExecutionId(id);
@@ -138,12 +158,20 @@ class BatchExecutionRecoveryTest {
         entity.setStatus(status);
         entity.setTriggerType("R");
         entity.setScheduleTime(plannedAt);
+        entity.setRunId(OLD_RUN_ID);
         return entity;
     }
 
-    /** 遺留リスト（起動時に読むもの）と、1 件ずつの読み直しを用意する。 */
+    /** このプロセスが作った実行（遺留ではない）。 */
+    private BatchExecutionEntity ownRow(String taskCode, String status, Long id, String plannedAt) {
+        BatchExecutionEntity entity = row(taskCode, status, id, plannedAt);
+        entity.setRunId(CURRENT_RUN_ID);
+        return entity;
+    }
+
+    /** 遺留リスト（前のプロセスの実行だけ）と、1 件ずつの読み直しを用意する。 */
     private void leftovers(BatchExecutionEntity... rows) {
-        when(executionMapper.findUnfinishedBefore(BOUNDARY)).thenReturn(List.of(rows));
+        when(executionMapper.findLeftoversExceptRunId(CURRENT_RUN_ID)).thenReturn(List.of(rows));
         for (BatchExecutionEntity row : rows) {
             when(executionMapper.findById(row.getExecutionId())).thenReturn(row);
         }
@@ -256,9 +284,9 @@ class BatchExecutionRecoveryTest {
         assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
         verify(executor, never()).submit(anyString(), anyLong(), any());
 
-        // 2 回目（周期検査から）は境界も読み直さない
+        // 2 回目（周期検査から）は遺留リストも読み直さない
         recovery.retryPendingRecoveryIfDue();
-        verify(executionMapper, times(1)).findMaxExecutionId();
+        verify(executionMapper, times(1)).findLeftoversExceptRunId(CURRENT_RUN_ID);
     }
 
     // ------------------------------------------------------------------ 自動で続く
@@ -302,15 +330,16 @@ class BatchExecutionRecoveryTest {
     }
 
     @Test
-    @DisplayName("遺留リストの読み込みが失敗したら退避して読み直す（境界は同じものを使う）")
-    void discoveryFailureIsRetriedWithTheSameBoundary() {
+    @DisplayName("遺留リストの読み込みが失敗したら退避して読み直す（**帰属**で読むので自分の実行は入らない）")
+    void discoveryFailureIsRetriedWithTheSameOwnershipFilter() {
         networkTasks();
-        when(executionMapper.findMaxExecutionId())
+        // 1 回目は失敗し、その間に現在のプロセスが実行を作った（自分の実行）
+        BatchExecutionEntity own = ownRow("batR04", "RUNNING", 9999L, "2026-09-20T06:30:00");
+        when(executionMapper.findLeftoversExceptRunId(CURRENT_RUN_ID))
                 .thenThrow(new IllegalStateException("DB が混んでいます"))
-                .thenReturn(BOUNDARY);
-        when(executionMapper.findUnfinishedBefore(BOUNDARY))
                 .thenReturn(List.of(row("batR04", "QUEUED", 830L, "2026-09-20T06:30:00")));
         when(executionMapper.findById(830L)).thenReturn(row("batR04", "QUEUED", 830L, "2026-09-20T06:30:00"));
+        when(executionMapper.findById(9999L)).thenReturn(own);
 
         recovery.recoverInterruptedExecutions();
         assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_DISCOVERY);
@@ -318,28 +347,48 @@ class BatchExecutionRecoveryTest {
 
         // 退避の間は読み直さない
         recovery.retryPendingRecoveryIfDue();
-        verify(executionMapper, times(1)).findMaxExecutionId();
+        verify(executionMapper, times(1)).findLeftoversExceptRunId(CURRENT_RUN_ID);
 
         clock.advance(Duration.ofSeconds(31));
         recovery.retryPendingRecoveryIfDue();
 
-        verify(executionMapper, times(2)).findMaxExecutionId();
-        verify(executionMapper).findUnfinishedBefore(BOUNDARY);   // 同じ境界で読む
+        // 読み直しでも**同じ帰属の条件**で読む（ID の大小では決めない）
+        verify(executionMapper, times(2)).findLeftoversExceptRunId(CURRENT_RUN_ID);
+        // 自分の実行（9999）は遺留に入らない → 実行し直さない・閉じない
+        verify(executor, never()).submit(eq("batR04"), eq(9999L), any());
+        verify(triggerStore, never()).closeLeftover(eq(9999L), any(), anyString());
+        // 前のプロセスの遺留（830）は実行し直す
         verify(executor).submit(eq("batR04"), eq(830L), any());
     }
 
     @Test
-    @DisplayName("起動の境界より新しい実行（このプロセスが作ったもの）は復旧しない")
+    @DisplayName("このプロセスが作った実行（帰属が現在の識別子）は復旧しない")
     void executionsCreatedByThisProcessAreNotRecovered() {
         networkTasks();
-        // 境界（5000）より新しい = このプロセスが作った実行
-        leftovers(row("batR04", "QUEUED", 5001L, "2026-09-20T06:30:00"));
+        // 帰属が現在のプロセスの実行: 実行中でも、復旧の対象にしてはいけない
+        BatchExecutionEntity own = ownRow("batR04", "RUNNING", 5001L, "2026-09-20T06:30:00");
+        leftovers(own);
 
         recovery.recoverInterruptedExecutions();
 
         verify(executor, never()).submit(anyString(), anyLong(), any());
         verify(triggerStore, never()).closeLeftover(anyLong(), any(), anyString());
         assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("遺留リストに紛れ込んだ自分の実行も、判定の直前に帰属で外す（二重の守り）")
+    void ownExecutionIsDroppedAgainAtReviewTime() {
+        networkTasks();
+        // 遺留リストに自分の実行が入ってしまった状況を作る（読みのタイミング次第でありうる）
+        BatchExecutionEntity own = ownRow("batR04", "QUEUED", 5002L, "2026-09-20T06:30:00");
+        leftovers(own);
+
+        recovery.recoverInterruptedExecutions();
+
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        verify(triggerStore, never()).closeLeftover(anyLong(), any(), anyString());
+        assertThat(recovery.status().pendingCount()).isZero();
     }
 
     @Test
@@ -420,6 +469,45 @@ class BatchExecutionRecoveryTest {
         verify(executor, never()).submit(anyString(), anyLong(), any());
         assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_REVIEW);
         assertThat(recovery.status().pendingCount()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("起動イベント・周期検査・手動の再読み込みが同時に来ても、遺留は 1 回だけ処理する")
+    void concurrentTriggersProcessEachLeftoverOnce() throws Exception {
+        networkTasks();
+        leftovers(row("batR04", "QUEUED", 870L, "2026-09-20T06:30:00"));
+
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(3);
+        try {
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<?>> futures = List.of(
+                    pool.submit(() -> {
+                        start.await();
+                        recovery.recoverInterruptedExecutions();
+                        return null;
+                    }),
+                    pool.submit(() -> {
+                        start.await();
+                        recovery.retryPendingRecoveryIfDue();
+                        return null;
+                    }),
+                    pool.submit(() -> {
+                        start.await();
+                        recovery.retryPendingRecoveryNow("設定の再読み込み");
+                        return null;
+                    }));
+            start.countDown();
+            for (java.util.concurrent.Future<?> future : futures) {
+                future.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        // 同じ遺留を 2 回投入しない・2 回閉じない
+        verify(executor, times(1)).submit(eq("batR04"), eq(870L), any());
+        verify(triggerStore, never()).closeLeftover(anyLong(), any(), anyString());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
     }
 
     @Test

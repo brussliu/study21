@@ -31,6 +31,15 @@ public class BatchExecutionEntity {
      * 「同じ元実行からやり直しは 1 つだけ」を保証する。
      */
     private Long sourceExecutionId;
+
+    /**
+     * この実行記録を作ったプロセスの**起動識別子**（{@link ProcessRunId}）。
+     *
+     * <p>通常は {@link BatchExecutionRunIdInterceptor} が挿入時に自動で入れる
+     * （入口ごとに設定する書き方にしない。足し忘れると復旧が自分の実行を遺留と誤認する）。
+     * DB 上は NULL 可（この列が無かった頃の行）。</p>
+     */
+    private String runId;
     private String scheduleTime;
     private String startTime;
     private String endTime;
@@ -173,5 +182,14 @@ public class BatchExecutionEntity {
 
     public void setSourceExecutionId(Long sourceExecutionId) {
         this.sourceExecutionId = sourceExecutionId;
+    }
+
+    /** この実行記録を作ったプロセスの起動識別子（復旧の境界に使う）。 */
+    public String getRunId() {
+        return runId;
+    }
+
+    public void setRunId(String runId) {
+        this.runId = runId;
     }
 }
