@@ -369,6 +369,31 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/japanese/JapaneseWordView.vue'),
         meta: { title: '単語情報管理', layout: 'user' }
       },
+      // 単語情報管理の**デモ**（画面確認用。本番 API を呼ばず、仮データだけで動く）
+      {
+        path: 'japanese-demo',
+        name: 'student-japanese-demo',
+        component: () => import('@/views/japanese/demo/DemoWordListView.vue'),
+        meta: { title: '単語情報管理（デモ）', layout: 'user' }
+      },
+      {
+        path: 'japanese-demo/new',
+        name: 'student-japanese-demo-new',
+        component: () => import('@/views/japanese/demo/DemoWordNewView.vue'),
+        meta: { title: '単語の新規登録（デモ）', layout: 'user' }
+      },
+      {
+        path: 'japanese-demo/edit/:wordId',
+        name: 'student-japanese-demo-edit',
+        component: () => import('@/views/japanese/demo/DemoWordEditPage.vue'),
+        meta: { title: '詳細編集（デモ）', layout: 'user' }
+      },
+      {
+        path: 'japanese-demo/study/:wordId',
+        name: 'student-japanese-demo-study',
+        component: () => import('@/views/japanese/demo/DemoWordStudyPage.vue'),
+        meta: { title: '学習画面の確認（デモ）', layout: 'user' }
+      },
       {
         path: 'japanese-test',
         name: 'student-japanese-test',

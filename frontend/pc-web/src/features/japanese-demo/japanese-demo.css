@@ -1,0 +1,935 @@
+/* 日本語勉強【単語情報管理】デモ（画面確認用の試作）のスタイル。
+   色は tokens.css の変数のみを使う（assets/prototype/*.css は変更しない）。
+   本番の JapaneseWordView 用スタイル（features/japanese/japanese.css）とは別ファイルにして、
+   デモを消しても本番の見た目に影響が出ないようにしている。 */
+
+.jp-demo {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/*
+ * 狭い画面で、右上のユーザー名が長いと共通の帯（.topbar）が横に広がり、
+ * 本文ごと横スクロールになる（デモだけでなく全画面で起きる既存の見え方）。
+ * ここでは画面の外へはみ出さないよう、名前を省略して収める。
+ * （共通の帯そのものは assets/prototype/*.css の持ち物なので触らない）
+ */
+@media (max-width: 1024px) {
+  .topbar__right,
+  .up-anchor {
+    min-width: 0;
+  }
+
+  .up-user {
+    min-width: 0;
+  }
+
+  .up-user > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+/* ---------- デモであることの表示 ---------- */
+
+/* 「デモ」バッジはページ見出しの近くに必ず出す（本番と見間違えないため） */
+.jp-demo__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 2px var(--sp-2);
+  border: 1px dashed var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.jp-demo__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-warning);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.jp-demo__notice strong {
+  color: var(--color-text-strong);
+}
+
+.jp-demo__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.jp-demo__actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* ---------- デモ表示設定（既定はたたむ） ---------- */
+
+.jp-demo-panel {
+  border: 1px dashed var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-demo-panel__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  background: none;
+  border: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  cursor: pointer;
+}
+
+.jp-demo-panel__head:hover {
+  color: var(--color-text);
+}
+
+.jp-demo-panel__body {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+
+.jp-demo-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.jp-demo-panel__label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.jp-demo-panel__hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+/* ---------- 状態のバッジ（色だけでなく文字でも示す） ---------- */
+
+.jp-demo-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+
+.jp-demo-status--running {
+  color: var(--color-info);
+}
+
+.jp-demo-status__spin {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.75rem;
+  border: 2px solid var(--color-info);
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: jp-demo-spin 0.9s linear infinite;
+}
+
+@keyframes jp-demo-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jp-demo-status__spin { animation: none; }
+}
+
+/* ---------- 一覧の表 ---------- */
+
+.jp-demo-table .col-narrow {
+  width: 5.5rem;
+  min-width: 5.5rem;
+}
+
+.jp-demo-table .col-medium {
+  width: 9rem;
+  min-width: 9rem;
+}
+
+.jp-demo-table .col-collections {
+  width: 13rem;
+  min-width: 13rem;
+  white-space: normal;
+}
+
+.jp-demo-table .col-meaning {
+  min-width: 12rem;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-table .col-actions {
+  width: 9.5rem;
+}
+
+.jp-demo-word {
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-word__reading {
+  display: block;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+}
+
+/* 複数書籍の収録はチップで見せ、多すぎるときは「ほか N 件」にたたむ */
+.jp-demo-collections {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.jp-demo-collection-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  padding: 1px var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.jp-demo-linkbtn {
+  padding: 2px var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.jp-demo-linkbtn:hover:not(:disabled) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.jp-demo-linkbtn:disabled {
+  color: var(--color-text-subtle);
+  cursor: default;
+}
+
+.jp-demo-linkbtn.is-danger {
+  color: var(--color-danger);
+}
+
+.jp-demo-linkbtn.is-danger:hover:not(:disabled) {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+/* ---------- ステップ（新規登録の 3 ステップ） ---------- */
+
+.jp-demo-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-demo-step {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.jp-demo-step.is-active {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-step.is-done {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.jp-demo-step__no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 50%;
+  background: var(--color-surface-alt);
+  font-size: var(--fs-xs);
+}
+
+.jp-demo-step.is-active .jp-demo-step__no {
+  background: var(--color-primary);
+  color: var(--color-on-primary, #fff);
+}
+
+/* ---------- 貼り付けの入力 ---------- */
+
+.jp-demo-paste {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-demo-paste__format {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: 1.8;
+}
+
+.jp-demo-paste__format code {
+  padding: 0 2px;
+  background: var(--color-surface);
+  border-radius: 2px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.jp-demo-textarea {
+  width: 100%;
+  min-height: 9rem;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  resize: vertical;
+}
+
+/* 解析結果の表で、状態ごとに行の左に印を付ける（色だけに頼らない） */
+.jp-demo-rowstate {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.jp-demo-rowstate--ok { color: var(--color-success); }
+.jp-demo-rowstate--warn { color: var(--color-warning); }
+.jp-demo-rowstate--error { color: var(--color-danger); }
+.jp-demo-rowstate--info { color: var(--color-info); }
+
+.jp-demo-tr--warn { background: var(--color-warning-soft); }
+.jp-demo-tr--error { background: var(--color-danger-soft); }
+
+.jp-demo-inline-input {
+  width: 100%;
+  min-width: 6rem;
+  padding: 2px var(--sp-1);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+}
+
+.jp-demo-inline-input.is-invalid {
+  border-color: var(--color-danger);
+}
+
+/* ---------- まとめ（数の内訳） ---------- */
+
+.jp-demo-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: var(--sp-2);
+}
+
+.jp-demo-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.jp-demo-tile__label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.jp-demo-tile__value {
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-tile.is-warn { border-color: var(--color-warning); }
+.jp-demo-tile.is-error { border-color: var(--color-danger); }
+
+/* ---------- 詳細編集（長い内容をタブで分ける） ---------- */
+
+.jp-demo-editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+.jp-demo-editor__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-demo-editor__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+}
+
+.jp-demo-editor__sub {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.jp-demo-editor__layout {
+  display: grid;
+  grid-template-columns: 13rem minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+  min-height: 0;
+}
+
+/* 左のナビは縦積み。設計システムのタブは横並びなので、ここだけ組み替える */
+.jp-demo-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  max-height: 65vh;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  align-self: start;
+}
+
+.jp-demo-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid transparent;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.jp-demo-nav__item:hover {
+  color: var(--color-text);
+}
+
+.jp-demo-nav__item.is-active {
+  border-left-color: var(--color-primary);
+  background: var(--color-surface-alt);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-nav__count {
+  margin-left: auto;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+}
+
+.jp-demo-editor__body {
+  min-width: 0;
+}
+
+.jp-demo-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.jp-demo-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-section__hint {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.jp-demo-fieldgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--sp-3);
+}
+
+/* 配列の 1 件（語義・例文・文型…）。操作は右上にまとめる */
+.jp-demo-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.jp-demo-item__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.jp-demo-item__no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.5rem;
+  height: 1.5rem;
+  padding: 0 var(--sp-1);
+  border-radius: 999px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.jp-demo-item__actions {
+  display: flex;
+  gap: var(--sp-1);
+  margin-left: auto;
+}
+
+.jp-demo-array-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---------- 学習画面（読みやすさ優先） ---------- */
+
+.jp-demo-study {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-width: 62rem;
+  margin: 0 auto;
+}
+
+.jp-demo-study__hero {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-demo-study__word {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-3xl, 2rem);
+  font-weight: var(--fw-bold);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-study__meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.jp-demo-study__core {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-study__sound {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+
+/* 日本語と中国語の階層（日本語＝本文、中国語＝補助） */
+.jp-demo-ja {
+  color: var(--color-text);
+  font-size: var(--fs-md);
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-zh {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-ja.is-large {
+  font-size: var(--fs-lg);
+}
+
+.jp-demo-reading {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: 1.7;
+}
+
+.jp-demo-pairs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-demo-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.jp-demo-pair__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.jp-demo-pair__label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* 文型は助詞を強調する */
+.jp-demo-pattern {
+  color: var(--color-text);
+  font-size: var(--fs-md);
+  line-height: 1.9;
+}
+
+.jp-demo-pattern mark {
+  padding: 0 2px;
+  border-radius: 2px;
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+/* 誤り・修正はアイコンと文字の両方で示す（色だけに頼らない） */
+.jp-demo-fix {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  line-height: 1.8;
+}
+
+.jp-demo-fix--wrong {
+  border: 1px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-text);
+}
+
+.jp-demo-fix--right {
+  border: 1px solid var(--color-success);
+  background: var(--color-success-soft);
+  color: var(--color-text);
+}
+
+.jp-demo-fix__icon {
+  flex: 0 0 auto;
+  font-weight: var(--fw-bold);
+}
+
+.jp-demo-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-demo-dialog__line {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+}
+
+.jp-demo-dialog__speaker {
+  flex: 0 0 5rem;
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.jp-demo-dialog__body {
+  min-width: 0;
+  flex: 1;
+}
+
+/* 類義語の比較カード */
+.jp-demo-compare {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--sp-2);
+}
+
+.jp-demo-compare__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.jp-demo-compare__verdict {
+  align-self: flex-start;
+  padding: 1px var(--sp-2);
+  border-radius: 999px;
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-compare__verdict--yes { background: var(--color-success-soft); color: var(--color-success); }
+.jp-demo-compare__verdict--sometimes { background: var(--color-warning-soft); color: var(--color-warning); }
+.jp-demo-compare__verdict--no { background: var(--color-danger-soft); color: var(--color-danger); }
+
+/* 学習画面のタブ（横並び・折り返しあり） */
+.jp-demo-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.jp-demo-tab {
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.jp-demo-tab:hover { color: var(--color-text); }
+
+.jp-demo-tab.is-active {
+  border-bottom-color: var(--color-primary);
+  color: var(--color-primary);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-tabpanel {
+  padding-top: var(--sp-3);
+}
+
+/* ミニ練習 */
+.jp-demo-quiz {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+.jp-demo-choice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.jp-demo-choice:hover:not(:disabled) { border-color: var(--color-primary); }
+
+.jp-demo-choice.is-correct {
+  border-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.jp-demo-choice.is-wrong {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.jp-demo-choice:disabled { cursor: default; }
+
+.jp-demo-choice__mark {
+  flex: 0 0 auto;
+  font-weight: var(--fw-bold);
+}
+
+/* 音声のデモ（音声ファイルは無いので状態だけを見せる） */
+.jp-demo-audio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.jp-demo-audio__state {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.jp-demo-audio__state.is-playing {
+  color: var(--color-info);
+}
+
+/* 下書きプレビューの帯 */
+.jp-demo-draftband {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px dashed var(--color-info);
+  border-radius: var(--radius-sm);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+  font-size: var(--fs-sm);
+}
+
+/* 二次情報（更新時刻など）は控えめに */
+.jp-demo-meta {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 狭い画面 ---------- */
+
+@media (max-width: 1024px) {
+  .jp-demo-editor__layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jp-demo-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-height: none;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .jp-demo-nav__item {
+    border-left: 0;
+    border-bottom: 3px solid transparent;
+  }
+
+  .jp-demo-nav__item.is-active {
+    border-left-color: transparent;
+    border-bottom-color: var(--color-primary);
+  }
+}
+
+@media (max-width: 768px) {
+  .jp-demo__actions {
+    margin-left: 0;
+    width: 100%;
+  }
+
+  .jp-demo-study__sound {
+    margin-left: 0;
+  }
+
+  .jp-demo-dialog__speaker {
+    flex-basis: 4rem;
+  }
+}
