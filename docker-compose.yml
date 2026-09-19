@@ -5,30 +5,84 @@
 #   部分2  study21-admin-api   可执行 JAR（内嵌 Tomcat，java -jar）
 #   部分3  study21-user-api    可执行 JAR（内嵌 Tomcat，java -jar）
 #
+# 加上一个共用的 Redis（登录状态＝セッション の保存先。2026-09-13 追加）：
+#   study21-redis              redis:7-alpine（user-api のログイン状態を保持する）
+#   ・有効期限は 60 分（user-api の spring.session.timeout）
+#   ・ホストには公開しない（compose のネットワーク内からのみ。中を見るには
+#     docker exec -it study21-redis redis-cli -a <パスワード>）
+#
 # 首次全量：docker compose up -d --build
 # 只更新某一个（另外两个容器不受影响、不重启）：
 #   docker compose up -d --build web
 #   docker compose up -d --build admin-api
 #   docker compose up -d --build user-api
 #
-# 端口规划（避免与 study2 冲突，study2 现用 8080 / 54320）：
+# 目录结构（NAS 侧，compose 项目目录 = <发布位置>/webapps）：
+#   <发布位置>/webapps  ← 本文件与源码（docker compose 在ここで実行する）
+#   <发布位置>/files    ← 用户数据（documents / legacy-documents / temp-files / test-files /
+#                          reading / legacy-reading。reading は書籍の本文 PDF と表紙）
+#   <发布位置>/logs     ← 日志（backend: admin-api / user-api、frontend: nginx 访问日志）
+#
+# 端口规划（避免与 study2 冲突，study2 现用 8080 / 54320 / 8888）：
 #   PC 前端       http://<NAS-IP>:8090
 #   Mobile 前端   http://<NAS-IP>:8091
 #   admin-api     http://<NAS-IP>:8081
 #   user-api      http://<NAS-IP>:8082
+#   代理（batS01）  <NAS-IP>:7777（端末はこのポートをプロキシとして使う。2.0 は 8888）
+
+# プロジェクト名を固定する（compose の既定はディレクトリ名。webapps へ移動しても
+# 同じスタックとして扱われ、コンテナ名の衝突を避けられる）。
+name: study21
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: study21-redis
+    # ログイン状態（セッション）を置く。消えても再ログインすれば済むが、
+    # コンテナの作り直しで全員ログアウトしないよう AOF で残す。
+    command:
+      - redis-server
+      - --requirepass
+      - '${STUDY21_REDIS_PASSWORD:?请在 setting/deploy.env 中设置 STUDY21_REDIS_PASSWORD}'
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --save
+      - "900 1"
+    environment:
+      TZ: ${STUDY21_TZ:-Asia/Tokyo}
+    volumes:
+      - study21-redis-data:/data
+    # ポートは公開しない（ホストから繋ぐときは docker exec -it study21-redis redis-cli）
+    restart: unless-stopped
+    networks:
+      - study21
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${STUDY21_REDIS_PASSWORD:?}", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   web:
     build:
       context: .
       dockerfile: deploy/docker/nginx.Dockerfile
     container_name: study21-web
+    environment:
+      # タイムゾーンは日本時間（ログの時刻を JST に揃える）。
+      # Alpine には tzdata が入っていないので、nginx.Dockerfile 側で導入している。
+      TZ: ${STUDY21_TZ:-Asia/Tokyo}
     ports:
-      - "8090:80"   # PC 前端
-      - "8091:81"   # Mobile 前端
+      - "${STUDY21_PC_PORT:-8090}:80"   # PC 前端
+      - "${STUDY21_MOBILE_PORT:-8091}:81"   # Mobile 前端
     depends_on:
       - admin-api
       - user-api
+    volumes:
+      # nginx のアクセス・エラーログ（logs/frontend/）
+      - ${STUDY21_FRONTEND_LOG_HOST_PATH:-../logs/frontend}:/var/log/nginx
     restart: unless-stopped
     networks:
       - study21
@@ -39,13 +93,45 @@ services:
       dockerfile: deploy/docker/admin-api.Dockerfile
     container_name: study21-admin-api
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-production}
       ALLOWED_ORIGINS: ${STUDY21_ALLOWED_ORIGINS:-http://localhost:8090,http://localhost:8091}
-      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://localhost:54320/study21}
+      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://192.168.0.100:54320/study21}
       STUDY21_DATASOURCE_USERNAME: ${STUDY21_DATASOURCE_USERNAME:-postgres}
-      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在未提交的 .env 中设置 STUDY21_DATASOURCE_PASSWORD}
+      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在 setting/deploy.env 中设置 STUDY21_DATASOURCE_PASSWORD}
+      # ログ出力（ホストの logs/ を /app/logs にマウント。実ファイルは /app/logs/backend/ 配下＝
+      # ホストの logs/backend/ に app / sql / error の 3 ファイルが出る）
+      STUDY21_LOG_DIR: /app/logs
+      STUDY21_LOG_LEVEL: ${STUDY21_LOG_LEVEL:-INFO}
+      STUDY21_SQL_LOG_LEVEL: ${STUDY21_SQL_LOG_LEVEL:-INFO}
+      STUDY21_LOG_RETENTION_DAYS: ${STUDY21_LOG_RETENTION_DAYS:-90}
+      STUDY21_LOG_MAX_FILE_SIZE: ${STUDY21_LOG_MAX_FILE_SIZE:-100MB}
+      # 日本語ログが標準出力で ? に化けないように UTF-8 を明示する
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      # タイムゾーンは日本時間（ログの時刻を JST に揃える）。
+      # eclipse-temurin イメージには tzdata が入っているためこれだけで効く。
+      TZ: ${STUDY21_TZ:-Asia/Tokyo}
+      # プロキシサービス（batS01）が admin-api の中で待ち受けるポート。
+      # 端末（子供のPC）はこのポートをプロキシとして使う。
+      # 2.0 のプロキシが 8888 を使っているため、既定は 7777（別の番号にする場合は
+      # この値を変えれば待ち受けと公開ポートの両方に効く）。
+      STUDY21_PROXY_PORT: ${STUDY21_PROXY_PORT:-7777}
+      # AI 生図の画像（元画像と切り抜き画像）。**user-api と共有**する置き場:
+      # 元画像は user-api が保存し、batC51 が読んで切り抜き画像を書く（同じパス規約を使う）。
+      STUDY21_GEOMETRY_AI_STORAGE_ROOT: /app/data/geometry-ai
+      # 授業録音の音声。**user-api と共有**する置き場（保存期間を過ぎた音声の削除を
+      # admin-api の batR02 が行うため、同じパスを指す必要がある）
+      STUDY21_CLASSROOM_STORAGE_ROOT: /app/data/classroom
+    volumes:
+      - ${STUDY21_LOG_HOST_PATH:-../logs}:/app/logs
+      # AI 生図の画像（user-api と同じホスト側ディレクトリをマウントする）
+      - ${STUDY21_GEOMETRY_AI_STORAGE_HOST_PATH:-../files/geometry-ai}:/app/data/geometry-ai
+      # 授業録音の音声（user-api と同じホスト側ディレクトリ＝<发布位置>/files/classroom）
+      - ${STUDY21_CLASSROOM_STORAGE_HOST_PATH:-../files/classroom}:/app/data/classroom
     ports:
-      - "8081:8081"
+      - "${STUDY21_ADMIN_API_PORT:-8081}:8081"
+      # プロキシ（端末側から見えるポート。コンテナ内の待ち受けと同じ番号にする）
+      - "${STUDY21_PROXY_PORT:-7777}:${STUDY21_PROXY_PORT:-7777}"
     restart: unless-stopped
     networks:
       - study21
@@ -56,30 +142,81 @@ services:
       dockerfile: deploy/docker/user-api.Dockerfile
     container_name: study21-user-api
     environment:
-      APP_ENV: production
+      APP_ENV: ${APP_ENV:-production}
       ALLOWED_ORIGINS: ${STUDY21_ALLOWED_ORIGINS:-http://localhost:8090,http://localhost:8091}
+      # 既定値は NAS ホスト上の PostgreSQL。コンテナ内の localhost は自分自身なので、
+      # 直接 compose を叩く場合もホスト IP を使う（開発機でローカル DB を使うときは要変更）。
       # DB 接続情報（保護者/生徒アカウントの登録・ログインに使用。
       # admin-api と同じ接続先。パスワード未設定だと SCRAM 認証エラーで 500 になる）
-      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://localhost:54320/study21}
+      STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://192.168.0.100:54320/study21}
       STUDY21_DATASOURCE_USERNAME: ${STUDY21_DATASOURCE_USERNAME:-postgres}
-      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在未提交的 .env 中设置 STUDY21_DATASOURCE_PASSWORD}
+      STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在 setting/deploy.env 中设置 STUDY21_DATASOURCE_PASSWORD}
+      # セッション（ログイン状態）の保存先。コンテナ内からは compose のサービス名で繋ぐ。
+      # ホストの IP を書くと（コンテナから見た localhost は自分自身なので）繋がらない。
+      STUDY21_REDIS_HOST: redis
+      STUDY21_REDIS_PORT: "6379"
+      STUDY21_REDIS_PASSWORD: '${STUDY21_REDIS_PASSWORD:?请在 setting/deploy.env 中设置 STUDY21_REDIS_PASSWORD}'
       # 新規資料は家族別の非公開領域へ保存。旧2.0ルートは移行期間だけ読取専用で指定可能。
       STUDY21_DOCUMENT_STORAGE_ROOT: /app/data/documents
       STUDY2_DOCUMENT_STORAGE_ROOT: /app/data/legacy-documents
       # 臨時ファイル（アップロード画像など）の保存領域
       STUDY21_TEMPFILE_STORAGE_ROOT: /app/data/temp-files
+      # 学習状況モニターのスナップショット画像（DB の 保存パス はこの下からの相対パス）
+      STUDY21_STUDY_MONITOR_SNAPSHOT_ROOT: /app/data/snapshots
       # テスト情報の試験用紙ファイルの保存領域
       STUDY21_TESTFILE_STORAGE_ROOT: /app/data/test-files
+      # 書籍の本文 PDF・表紙画像（読書管理）。2.0 の webapps/file/ENGLISH_READING は
+      # 読取専用の旧ルートとして指定できる（コピーして置けばアップロード不要で読める）
+      STUDY21_READING_STORAGE_ROOT: /app/data/reading
+      STUDY2_READING_STORAGE_ROOT: /app/data/legacy-reading
+      # AI 生図の画像（元画像はここへ保存し、batC51 が読んで切り抜き画像を書く）
+      STUDY21_GEOMETRY_AI_STORAGE_ROOT: /app/data/geometry-ai
+      # 授業録音の音声（分塊を追記して 1 ファイルにする。ここを指定しないと
+      # コンテナ内の一時領域に書かれ、再起動で録音が消える）
+      STUDY21_CLASSROOM_STORAGE_ROOT: /app/data/classroom
+      # ログ出力（ホストの logs/ を /app/logs にマウント。実ファイルは /app/logs/backend/ 配下＝
+      # ホストの logs/backend/ に app / sql / error の 3 ファイルが出る）
+      STUDY21_LOG_DIR: /app/logs
+      STUDY21_LOG_LEVEL: ${STUDY21_LOG_LEVEL:-INFO}
+      STUDY21_SQL_LOG_LEVEL: ${STUDY21_SQL_LOG_LEVEL:-INFO}
+      STUDY21_LOG_RETENTION_DAYS: ${STUDY21_LOG_RETENTION_DAYS:-90}
+      STUDY21_LOG_MAX_FILE_SIZE: ${STUDY21_LOG_MAX_FILE_SIZE:-100MB}
+      # 日本語ログが標準出力で ? に化けないように UTF-8 を明示する
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+      # タイムゾーンは日本時間（ログの時刻を JST に揃える）。
+      # eclipse-temurin イメージには tzdata が入っているためこれだけで効く。
+      TZ: ${STUDY21_TZ:-Asia/Tokyo}
     volumes:
-      - ${STUDY21_DOCUMENT_STORAGE_HOST_PATH:-./data/documents}:/app/data/documents
-      - ${STUDY2_DOCUMENT_STORAGE_HOST_PATH:-./data/legacy-documents}:/app/data/legacy-documents:ro
-      - ${STUDY21_TEMPFILE_STORAGE_HOST_PATH:-./data/temp-files}:/app/data/temp-files
-      - ${STUDY21_TESTFILE_STORAGE_HOST_PATH:-./data/test-files}:/app/data/test-files
+      # 用户数据（<发布位置>/files 配下。旧 data/ から移行した実データ）
+      - ${STUDY21_DOCUMENT_STORAGE_HOST_PATH:-../files/documents}:/app/data/documents
+      - ${STUDY2_DOCUMENT_STORAGE_HOST_PATH:-../files/legacy-documents}:/app/data/legacy-documents:ro
+      - ${STUDY21_TEMPFILE_STORAGE_HOST_PATH:-../files/temp-files}:/app/data/temp-files
+      - ${STUDY21_TESTFILE_STORAGE_HOST_PATH:-../files/test-files}:/app/data/test-files
+      # 書籍の PDF・表紙（2.1 が取り込む。ホスト側 <发布位置>/files/reading に残る）
+      - ${STUDY21_READING_STORAGE_HOST_PATH:-../files/reading}:/app/data/reading
+      # 2.0 の webapps/file/ENGLISH_READING を置く場所（読み取り専用）
+      - ${STUDY2_READING_STORAGE_HOST_PATH:-../files/legacy-reading}:/app/data/legacy-reading:ro
+      # 2.0 の snapshots フォルダーの中身（日付フォルダー）を置く。読み取り専用でよい
+      - ${STUDY21_STUDY_MONITOR_SNAPSHOT_HOST_PATH:-../files/snapshots}:/app/data/snapshots:ro
+      # AI 生図の画像（admin-api と同じホスト側ディレクトリ。読み書きする）
+      - ${STUDY21_GEOMETRY_AI_STORAGE_HOST_PATH:-../files/geometry-ai}:/app/data/geometry-ai
+      # 授業録音の音声（ホスト側 <发布位置>/files/classroom に残す＝再起動しても消えない）
+      - ${STUDY21_CLASSROOM_STORAGE_HOST_PATH:-../files/classroom}:/app/data/classroom
+      # ログ（logs/backend/）
+      - ${STUDY21_LOG_HOST_PATH:-../logs}:/app/logs
     ports:
-      - "8082:8082"
+      - "${STUDY21_USER_API_PORT:-8082}:8082"
+    depends_on:
+      # セッションの保存先。起動時にも一度繋ぐので、先に立ち上げる
+      - redis
     restart: unless-stopped
     networks:
       - study21
+
+volumes:
+  # セッションの保存先（コンテナを作り直してもログイン状態を残す）
+  study21-redis-data:
 
 networks:
   study21:
