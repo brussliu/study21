@@ -64,6 +64,7 @@ class BatchExecutionRecoveryTest {
     private ScheduleConfigService configService;
     private ScheduleRuleCatalog catalog;
     private MutableClock clock;
+    private SchedulePlanGuard planGuard;
     private BatchExecutionRecovery recovery;
 
     /** テスト用の起動識別子（固定値）。 */
@@ -113,9 +114,9 @@ class BatchExecutionRecoveryTest {
         configService = mock(ScheduleConfigService.class);
         catalog = new ScheduleRuleCatalog();
         clock = new MutableClock();
-        SchedulePlanGuard planGuard = new SchedulePlanGuard(catalog, triggerStore);
+        planGuard = new SchedulePlanGuard(catalog, triggerStore);
         recovery = new BatchExecutionRecovery(executionMapper, triggerStore, executor, catalog, planGuard,
-                configService, new ProcessRunIdOf(CURRENT_RUN_ID), clock);
+                configService, new ProcessRunIdOf(CURRENT_RUN_ID), true, clock);
         when(triggerStore.closeLeftover(anyLong(), any(), anyString())).thenReturn(true);
     }
 
@@ -643,6 +644,152 @@ class BatchExecutionRecoveryTest {
 
         verify(triggerStore).closeLeftover(eq(710L), eq(BatchExecutionStatus.SKIPPED), anyString());
         verify(executor, times(1)).submit(eq("batL02"), eq(711L), any());
+    }
+
+    // ------------------------------------------------------------------ 追跡の不変条件（照会失敗・暫緩・投入失敗）
+
+    @Test
+    @DisplayName("A: 復旧トランザクション成功後の照会が失敗しても、新しいやり直しは追跡に残り次で投入する")
+    void keepsTheNewRetryTrackedWhenTheFirstLookupFails() {
+        networkTasks();
+        leftovers(row("batR04", "RUNNING", 720L, "2026-09-20T06:30:00"));
+        // 復旧トランザクションは成功（旧実行を閉じ、やり直し 721 を作ってコミット済み）
+        when(triggerStore.recoverRunningExecution(eq(720L), eq("batR04"), eq("R"), any(), anyString(),
+                eq(BatchExecutionRecovery.RETRY_CODE)))
+                .thenReturn(new ScheduledTriggerStore.RecoveryResult(true, 721L, true));
+        // 1 回目の照会（状態確認）が失敗する
+        when(executionMapper.findById(721L))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenReturn(row("batR04", "QUEUED", 721L, "2026-09-20T06:30:00"));
+
+        recovery.recoverInterruptedExecutions();
+
+        // 照会に失敗したので投入しない。追跡には残っている（COMPLETED にしない）
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_REVIEW);
+        assertThat(recovery.status().pendingCount()).isEqualTo(1);
+
+        // 次のパス: 同じ実行IDを投入する（やり直しを作り直さない）
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        verify(executor, times(1)).submit(eq("batR04"), eq(721L), any());
+        // 復旧トランザクションは 1 回だけ（やり直しを二重に作らない）
+        verify(triggerStore, times(1)).recoverRunningExecution(eq(720L), eq("batR04"), eq("R"), any(),
+                anyString(), eq(BatchExecutionRecovery.RETRY_CODE));
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("B: 同じパスで作った複数のやり直しは、1 つの照会失敗でも全部追跡に残り、次で 1 回ずつ投入する")
+    void keepsAllRetriesTrackedWhenOneLookupFails() {
+        // 2 つのタスク（R と L）で、それぞれ有効な実行中を復旧してやり直しを作る
+        config(TaskSchedule.daily("batR04", true, LocalTime.of(6, 30)),
+                TaskSchedule.interval("batL02", true, 5, 1));
+        leftovers(row("batR04", "RUNNING", 730L, "2026-09-20T06:30:00"),
+                row("batL02", "RUNNING", 731L, "2026-09-20T08:56:00"));
+        when(triggerStore.recoverRunningExecution(eq(730L), eq("batR04"), eq("R"), any(), anyString(),
+                eq(BatchExecutionRecovery.RETRY_CODE)))
+                .thenReturn(new ScheduledTriggerStore.RecoveryResult(true, 732L, true));
+        when(triggerStore.recoverRunningExecution(eq(731L), eq("batL02"), eq("R"), any(), anyString(),
+                eq(BatchExecutionRecovery.RETRY_CODE)))
+                .thenReturn(new ScheduledTriggerStore.RecoveryResult(true, 733L, true));
+        // 732 の照会だけが失敗する（733 は待機中）
+        when(executionMapper.findById(732L))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenReturn(row("batR04", "QUEUED", 732L, "2026-09-20T06:30:00"));
+        when(executionMapper.findById(733L)).thenReturn(row("batL02", "QUEUED", 733L, "2026-09-20T08:56:00"));
+
+        recovery.recoverInterruptedExecutions();
+
+        // 照会できた方は投入され、できなかった方も追跡に残る
+        verify(executor, times(1)).submit(eq("batL02"), eq(733L), any());
+        verify(executor, never()).submit(eq("batR04"), anyLong(), any());
+        assertThat(recovery.status().pendingCount()).isEqualTo(1);
+
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        verify(executor, times(1)).submit(eq("batR04"), eq(732L), any());   // 1 回だけ
+        verify(executor, times(1)).submit(eq("batL02"), eq(733L), any());   // 既に接収済みは再投入しない
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("C: 同じタスクの未決が 2 パス続いても持ち越しを失わず、片付いてから 1 回投入する")
+    void keepsThePendingDispatchAcrossSeveralPasses() {
+        config(TaskSchedule.interval("batL02", true, 5, 1));
+        leftovers(row("batL02", "QUEUED", 740L, "2026-09-20T08:51:00"),
+                row("batL02", "QUEUED", 741L, "2026-09-20T08:56:00"));
+        // 古い方（追い越された記録）を閉じるのが 2 パス続けて失敗する（未決が残る）
+        when(triggerStore.closeLeftover(eq(740L), any(), anyString()))
+                .thenThrow(new IllegalStateException("DB が混んでいます"))
+                .thenThrow(new IllegalStateException("まだ混んでいます"))
+                .thenReturn(true);
+
+        for (int pass = 0; pass < 2; pass++) {
+            recovery.recoverInterruptedExecutions();
+            recovery.recoverInterruptedExecutions();   // 同じパス内の再呼び出しでも二重に進めない
+            verify(executor, never()).submit(anyString(), anyLong(), any());
+            assertThat(recovery.status().pendingCount()).isEqualTo(2);   // 未決＋投入待ち
+            assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_REVIEW);
+            clock.advance(Duration.ofSeconds(31));
+        }
+
+        // 未決が片付いた → 古い方を閉じて、有効な方を 1 回だけ投入する
+        recovery.recoverInterruptedExecutions();
+
+        verify(triggerStore, times(3)).closeLeftover(eq(740L), eq(BatchExecutionStatus.SKIPPED), anyString());
+        verify(executor, times(1)).submit(eq("batL02"), eq(741L), any());
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("D: 投入失敗は保留し、記録が明確に終わったら追跡から外す（業務を二重に走らせない）")
+    void keepsOnSubmitFailureAndDropsWhenTerminal() {
+        networkTasks();
+        leftovers(row("batR04", "QUEUED", 750L, "2026-09-20T06:30:00"));
+        // 1 回目の投入は想定外の例外
+        org.mockito.Mockito.doThrow(new IllegalStateException("実行器が止まっています"))
+                .doNothing().when(executor).submit(eq("batR04"), eq(750L), any());
+
+        recovery.recoverInterruptedExecutions();
+
+        verify(executor, times(1)).submit(eq("batR04"), eq(750L), any());   // 例外になった 1 回
+        assertThat(recovery.status().pendingCount()).isEqualTo(1);          // 追跡には残る
+
+        // 記録が別の経路で終わっていたら、投入せずに追跡から外す
+        BatchExecutionEntity done = row("batR04", "SUCCESS", 750L, "2026-09-20T06:30:00");
+        when(executionMapper.findById(750L)).thenReturn(done);
+        clock.advance(Duration.ofSeconds(31));
+        recovery.retryPendingRecoveryIfDue();
+
+        verify(executor, times(1)).submit(eq("batR04"), eq(750L), any());   // 追加の投入はない
+        assertThat(recovery.status().pendingCount()).isZero();
+        assertThat(recovery.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
+    }
+
+    // ------------------------------------------------------------------ 自動運転のスイッチ
+
+    @Test
+    @DisplayName("自動復旧のスイッチ: 無効なら起動イベントでも周期検査でも進めない（明示呼び出しは動く）")
+    void autoRecoverySwitchGatesOnlyTheAutomaticEntries() {
+        networkTasks();
+        leftovers(row("batR04", "QUEUED", 760L, "2026-09-20T06:30:00"));
+        BatchExecutionRecovery manual = new BatchExecutionRecovery(executionMapper, triggerStore, executor,
+                catalog, planGuard, configService, new ProcessRunIdOf(CURRENT_RUN_ID), false, clock);
+
+        // 自動の入口（起動イベント・周期検査）は何もしない
+        manual.recoverInterruptedExecutions();
+        manual.retryPendingRecoveryIfDue();
+        verify(executor, never()).submit(anyString(), anyLong(), any());
+        verify(executionMapper, never()).findLeftoversExceptRunId(anyString());
+        assertThat(manual.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.PENDING_DISCOVERY);
+
+        // 明示的に呼べば動く（業務の入口はスイッチの影響を受けない）
+        manual.retryPendingRecoveryNow("手動");
+        verify(executor, times(1)).submit(eq("batR04"), eq(760L), any());
+        assertThat(manual.status().phase()).isEqualTo(BatchExecutionRecovery.Phase.COMPLETED);
     }
 
     @Test

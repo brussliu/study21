@@ -49,6 +49,14 @@ public class BatchScheduleScheduler {
     /** 設定が読めないときの案内ログを出しすぎないための間隔（この回数ごとに 1 行）。 */
     private final int skipLogEvery;
 
+    /**
+     * **自動運転のスイッチ**（定期実行）。既定は有効。
+     *
+     * <p>無効にすると 30 秒ごとの検査は何もしない（テストや、手動でだけ動かす環境のため）。
+     * 「遅い間隔にする」ではなく**明示的に止める**ための設定。</p>
+     */
+    private final boolean autoRunEnabled;
+
     private long skipLogCounter;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -58,12 +66,13 @@ public class BatchScheduleScheduler {
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
                                   BatchExecutionRecovery recovery,
-                                  @Value("${study21.batch.schedule.skip-log-every:20}") int skipLogEvery) {
+                                  @Value("${study21.batch.schedule.skip-log-every:20}") int skipLogEvery,
+                                  @Value("${study21.batch.auto-run.schedule-enabled:true}") boolean autoRunEnabled) {
         this(configService, triggerStore, executor, catalog, planGuard, recovery, skipLogEvery,
-                Clock.system(ScheduleConfigService.ZONE));
+                autoRunEnabled, Clock.system(ScheduleConfigService.ZONE));
     }
 
-    /** テスト用（時計を差し替える）。 */
+    /** テスト用（時計と自動運転のスイッチを差し替える）。 */
     public BatchScheduleScheduler(ScheduleConfigService configService,
                                   ScheduledTriggerStore triggerStore,
                                   BatchScheduleExecutor executor,
@@ -71,6 +80,7 @@ public class BatchScheduleScheduler {
                                   SchedulePlanGuard planGuard,
                                   BatchExecutionRecovery recovery,
                                   int skipLogEvery,
+                                  boolean autoRunEnabled,
                                   Clock clock) {
         this.configService = configService;
         this.triggerStore = triggerStore;
@@ -79,6 +89,7 @@ public class BatchScheduleScheduler {
         this.planGuard = planGuard;
         this.recovery = recovery;
         this.skipLogEvery = Math.max(1, skipLogEvery);
+        this.autoRunEnabled = autoRunEnabled;
         this.clock = clock;
     }
 
@@ -86,6 +97,11 @@ public class BatchScheduleScheduler {
     @Scheduled(fixedDelayString = "${study21.batch.schedule.check-interval-ms:30000}",
             initialDelayString = "${study21.batch.schedule.initial-delay-ms:10000}")
     public void checkDueTasks() {
+        if (!autoRunEnabled) {
+            // 定期実行の自動運転は無効（テストや手動運用）。検査そのものは走らせない
+            log.debug("定期検査は無効です（study21.batch.auto-run.schedule-enabled=false）。");
+            return;
+        }
         try {
             runOnce(clock.instant());
         } catch (RuntimeException cause) {

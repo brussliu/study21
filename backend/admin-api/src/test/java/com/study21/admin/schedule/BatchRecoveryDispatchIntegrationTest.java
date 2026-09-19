@@ -4,7 +4,6 @@ import com.study21.admin.batch.BatchExecutionEntity;
 import com.study21.admin.batch.BatchExecutionMapper;
 import com.study21.admin.batch.BatchExecutionStatus;
 import com.study21.admin.batch.BatchServiceImpl;
-import com.study21.admin.batch.BatchStartupRunner;
 import com.study21.admin.batch.ProcessRunId;
 import com.study21.admin.testing.BatchTestExecutionCleanup;
 import com.study21.admin.testing.StubBatchTaskHandler;
@@ -16,7 +15,6 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -67,10 +65,6 @@ class BatchRecoveryDispatchIntegrationTest {
     @Autowired
     private ProcessRunId processRunId;
 
-    /** 起動時バッチはテストでは走らせない。 */
-    @MockitoBean
-    private BatchStartupRunner startupRunner;
-
     @Autowired
     private com.study21.admin.batch.BatchTaskRegistry registry;
 
@@ -89,10 +83,25 @@ class BatchRecoveryDispatchIntegrationTest {
     @Autowired
     private com.study21.admin.testing.TestSqlMapper sql;
 
+    @Autowired
+    private org.springframework.context.ConfigurableApplicationContext applicationContext;
+
+    /** testdb では自動運転が無効（3 つのスイッチ）。値そのものを確かめる。 */
+    @org.springframework.beans.factory.annotation.Value("${study21.batch.auto-run.schedule-enabled:true}")
+    private boolean scheduleAutoEnabled;
+
+    @org.springframework.beans.factory.annotation.Value("${study21.batch.auto-run.startup-enabled:true}")
+    private boolean startupAutoEnabled;
+
+    @org.springframework.beans.factory.annotation.Value("${study21.batch.auto-run.recovery-enabled:true}")
+    private boolean recoveryAutoEnabled;
+
     /** 実業務（動画取込など）の代役。呼ばれた回数と開始をテストから観察する。 */
     private StubBatchTaskHandler stubHandler;
     private BatchExecutionRecovery recovery;
     private BatchTestExecutionCleanup cleanup;
+    /** テストが組み立てた実行器（後始末の前に必ず止める＝片付け中の書き込みを防ぐ）。 */
+    private BatchScheduleExecutor manualExecutor;
 
     @BeforeEach
     void setUp() {
@@ -116,17 +125,23 @@ class BatchRecoveryDispatchIntegrationTest {
         stubHandler = new StubBatchTaskHandler("batL02", "テスト: 実行しました");
         BatchServiceImpl testBatchService = new BatchServiceImpl(registry, settingsService, executionMapper,
                 controlMapper, aiCallLogMapper, List.of(stubHandler), List.of(), timingRecorder);
-        BatchScheduleExecutor testExecutor = new BatchScheduleExecutor(testBatchService, planGuard,
+        manualExecutor = new BatchScheduleExecutor(testBatchService, planGuard,
                 configService, 1, BatchScheduleExecutor.DEFAULT_QUEUE_CAPACITY,
                 Clock.system(ScheduleConfigService.ZONE));
+        BatchScheduleExecutor testExecutor = manualExecutor;
         // 設定を読み直しておく（この経路はスケジューラと同じ）
         configService.refresh("テスト");
+        // テストは自動の入口を使わず、必要なときに明示的に呼ぶ（自動運転は testdb で無効）
         recovery = new BatchExecutionRecovery(executionMapper, triggerStore, testExecutor, catalog,
-                planGuard, configService, processRunId, Clock.system(ScheduleConfigService.ZONE));
+                planGuard, configService, processRunId, true, Clock.system(ScheduleConfigService.ZONE));
     }
 
     @AfterEach
     void closeOnlyOwnRows() {
+        // 手動で作った実行器を先に止める（片付けの間に業務が書き込まないように）
+        if (manualExecutor != null) {
+            manualExecutor.shutdown();
+        }
         cleanup.closeAll();
         // この試験が作った記録（前のプロセスの識別子で印を付けたもの）のうち、
         // 未完了のまま残ったものを閉じる（次の実行が拾ってしまわないように）
@@ -155,6 +170,15 @@ class BatchRecoveryDispatchIntegrationTest {
         return record;
     }
 
+    /** このプロセスの起動識別子で作られた起動時バッチ（batS01）の記録数。 */
+    private long ownStartupBatchRows() {
+        List<java.util.Map<String, Object>> rows = sql.query(
+                "SELECT COUNT(*) AS c FROM public.\"BAT_バッチ実行履歴情報\""
+                        + " WHERE \"起動識別子\" = '" + processRunId.value() + "'"
+                        + " AND \"バッチコード\" = 'batS01'");
+        return ((Number) rows.get(0).get("c")).longValue();
+    }
+
     /** 終了状態になるまで待つ（業務は別スレッドで走る）。 */
     private BatchExecutionEntity awaitTerminal(long executionId, Duration timeout) throws InterruptedException {
         Instant deadline = Instant.now().plus(timeout);
@@ -166,6 +190,42 @@ class BatchRecoveryDispatchIntegrationTest {
             row = executionMapper.findById(executionId);
         }
         return row;
+    }
+
+    @Test
+    @DisplayName("testdb では自動運転のスイッチが 3 つとも無効（定期実行・起動時バッチ・自動復旧）")
+    void autoRunSwitchesAreDisabledInTestDb() {
+        assertThat(scheduleAutoEnabled).isFalse();
+        assertThat(startupAutoEnabled).isFalse();
+        assertThat(recoveryAutoEnabled).isFalse();
+    }
+
+    @Test
+    @DisplayName("起動イベントでは自動復旧しない（スイッチ無効）。明示的に呼べば復旧する")
+    void applicationReadyEventDoesNotRecoverButExplicitCallDoes() throws Exception {
+        TaskSchedule schedule = TaskSchedule.interval("batL02", true, 5, 1);
+        LocalDateTime newest = schedule.previousRunnablePointAtOrBefore(LocalDateTime.now(ScheduleConfigService.ZONE))
+                .orElseThrow();
+        BatchExecutionEntity latest = insertLeftover("batL02", newest, BatchExecutionStatus.QUEUED.name());
+
+        // 起動イベントをそのまま流す（本物のリスナーが動く）
+        long startupRowsBefore = ownStartupBatchRows();
+        applicationContext.publishEvent(new org.springframework.boot.context.event.ApplicationReadyEvent(
+                new org.springframework.boot.SpringApplication(), new String[0], applicationContext,
+                java.time.Duration.ZERO));
+        // 待たない: 自動の入口はどちらも**同期**に動く（動いていればこの時点で記録が変わっている）。
+        // 起動時バッチも自動復旧も走らない（スイッチが無効）
+        assertThat(ownStartupBatchRows()).isEqualTo(startupRowsBefore);
+        assertThat(executionMapper.findById(latest.getExecutionId()).getStatus())
+                .isEqualTo(BatchExecutionStatus.QUEUED.name());
+        assertThat(stubHandler.calls()).isZero();
+
+        // 明示的に呼べば（業務の入口はスイッチの影響を受けない）復旧して実行される
+        recovery.recoverInterruptedExecutions();
+        assertThat(stubHandler.started().await(20, TimeUnit.SECONDS)).isTrue();
+        assertThat(awaitTerminal(latest.getExecutionId(), Duration.ofSeconds(20)).getStatus())
+                .isEqualTo(BatchExecutionStatus.SUCCESS.name());
+        assertThat(stubHandler.executedIds()).containsExactly(latest.getExecutionId());
     }
 
     @Test

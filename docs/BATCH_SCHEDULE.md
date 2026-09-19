@@ -284,9 +284,19 @@
    **今回は投入せず持ち越す**（投入すると冒頭のスキップで失われるため）。未決が片付けば次で投入する。
    他のタスクは進める（1 つのタスクの失敗で全体を止めない）。
 
-- **投入待ちは復旧の追跡に残す**（実行器へ渡すまで、または明確に終わったと分かるまで外さない）。
-  実行中から作ったやり直しは**このプロセスの記録**なので「前のプロセスの遺留」の検索では二度と出ない
-  → **この追跡が唯一の持ち主**で、次パス・次回起動まで責任を持つ。
+- **投入待ちは復旧の追跡（`pendingDispatches`）に残す**（実行器へ渡すまで、または明確に終わったと
+  分かるまで外さない）。実行中から作ったやり直しは**このプロセスの記録**なので
+  「前のプロセスの遺留」の検索では二度と出ない → **この追跡が唯一の持ち主**で、
+  次パス・次回起動まで責任を持つ。**局所変数（判定結果のリスト）だけに持たせない**:
+  - 復旧トランザクションが成功してやり直しを作ったら、**先に追跡へ入れ、そのあと元の実行IDを
+    遺留リストから外す**（順序を逆にすると、間で照会が失敗したときに新しい記録が誰の追跡にも入らない）。
+  - 第 2 段階は**追跡の複製**を回す（回しながら集合を触らない）。判断は 3 状態:
+    **待機中**（投入してよい）／**終了済み**（投入しないで追跡から外す）／
+    **照会できず**（**「無い」「終わった」と解釈しない**。追跡に残して次のパスでやり直す）。
+  - 同じタスクの未決が残っている間、投入は持ち越す（何パス続いても失わない）。
+  - `executor.submit` が例外でも追跡に残す。**実行器が引き受けた**か、**記録が終了済みと
+    確認できた**ときだけ外す。
+  - 復旧の完了は「遺留リストと追跡の両方が空」のときだけ（画面の保留件数もその和）。
 - 投入の直前に**記録がいまも待機中か**を確かめ、実行済み・閉じられていれば投入しない（二重実行しない）。
   実行の直前には**そのとき最新の 1 枚**で再検証する（待機中に設定が変わっていれば見送る）。
 - 待ち行列があふれたときの入り直しは**実行器の既存の仕組み**（`retryPendingSubmissions`）に任せる
@@ -390,11 +400,29 @@ tmp/tools/study21-batchtestdb.sh stop      # 止める（使い捨てなので�
 ```
 
 - 試験側は `@ActiveProfiles("testdb")`（`src/test/resources/application-testdb.properties`）で
-  データ源を切り替え、**起動時の副作用**（30 秒スケジューラ・起動時バッチ）を止める。
+  データ源を切り替え、**自動運転の 3 つのスイッチ**（§7-4）で起動時の副作用を止める
+  （「遅延で避ける」ではなく明示的に無効。テストは業務の入口を明示的に呼ぶ）。
 - 実業務のハンドラ（動画取込・AI・プロキシ起動）は**代役**にして、外部への副作用を出さない
   （MyBatis・起動識別子のインターセプタ・トランザクションの経路は本物のまま通す）。
 - 試験が作った記録は `BatchTestExecutionCleanup` で**自分が作った実行IDだけ**を閉じる
   （「最近の N 件」をまとめて触らない）。
+
+## 7-4. 自動運転のスイッチ（テスト・手動運用のため）
+
+自動で走る入口は 3 つ。どれも**既定は有効**（正常環境の挙動は変えない）。テストや、
+手動でだけ動かす環境では**明示的に止める**（「間隔を遅くする」で逃げない）。
+
+| 設定キー | 既定 | 止めると |
+|---|---|---|
+| `study21.batch.auto-run.schedule-enabled` | `true` | 30 秒ごとの検査（定期実行）を何もしない |
+| `study21.batch.auto-run.startup-enabled` | `true` | 起動時バッチ（種別 S）を実行しない |
+| `study21.batch.auto-run.recovery-enabled` | `true` | 起動時の自動復旧と、30 秒検査からの復旧の再試行をしない |
+
+- **業務の入口はスイッチの影響を受けない**（`BatchService#runOnStartup`、
+  `BatchExecutionRecovery#recoverInterruptedExecutions` を明示的に呼べば動く。テストはこれを利用する）。
+  管理画面の【設定を再読み込み】からの `retryPendingRecoveryNow` も明示の入口として動く。
+- 入口は**薄い適配層**（リスナー／`@Scheduled` の先頭でスイッチを見て、本体を呼ぶだけ）。
+  Bean は常に生成されるので、Mapper・MyBatis のインターセプタ・トランザクションはそのまま使える。
 
 ## 8. 運用
 
@@ -467,6 +495,11 @@ tmp/tools/study21-batchtestdb.sh stop      # 止める（使い捨てなので�
 | 4-35 | 復旧トランザクション失敗でも次のパスで回復し、やり直しを二重に作らない | `BatchExecutionRecoveryTest#retriesWhenTheRecoveryTransactionFailsWithoutDuplicatingTheRetry` |
 | 4-36 | 待機中でない記録は実行しない（同じ実行IDの二重実行を防ぐ） | `BatchRerunServiceImplTest`（実行済みの記録は実行しない）・`BatchExecutionRecoveryTest#dropsThePendingDispatchWhenTheRecordIsAlreadyTerminal` |
 | 4-37 | テストの後始末は自分が作った記録だけを閉じる（他の記録を変えない） | `BatchExecutionCleanupIsolationTest`（実 DB） |
+| 4-38 | 復旧トランザクション後の**照会失敗**でも新しいやり直しは追跡に残り、次で 1 回だけ投入する | `BatchExecutionRecoveryTest#keepsTheNewRetryTrackedWhenTheFirstLookupFails` |
+| 4-39 | 同じパスで作った複数のやり直しは、1 つの照会失敗でも全部追跡に残る（片方は投入済みでも再投入しない） | `BatchExecutionRecoveryTest#keepsAllRetriesTrackedWhenOneLookupFails` |
+| 4-40 | 未決が何パス続いても投入待ちを失わない／投入失敗は保留し、終了済みと分かったら外す | `BatchExecutionRecoveryTest#keepsThePendingDispatchAcrossSeveralPasses`・`#keepsOnSubmitFailureAndDropsWhenTerminal` |
+| 4-41 | 自動運転のスイッチは自動の入口だけを止める（明示呼び出しは動く） | `BatchExecutionRecoveryTest#autoRecoverySwitchGatesOnlyTheAutomaticEntries`・`BatchScheduleSchedulerTest#autoRunSwitchDisablesThePeriodicCheck`・`#autoRunSwitchEnabledKeepsThePeriodicCheck`・`BatchStartupRunnerTest` |
+| 4-42 | testdb では 3 つのスイッチが無効で、起動イベントでも起動時バッチ・自動復旧・定期実行が走らない（明示呼び出しでは動く） | `BatchRecoveryDispatchIntegrationTest#autoRunSwitchesAreDisabledInTestDb`・`#applicationReadyEventDoesNotRecoverButExplicitCallDoes`（実 DB・実リスナー） |
 | 4-26 | 1 回の判断が**1 枚のスナップショット**だけを使う（途中で入れ替わっても混ざらない） | `SchedulePlanGuardTest#usesOnlyTheGivenSnapshot`・`#networkAndIntervalDecisionsUseTheGivenSnapshot`、`BatchScheduleExecutorTest#beforeRunUsesTheLatestSnapshot` |
 | 4-15 | 設定が無い・不正のときは、画面に**理由と次に確認する時刻**を出す | `ScheduleConfigServiceTest`（`fallbackMessage` / `configMissingMessage`）・`batch-schedule-panel.spec.ts`（`task-fallback` / `schedule-config-missing`）、実機（設定画面） |
 | 5 | メモリ欠落時に DB から托底して回填する | `ScheduleConfigServiceTest#fallbackLoadsOnceForConcurrentMisses` |

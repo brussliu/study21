@@ -159,6 +159,14 @@ public class BatchExecutionRecovery {
     private final SchedulePlanGuard planGuard;
     private final ScheduleConfigService configService;
     private final ProcessRunId processRunId;
+    /**
+     * **自動運転のスイッチ**（起動時の自動復旧と、30 秒検査からの再試行）。既定は有効。
+     *
+     * <p>無効にしても復旧の機能そのものは使える（{@link #recoverInterruptedExecutions()} や
+     * {@link #retryPendingRecoveryNow(String)} を**明示的に**呼べば動く）。テストや、
+     * 手動でだけ動かす環境のために、自動の入口だけを止める。</p>
+     */
+    private final boolean autoRunEnabled;
     private final Clock clock;
 
     /** 処理を 1 本に直列化する（起動イベント・周期検査・手動の再読み込みが同時に来ても 1 件ずつ）。 */
@@ -181,12 +189,14 @@ public class BatchExecutionRecovery {
                                   ScheduleRuleCatalog catalog,
                                   SchedulePlanGuard planGuard,
                                   ScheduleConfigService configService,
-                                  ProcessRunId processRunId) {
+                                  ProcessRunId processRunId,
+                                  @org.springframework.beans.factory.annotation.Value(
+                                          "${study21.batch.auto-run.recovery-enabled:true}") boolean autoRunEnabled) {
         this(executionMapper, triggerStore, executor, catalog, planGuard, configService, processRunId,
-                Clock.system(ScheduleConfigService.ZONE));
+                autoRunEnabled, Clock.system(ScheduleConfigService.ZONE));
     }
 
-    /** テスト用（時計を差し替える）。 */
+    /** テスト用（時計と自動運転のスイッチを差し替える）。 */
     public BatchExecutionRecovery(BatchExecutionMapper executionMapper,
                                   ScheduledTriggerStore triggerStore,
                                   BatchScheduleExecutor executor,
@@ -194,6 +204,7 @@ public class BatchExecutionRecovery {
                                   SchedulePlanGuard planGuard,
                                   ScheduleConfigService configService,
                                   ProcessRunId processRunId,
+                                  boolean autoRunEnabled,
                                   Clock clock) {
         this.executionMapper = executionMapper;
         this.triggerStore = triggerStore;
@@ -202,6 +213,7 @@ public class BatchExecutionRecovery {
         this.planGuard = planGuard;
         this.configService = configService;
         this.processRunId = processRunId;
+        this.autoRunEnabled = autoRunEnabled;
         this.clock = clock;
     }
 
@@ -215,6 +227,13 @@ public class BatchExecutionRecovery {
     @EventListener(ApplicationReadyEvent.class)
     @Order(Ordered.HIGHEST_PRECEDENCE + 10)
     public void recoverInterruptedExecutions() {
+        // 自動の入口（薄い適配層）。スイッチが無効なら何もしない。
+        // 復旧そのものは recoverInterruptedExecutions() を明示的に呼べば動く
+        if (!autoRunEnabled) {
+            log.info("起動時の自動復旧は無効です（study21.batch.auto-run.recovery-enabled=false）。"
+                    + "明示的に呼ぶと復旧します。");
+            return;
+        }
         advance("起動時");
     }
 
@@ -225,6 +244,9 @@ public class BatchExecutionRecovery {
      * 保留している行があれば、退避の間隔で判定し直す（＝**再起動しなくても自動で続く**）。</p>
      */
     public void retryPendingRecoveryIfDue() {
+        if (!autoRunEnabled) {
+            return;   // 自動の入口は無効（30 秒検査からも進めない）
+        }
         advance("自動再試行", false);
     }
 
@@ -344,8 +366,10 @@ public class BatchExecutionRecovery {
         }
 
         // ---------------------------------------------------------------- 第 1 段階: 判定と整理
+        // 判定した「投入待ち」は**メンバーの追跡（pendingDispatches）へ直接入れる**。
+        // 局所変数だけに持たせると、途中で照会が失敗して抜けたときに新しく作ったやり直しが
+        // 追跡から消える（このプロセスの記録なので遺留検索では二度と出ない＝漏執行になる）。
         Set<String> unresolvedTasks = new LinkedHashSet<>();
-        List<PendingDispatch> judged = new ArrayList<>();
         List<BatchExecutionEntity> ordered = new ArrayList<>(rows.values());
         ordered.sort(Comparator
                 .comparing((BatchExecutionEntity row) -> plannedAtOf(row),
@@ -406,7 +430,9 @@ public class BatchExecutionRecovery {
                 log.warn("再起動前に確保していた計画実行点を実行し直します（投入は整理のあと）。"
                         + "taskCode={} executionId={} 予定={} configVersion={}",
                         taskCode, executionId, plannedAt, decision.configVersion());
-                judged.add(new PendingDispatch(taskCode, executionId, plannedAt));
+                // 投入待ちは**メンバーの追跡**に入れる（局所変数だけに持たせない）。
+                // 遺留リストからはまだ外さない（投入が済むまで「決着していない」）
+                pendingDispatches.put(executionId, new PendingDispatch(taskCode, executionId, plannedAt));
                 continue;
             }
             // 実行中（結果が分からない）→ 閉じる＋やり直しを 1 トランザクションで作る
@@ -427,47 +453,54 @@ public class BatchExecutionRecovery {
                 unresolvedTasks.add(taskCode);   // 他の復旧が処理中 → 次のパスで確認する
                 continue;
             }
-            leftoverIds.remove(executionId);
             processed++;
             if (result.retryExecutionId() != null) {
-                // **コミット後**に投入待ちへ入れる（トランザクションの中で投入しない）。
-                // このやり直しは**このプロセスの記録**なので遺留検索では二度と出ない →
-                // ここで追跡に入れて、この追跡が投入まで責任を持つ
-                judged.add(new PendingDispatch(taskCode, result.retryExecutionId(), plannedAt));
+                // **コミット後**にメンバーの追跡へ入れる（トランザクションの中で投入しない）。
+                // このやり直しは**このプロセスの記録**なので「前のプロセスの遺留」検索では
+                // 二度と出てこない → ここで入れた追跡が投入までの唯一の持ち主になる。
+                // 先に登録してから元の ID を外す（登録前に例外が出ても取りこぼさない順序）
+                pendingDispatches.put(result.retryExecutionId(),
+                        new PendingDispatch(taskCode, result.retryExecutionId(), plannedAt));
             }
+            leftoverIds.remove(executionId);
         }
 
         // ---------------------------------------------------------------- 第 2 段階: 投入
-        // 前のパスから持ち越した投入待ち＋今回判定した分（実行IDで重複を除く）
-        Map<Long, PendingDispatch> candidates = new LinkedHashMap<>(pendingDispatches);
-        for (PendingDispatch pending : judged) {
-            candidates.put(pending.executionId(), pending);
-        }
+        // **追跡の複製**を回す（回しながら集合を触らない）。判断できないものは残す。
         int submitted = 0;
         int held = 0;
-        for (PendingDispatch pending : candidates.values()) {
+        for (PendingDispatch pending : new ArrayList<>(pendingDispatches.values())) {
+            if (!pendingDispatches.containsKey(pending.executionId())) {
+                continue;   // 同じパスで既に外れている（他の行の処理で決着した）
+            }
             if (unresolvedTasks.contains(pending.taskCode())) {
                 // 同じタスクに未決の遺留が残っている。ここで投入すると業務側の
                 // 「前回が終わっていない」でスキップされ、**本来実行すべき記録が失われる**。
-                // 追跡に残して次に回す（未決が片付けば投入する）
-                pendingDispatches.put(pending.executionId(), pending);
+                // 追跡に残したまま次に回す（未決が片付けば投入する）
                 held++;
                 continue;
             }
-            if (!isStillQueued(pending.executionId())) {
+            DispatchState state = stateOf(pending.executionId());
+            if (state == DispatchState.TERMINAL) {
                 // 既に実行済み・閉じられている（別の経路が処理した）→ 追跡から外す（二重実行しない）
                 pendingDispatches.remove(pending.executionId());
                 leftoverIds.remove(pending.executionId());
                 continue;
             }
+            if (state == DispatchState.UNKNOWN) {
+                // **照会できなかった**。「無い」「終わった」と解釈してはいけない →
+                // 追跡に残し、既存の退避の仕組みで次のパスでやり直す
+                held++;
+                continue;
+            }
             if (dispatchToExecutor(pending)) {
+                // 実行器が引き受けた → ここで追跡から外す（以後の面倒は実行器が見る）
                 pendingDispatches.remove(pending.executionId());
                 leftoverIds.remove(pending.executionId());
                 retried++;
                 submitted++;
             } else {
                 // 投入できなかった（想定外の例外）→ 追跡に残して次に回す（記録は待機中のまま残る）
-                pendingDispatches.put(pending.executionId(), pending);
                 held++;
             }
         }
@@ -502,10 +535,36 @@ public class BatchExecutionRecovery {
         }
     }
 
-    /** その実行記録がいまも**待機中**か（実行済み・閉じられたものを投入しない＝二重実行しない）。 */
-    private boolean isStillQueued(long executionId) {
-        BatchExecutionEntity row = executionMapper.findById(executionId);
-        return row != null && BatchExecutionStatus.QUEUED.name().equals(row.getStatus());
+    /**
+     * その実行記録のいまの状態（投入してよいかの判断に使う）。
+     *
+     * <p><b>照会の失敗（{@link DispatchState#UNKNOWN}）を「無い」「終わった」と解釈しない</b>。
+     * 失敗したら待機中のまま追跡に残し、次のパスでやり直す（取りこぼしを作らない）。</p>
+     */
+    private DispatchState stateOf(long executionId) {
+        BatchExecutionEntity row;
+        try {
+            row = executionMapper.findById(executionId);
+        } catch (RuntimeException cause) {
+            log.warn("実行記録の状態を確かめられませんでした（次のパスでやり直します）。executionId={} reason={}",
+                    executionId, messageOf(cause));
+            return DispatchState.UNKNOWN;
+        }
+        if (row == null) {
+            return DispatchState.TERMINAL;   // 行が無い＝投入しても何も起きない
+        }
+        return BatchExecutionStatus.QUEUED.name().equals(row.getStatus())
+                ? DispatchState.QUEUED : DispatchState.TERMINAL;
+    }
+
+    /** 投入してよいかの判断（照会結果）。 */
+    private enum DispatchState {
+        /** まだ待機中（投入してよい）。 */
+        QUEUED,
+        /** 実行済み・閉じられている（投入しない。追跡から外す）。 */
+        TERMINAL,
+        /** 照会できなかった（判断しない。追跡に残す）。 */
+        UNKNOWN
     }
 
     /** 例外を握って閉じる（false = 閉じられなかった＝次のパスで再試行）。 */

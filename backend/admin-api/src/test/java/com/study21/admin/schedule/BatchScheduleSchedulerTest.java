@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -58,12 +59,17 @@ class BatchScheduleSchedulerTest {
                     new SchedulePlanGuard(catalog, triggerStore), mock(ScheduleConfigService.class),
                     new com.study21.admin.batch.ProcessRunId(
                             Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE)),
+                    true,   // 自動運転のスイッチ（このテストでは有効）
                     Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE));
         }
 
         @Override
         public void retryPendingRecoveryIfDue() {
             retries++;
+        }
+
+        int retryCount() {
+            return retries;
         }
     }
 
@@ -78,7 +84,7 @@ class BatchScheduleSchedulerTest {
         recovery = new BatchScheduleRecoveryStub(catalog, triggerStore);
         Clock clock = Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE);   // 2026-09-19 23:30 JST
         scheduler = new BatchScheduleScheduler(configService, triggerStore, executor,
-                catalog, planGuard, recovery, 20, clock);
+                catalog, planGuard, recovery, 20, true, clock);
     }
 
     /** タスクぶんのスナップショット（指定しなかったタスクは「未設定」になる）。 */
@@ -234,6 +240,32 @@ class BatchScheduleSchedulerTest {
         assertThat(result.checkedAt()).isEqualTo(LocalDateTime.of(2026, 9, 19, 23, 30));
         assertThat(result.configVersion()).isEqualTo(3);
         assertThat(result.queuedWorkers()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("自動運転のスイッチ: 無効なら定期検査は何もしない（手動で動かす環境のため）")
+    void autoRunSwitchDisablesThePeriodicCheck() {
+        BatchScheduleScheduler disabled = new BatchScheduleScheduler(configService, triggerStore, executor,
+                catalog, planGuard, recovery, 20, false,
+                Clock.fixed(Instant.parse("2026-09-19T14:30:00Z"), ZONE));
+
+        disabled.checkDueTasks();
+
+        // 設定も計画も実行器も触らない（復旧の再試行も促さない）
+        verifyNoInteractions(configService, triggerStore, executor);
+        assertThat(recovery.retryCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("自動運転のスイッチ: 有効（既定）なら定期検査は今までどおり動く")
+    void autoRunSwitchEnabledKeepsThePeriodicCheck() {
+        ScheduleConfigSnapshot empty = snapshot();
+        when(configService.snapshot()).thenReturn(empty);
+        when(configService.ensureUsableConfig()).thenReturn(empty);
+
+        scheduler.checkDueTasks();
+
+        assertThat(recovery.retryCount()).isEqualTo(1);
     }
 
     @Test

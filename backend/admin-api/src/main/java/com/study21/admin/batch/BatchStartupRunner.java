@@ -26,12 +26,34 @@ public class BatchStartupRunner {
 
     private final BatchService batchService;
 
-    public BatchStartupRunner(BatchService batchService) {
+    /**
+     * **自動運転のスイッチ**（起動時バッチ）。既定は有効。
+     *
+     * <p>無効にすると {@code ApplicationReadyEvent} では何もしない（テストや、手動でだけ動かす
+     * 環境のため）。業務の入口（{@code BatchService#runOnStartup}）はそのまま呼べる。</p>
+     */
+    private final boolean autoRunEnabled;
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public BatchStartupRunner(BatchService batchService,
+                              @org.springframework.beans.factory.annotation.Value(
+                                      "${study21.batch.auto-run.startup-enabled:true}") boolean autoRunEnabled) {
         this.batchService = batchService;
+        this.autoRunEnabled = autoRunEnabled;
+    }
+
+    /** テスト用（自動運転のスイッチを差し替える）。 */
+    public BatchStartupRunner(BatchService batchService) {
+        this(batchService, true);
     }
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationReady() {
+        if (!autoRunEnabled) {
+            // 起動時バッチの自動運転は無効（テストや手動運用）
+            log.info("起動時バッチは無効です（study21.batch.auto-run.startup-enabled=false）。");
+            return;
+        }
         List<String> targets;
         try {
             targets = batchService.startupTargets();

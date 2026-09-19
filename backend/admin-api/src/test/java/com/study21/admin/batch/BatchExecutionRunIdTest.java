@@ -12,7 +12,6 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -71,10 +70,6 @@ class BatchExecutionRunIdTest {
 
     @Autowired
     private com.study21.admin.schedule.ScheduleTimingRecorder timingRecorder;
-
-    /** 起動時バッチ（実業務の入口）はテストでは走らせない。 */
-    @MockitoBean
-    private BatchStartupRunner startupRunner;
 
     /**
      * テストが組み立てたバッチサービス（**代役ハンドラだけ**を持つ）。

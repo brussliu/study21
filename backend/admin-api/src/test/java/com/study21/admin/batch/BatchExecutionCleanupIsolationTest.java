@@ -8,7 +8,6 @@ import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,9 +31,6 @@ class BatchExecutionCleanupIsolationTest {
 
     @Autowired
     private BatchExecutionMapper executionMapper;
-
-    @MockitoBean
-    private BatchStartupRunner startupRunner;
 
     /** 検証用に作った「後始末の対象ではない」記録（このテストが最後に片付ける）。 */
     private final List<Long> foreignIds = new ArrayList<>();
