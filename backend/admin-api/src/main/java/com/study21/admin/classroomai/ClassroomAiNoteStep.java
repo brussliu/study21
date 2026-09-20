@@ -97,6 +97,16 @@ public class ClassroomAiNoteStep {
         }
         result.put("noteId", entity.getNoteId());
         result.put("recordId", entity.getRecordId());
+        /*
+         * **この試行のトークン**で状態更新を照合する（古い試行が遅れて返っても、
+         * 新しい試行や既にできた結果を上書きしない）。
+         *
+         * <p>要求内容にトークンが載っていればそれを使う（起動の受理が付けた値）。載っていなければ
+         * 記録のいまの値を使う（スケジューラ・手動実行の回）。どちらも無ければ照合しない
+         * （旧い経路の互換）。</p>
+         */
+        String token = tokenOf(execution, entity);
+        entity.setGenerationToken(token);
 
         if (!isTarget(entity)) {
             result.put("skipped", true);
@@ -184,6 +194,28 @@ public class ClassroomAiNoteStep {
             builder.append(segment.getText());
         }
         return builder.toString();
+    }
+
+    /**
+     * この実行の**試行のトークン**（状態更新の照合に使う）。
+     *
+     * <p>起動の受理が付けた値を要求内容から読み、無ければ記録のいまの値を使う。</p>
+     */
+    static String tokenOf(BatchExecutionEntity execution, ClassroomNoteEntity entity) {
+        if (execution != null) {
+            String payload = execution.getRequestPayload();
+            if (payload != null && !payload.isBlank()) {
+                try {
+                    JsonNode node = MAPPER.readTree(payload).path("token");
+                    if ((node.isTextual() || node.isNumber()) && !node.asText().isBlank()) {
+                        return node.asText();
+                    }
+                } catch (IOException ignored) {
+                    // 読めない要求内容は「トークン無し」として扱う（記録の値を使う）
+                }
+            }
+        }
+        return entity == null ? null : entity.getGenerationToken();
     }
 
     /** 要求内容の JSON から noteId を読む。 */

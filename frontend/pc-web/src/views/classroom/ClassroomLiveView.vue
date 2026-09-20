@@ -9,6 +9,7 @@ import { ApiError, useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
   endClassroomRecord,
+  fetchClassroomNoteTaskStatus,
   fetchClassroomChunks,
   type ClassroomChunkManifest,
   type ClassroomFinalizeCheck,
@@ -1366,6 +1367,8 @@ function resetFinalize(): void {
   sttIncompleteAccepted.value = false
   sttIncompleteNotice.value = ''
   sttFinalizeSummary.value = null
+  noteStartFailed.value = false
+  noteState.value = 'idle' 
   finalizeError.value = ''
   finalizeFailedStage.value = 'idle'
   finishPhase.value = 'idle'
@@ -1454,6 +1457,15 @@ let sttFinalized = false
 /** 最終まとめの**起動**に失敗したか（録音の保存とは別。詳細画面にも残す）。 */
 const noteStartFailed = ref(false)
 
+/**
+ * 最終まとめの**起動の状態**（画面に出す文言を決める）。
+ *
+ * <p>`pending` は「**まだ始まっていない**（詳細画面から作成できる）」、`unknown` は
+ * 「**確認できない**」。失敗・未着手・確認不能を混ぜない（混ぜると「分からない」を
+ * 「失敗した」と言い切ってしまう）。</p>
+ */
+const noteState = ref<'idle' | 'pending' | 'unknown'>('idle')
+
 /** 走っている「最終まとめの起動の受理」を待つ約束（二重に頼まない）。 */
 let noteStartPromise: Promise<boolean> | null = null
 
@@ -1466,18 +1478,39 @@ let noteStartPromise: Promise<boolean> | null = null
  *
  * @return 受理を確認できたら true（既に走っている・作成済みも true）
  */
-async function acceptClassroomNote(runPath: string): Promise<boolean> {
+async function acceptClassroomNote(runPath: string, noteId: number | null): Promise<boolean> {
   if (noteStartPromise !== null) return noteStartPromise
   noteStartPromise = (async () => {
     try {
       const response = await runClassroomNote(runPath, 'classroom-live-view', 30_000)
       const data = response.data as { status?: string } | null
-      // 「受理した」「既に走っている」「作成済み」のどれでも、タスクは確かに存在する
-      return data === null || data.status === undefined
-        || data.status === 'GENERATING' || data.status === 'READY'
+      /*
+       * **受理されたかを状態で確かめる**。
+       *
+       * <p>応答の `status` が `GENERATING` / `READY` なら受理されている。`PENDING`（=user-api が
+       * 作っただけ）や**欄が無い応答**は受理の証拠にならないので、**記録を問い合わせる**。</p>
+       */
+      if (data !== null && (data.status === 'GENERATING' || data.status === 'READY')) return true
+      const confirmed = await noteTaskAccepted(noteId)
+      if (confirmed === true) return true
+      noteState.value = confirmed === null ? 'unknown' : 'pending'
+      syncError.value = confirmed === null
+        ? '最終まとめの状態を確認できませんでした。詳細画面から確認してください。'
+        : '最終まとめの生成はまだ始まっていません（詳細画面から作成できます）。'
+      return false
     } catch (caught) {
-      if (await noteIsRegistered()) return true
-      syncError.value = messageOf(caught, '最終まとめの生成を開始できませんでした。')
+      /*
+       * 応答を失った（タイムアウト・通信断）かもしれない。**同じノートの状態**を問い合わせる:
+       *   * `GENERATING` / `READY` … 受理されている（**二つ目のタスクを作らない**）
+       *   * `PENDING` … まだ受理されていない（開始/再試行の入口を出す）
+       *   * 問い合わせも失敗 … **確認できない**（成功とも失敗とも決めない）
+       */
+      const confirmed = await noteTaskAccepted(noteId)
+      if (confirmed === true) return true
+      noteState.value = confirmed === null ? 'unknown' : 'pending'
+      syncError.value = confirmed === null
+        ? messageOf(caught, '最終まとめの状態を確認できませんでした。')
+        : messageOf(caught, '最終まとめの生成を開始できませんでした。')
       return false
     } finally {
       noteStartPromise = null
@@ -1487,18 +1520,23 @@ async function acceptClassroomNote(runPath: string): Promise<boolean> {
 }
 
 /**
- * 最終まとめのタスクが**記録として存在するか**（受理されたのに応答を失った回の確認）。
+ * **そのノートの実行が受理されているか**を記録に問い合わせる。
  *
- * <p>ノートの行（`PENDING`／`GENERATING`／`READY`）が在れば、タスクは作られている。</p>
+ * <p>「FINAL の行があるか」では**足りない**: 終了のときに user-api が `PENDING` の行を先に
+ * 作るので、起動が届いていなくても行は存在する（それを受理と読むと、失敗が見えなくなる）。
+ * 見るのは**同じ `noteId` の状態**。</p>
+ *
+ * @return true = 受理済み / false = 未受理（PENDING・FAILED）/ null = **確認できない**
  */
-async function noteIsRegistered(): Promise<boolean> {
+async function noteTaskAccepted(noteId: number | null): Promise<boolean | null> {
   const id = recordId.value
-  if (id === null) return false
+  if (id === null || noteId === null) return null
   try {
-    const response = await fetchClassroomRecord(id)
-    return response.data.notes.some((note) => note.kind === 'FINAL')
+    const response = await fetchClassroomNoteTaskStatus(id, noteId)
+    return response.data.accepted === true
   } catch {
-    return false
+    // 状態が取れない＝**確認できない**（成功とも失敗とも決めない）
+    return null
   }
 }
 
@@ -2371,7 +2409,7 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
        * 「タスクを受け付けた」だけ（AI の完了は待たない）。結果は詳細画面のポーリングで読む。</p>
        */
       finishPhase.value = 'note'
-      const accepted = await acceptClassroomNote(runPath)
+      const accepted = await acceptClassroomNote(runPath, outcome.result.finalNoteId ?? null)
       if (!accepted) {
         /*
          * **起動できなかった**。録音の保存は成功しているので**そこは戻さない**
@@ -2379,8 +2417,11 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
          * （詳細画面でも同じ状態と入口を出す）。
          */
         noteStartFailed.value = true
-        finishNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした。'
-          + '詳細画面の【最終まとめを再試行】からやり直せます。'
+        finishNotice.value = noteState.value === 'pending'
+          ? '録音は保存しました。最終まとめはまだ作成していません'
+            + '（詳細画面の【最終まとめを作成】から作成できます）。'
+          : '録音は保存しました。最終まとめの状態を確認できませんでした'
+            + '（詳細画面で状態を確かめてください）。'
         finishPhase.value = 'done'
         toast.warning(finishNotice.value)
         backToDetail()

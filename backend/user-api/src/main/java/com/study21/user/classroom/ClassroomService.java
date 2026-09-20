@@ -111,6 +111,13 @@ public interface ClassroomService {
     /** 記録詳細（状態・転写全文・ノート一覧・前置詞）。 */
     ClassroomModels.RecordDetail detail(UserPrincipal user, long recordId);
 
+    /**
+     * **その記録の最終まとめ（1 つ）の状態**（画面が起動の受理を確かめるための入口）。
+     *
+     * <p>`PENDING` は「行がある」だけで、実行が受理された証拠ではない。画面は `accepted` を見る。</p>
+     */
+    ClassroomModels.NoteStatusView noteStatus(UserPrincipal user, long recordId, long noteId);
+
     /** 一覧（学生=自分 / 保護者=家族 / 管理者=全体、ページング）。 */
     ClassroomModels.RecordListResult list(UserPrincipal user, String status, int page, int size);
 

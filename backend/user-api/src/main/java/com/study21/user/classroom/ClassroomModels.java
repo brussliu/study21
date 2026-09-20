@@ -618,6 +618,29 @@ public final class ClassroomModels {
             String reason) {
     }
 
+    /**
+     * **最終まとめ（1 つのノート）の生成タスクの状態**。
+     *
+     * <p>画面はこれで「まだ始まっていない」「受理されている」「できた」「失敗した」を
+     * **正確に**見分ける。`PENDING` は「**user-api が行を作った**」だけで、admin-api の
+     * 実行が**受理された証拠ではない**（受理されると `GENERATING` 以上になる）。</p>
+     *
+     * @param noteId  対象のノート（終了の応答が返した `finalNoteId`）
+     * @param status  `PENDING`（未受理）/ `GENERATING`（受理済み・実行中）/ `READY`（完成）/ `FAILED`（失敗）
+     * @param accepted 実行が**受理されている**か（`GENERATING` 以上、または完成）
+     * @param retryable もう一度起動を頼めるか（`PENDING`・`FAILED` は true）
+     */
+    public record NoteStatusView(
+            long noteId,
+            String kind,
+            String status,
+            String statusLabel,
+            boolean accepted,
+            boolean retryable,
+            String errorCode,
+            String errorMessage) {
+    }
+
     /** 終了の要求（不完全なまま終える明示と、送った分塊の一覧）。 */
     public record EndRequest(boolean force, ChunkManifest manifest) {
     }

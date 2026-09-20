@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS public."CR_授業ノート情報" (
     "再試行回数"        INTEGER      NOT NULL DEFAULT 0,
     -- 生成の**起動を受理した**時刻（前回の開始から一定時間たった GENERATING は「落ちた」とみなす）
     "生成開始日時"      TIMESTAMP    NULL,
+    -- 受理した**試行の識別子**（遅れて返った古い試行の書き込みを捨てる照合に使う）
+    "生成トークン"      VARCHAR(64)  NULL,
 
     -- ---- 2.1 の共通規約 ----
     "バージョン"         INTEGER      NOT NULL DEFAULT 1,

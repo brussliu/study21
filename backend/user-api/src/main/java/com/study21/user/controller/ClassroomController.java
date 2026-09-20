@@ -244,6 +244,19 @@ public class ClassroomController {
         return ApiResponse.ok(classroomService.chunks(user, recordId, afterSeq));
     }
 
+    /**
+     * **最終まとめ（1 つ）の状態**（画面が起動の受理を確かめる）。
+     *
+     * <p>「FINAL の行があるか」ではなく、**その行の状態そのもの**を返す（`PENDING` は未受理）。</p>
+     */
+    @GetMapping("/{recordId}/notes/{noteId}")
+    public ApiResponse<ClassroomModels.NoteStatusView> noteStatus(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId,
+            @PathVariable long noteId) {
+        return ApiResponse.ok(classroomService.noteStatus(user, recordId, noteId));
+    }
+
     @GetMapping("/{recordId}")
     public ApiResponse<ClassroomModels.RecordDetail> detail(
             @AuthenticationPrincipal UserPrincipal user,

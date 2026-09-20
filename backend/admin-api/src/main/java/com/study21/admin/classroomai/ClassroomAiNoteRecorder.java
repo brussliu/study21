@@ -29,25 +29,28 @@ public class ClassroomAiNoteRecorder {
         this.aiCallLogMapper = aiCallLogMapper;
     }
 
-    /** AI へ送る前に「生成中」を確定する。 */
+    /** AI へ送る前に「生成中」を確定する（**この試行のトークン**と一緒に）。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void markGenerating(ClassroomNoteEntity entity, Long executionId) {
-        requireUpdated(noteMapper.markGenerating(entity.getNoteId(), executionId, versionOf(entity)), entity);
+        requireUpdated(noteMapper.markGenerating(entity.getNoteId(), executionId, versionOf(entity),
+                entity.getGenerationToken()), entity);
     }
 
     /** ノートを READY にする（FINAL はあわせて記録の最終まとめ・状態=COMPLETED）。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void updateReady(ClassroomNoteEntity entity) {
-        requireUpdated(noteMapper.updateReady(entity), entity);
+        requireUpdated(noteMapper.updateReady(entity.getNoteId(), entity.getNoteJson(),
+                entity.getAiCallId(), versionOf(entity), entity.getGenerationToken()), entity);
         if ("FINAL".equals(entity.getKind())) {
             recordMapper.updateSummaryCompleted(entity.getRecordId(), entity.getNoteJson());
         }
     }
 
-    /** 失敗を書く。 */
+    /** 失敗を書く（**いまの試行のときだけ**）。 */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void updateFailed(ClassroomNoteEntity entity) {
-        requireUpdated(noteMapper.updateFailed(entity), entity);
+        requireUpdated(noteMapper.updateFailed(entity.getNoteId(), entity.getErrorCode(),
+                entity.getErrorMessage(), versionOf(entity), entity.getGenerationToken()), entity);
     }
 
     /** AI 呼び出し履歴に 1 行足して、採番された 呼出履歴ID を返す。 */

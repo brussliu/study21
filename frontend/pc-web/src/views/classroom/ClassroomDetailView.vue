@@ -294,8 +294,40 @@ const transcribeSourceNote = computed(() => {
  */
 const finalNote = computed(() => detail.value?.notes.find((note) => note.kind === 'FINAL') ?? null)
 
-/** 最終まとめを作り直せるか（**失敗したときだけ**。走っている・できているときは出さない）。 */
-const canRetryFinalNote = computed(() => finalNote.value?.status === 'FAILED')
+/**
+ * 最終まとめの**作成/やり直しの入口を出すか**。
+ *
+ * <p>`PENDING` は **user-api が行を作っただけ**で、admin-api の実行が受理された証拠ではない
+ * （起動が届かなかった回・サーバーが落ちた回）。だから `PENDING` にも入口を出す
+ * （以前は `FAILED` だけだったので、**未着手のまま永久に「作成中」**に見えていた）。</p>
+ *
+ * <p>`GENERATING`（受理済み・実行中）と `READY`（完成）では出さない。</p>
+ */
+const canRetryFinalNote = computed(() => {
+  const status = finalNote.value?.status
+  return status === 'PENDING' || status === 'FAILED'
+})
+
+/** 入口の文言（未着手と失敗で分ける）。 */
+const finalNoteActionLabel = computed(() => (
+  finalNote.value?.status === 'PENDING' ? '最終まとめを作成' : '最終まとめを再試行'
+))
+
+/** 最終まとめの状態の表示（日本語。PENDING を「作成中」と言わない）。 */
+const finalNoteStateText = computed(() => {
+  const note = finalNote.value
+  if (note === null) return ''
+  if (note.status === 'READY') return '最終まとめができました。'
+  if (note.status === 'FAILED') {
+    return '録音は保存しました。最終まとめの生成に失敗しました（'
+      + `${note.errorMessage ?? note.errorCode ?? '理由は記録されています'}）。`
+  }
+  if (note.status === 'GENERATING') {
+    return '最終まとめを作成しています（この画面を開いたままでも閉じても進みます）。'
+  }
+  // PENDING: **まだ始まっていない**（「作成中」と読ませない）
+  return '最終まとめはまだ作成していません（下のボタンから作成できます）。'
+})
 
 /** 最終まとめの起動を頼んでいる最中か（連打で二重に走らせない）。 */
 const retryingFinalNote = ref(false)
@@ -318,15 +350,34 @@ async function retryFinalNote(): Promise<void> {
   try {
     const response = await runClassroomNote(`/api/admin/batch/classroom/notes/${noteId}/run`,
       'classroom-detail-view')
-    finalNoteNotice.value = response.data.message
-      ?? '最終まとめの作成を始めました。'
+    // 状態を取り直して、**受理されたかを記録で確かめる**（応答の文面を信じない）
     await refresh()
-    // 走っているあいだは状態を取り続ける（「生成中」のまま放置しない）
-    startPolling()
+    if (finalNote.value?.status === 'GENERATING' || finalNote.value?.status === 'READY') {
+      finalNoteNotice.value = response.data.message ?? '最終まとめの作成を始めました。'
+      // 走っているあいだは状態を取り続ける（「作成中」のまま放置しない）
+      startPolling()
+    } else if (finalNote.value?.status === 'FAILED') {
+      finalNoteNotice.value = '録音は保存しました。最終まとめの生成に失敗しました（'
+        + `${finalNote.value.errorMessage ?? finalNote.value.errorCode ?? '理由は記録されています'}）。`
+      startPolling()
+    } else {
+      // **まだ始まっていない**（応答は受理と言ったが、記録は PENDING）。入口を残す
+      finalNoteNotice.value = '最終まとめの作成はまだ始まっていません。もう一度お試しください。'
+    }
   } catch (caught) {
-    // **失敗を隠さない**（録音の保存は成功していることも一緒に伝える）
-    finalNoteNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした（'
-      + messageOf(caught, '通信に失敗しました') + '）。'
+    /*
+     * 応答を失ったかもしれない。**同じノートの状態**を確かめてから伝える
+     * （受理されていたら「開始できませんでした」とは言わない）。
+     */
+    await refresh()
+    if (finalNote.value?.status === 'GENERATING' || finalNote.value?.status === 'READY') {
+      finalNoteNotice.value = '最終まとめの作成を始めました。'
+      startPolling()
+    } else {
+      // **失敗を隠さない**（録音の保存は成功していることも一緒に伝える）
+      finalNoteNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした（'
+        + messageOf(caught, '通信に失敗しました') + '）。'
+    }
   } finally {
     retryingFinalNote.value = false
   }
@@ -518,14 +569,7 @@ onBeforeUnmount(() => {
               {{ finalNote.statusLabel }}
             </span>
           </div>
-          <p class="cr-hint" data-cr-final-note-state>
-            <template v-if="finalNote.status === 'READY'">最終まとめができました。</template>
-            <template v-else-if="finalNote.status === 'FAILED'">
-              録音は保存しました。最終まとめの生成に失敗しました（
-              {{ finalNote.errorMessage ?? finalNote.errorCode ?? '理由は記録されています' }}）。
-            </template>
-            <template v-else>最終まとめを作成しています（この画面を開いたままでも閉じても進みます）。</template>
-          </p>
+          <p class="cr-hint" data-cr-final-note-state>{{ finalNoteStateText }}</p>
           <span v-if="finalNoteNotice !== ''" class="cr-hint" data-cr-final-note-notice>
             {{ finalNoteNotice }}
           </span>
@@ -533,7 +577,7 @@ onBeforeUnmount(() => {
             v-if="canRetryFinalNote" type="button" class="btn btn--secondary btn--sm"
             :disabled="retryingFinalNote" data-cr-final-note-retry @click="retryFinalNote"
           >
-            {{ retryingFinalNote ? '頼んでいます...' : '最終まとめを再試行' }}
+            {{ retryingFinalNote ? '頼んでいます...' : finalNoteActionLabel }}
           </button>
         </section>
 

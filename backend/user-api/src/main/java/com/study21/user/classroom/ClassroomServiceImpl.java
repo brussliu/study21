@@ -676,6 +676,38 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     @Override
     @Transactional(readOnly = true)
+    public ClassroomModels.NoteStatusView noteStatus(UserPrincipal user, long recordId, long noteId) {
+        // 見える記録か（他人の記録のノートを覗かせない）
+        requireVisible(user, recordId);
+        // その記録のノート一覧から**指定の 1 件**を探す（別の記録のノートは見せない）
+        ClassroomNoteEntity note = noteMapper.findByRecord(recordId).stream()
+                .filter(candidate -> candidate.getNoteId() != null && candidate.getNoteId() == noteId)
+                .findFirst()
+                .orElse(null);
+        if (note == null) {
+            // **別の記録のノートを指定された**（画面の取り違え）: 存在しない扱いにする
+            throw new NotFoundException("授業ノートが見つかりません。");
+        }
+        String status = note.getStatus() == null ? "PENDING" : note.getStatus();
+        boolean accepted = "GENERATING".equals(status) || "READY".equals(status);
+        return new ClassroomModels.NoteStatusView(noteId, note.getKind(), status,
+                noteStatusLabel(status), accepted,
+                "PENDING".equals(status) || "FAILED".equals(status),
+                note.getErrorCode(), note.getErrorMessage());
+    }
+
+    /** ノートの状態の表示名（日本語）。 */
+    private static String noteStatusLabel(String status) {
+        return switch (status == null ? "PENDING" : status) {
+            case "GENERATING" -> "作成中";
+            case "READY" -> "できました";
+            case "FAILED" -> "失敗";
+            default -> "まだ作成していません";
+        };
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public ClassroomModels.RecordListResult list(UserPrincipal user, String status, int page, int size) {
         int safeSize = size <= 0 ? ClassroomModels.DEFAULT_SIZE : Math.min(size, ClassroomModels.MAX_SIZE);
         int safePage = Math.max(1, page);

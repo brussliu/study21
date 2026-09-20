@@ -47,4 +47,21 @@ public class ClassroomAiBatchController {
         ClassroomAiPipelineService.Acceptance acceptance = pipelineService.accept(noteId, operator);
         return ApiResponse.ok(acceptance, acceptance.message());
     }
+
+    /**
+     * **失われた実行を回復する**（`GENERATING` のまま残ったノートをやり直せる失敗に戻す）。
+     *
+     * <p>サーバーが落ちて実行が消えた回を、利用者がここから戻せる（画面の【最終まとめを再試行】が
+     * 効かない状態の回復）。**実行記録が生きているものは触らない**（長い AI 呼び出しを止めない）。</p>
+     */
+    @PostMapping("/notes/recover")
+    public ApiResponse<Map<String, Object>> recover() {
+        var recovered = pipelineService.recoverLostGenerations(50);
+        Map<String, Object> result = new java.util.LinkedHashMap<>();
+        result.put("recoveredNoteIds", recovered);
+        result.put("count", recovered.size());
+        return ApiResponse.ok(result, recovered.isEmpty()
+                ? "回復が必要な最終まとめはありませんでした。"
+                : "実行が失われていた " + recovered.size() + " 件を、やり直せる状態に戻しました。");
+    }
 }

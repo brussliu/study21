@@ -30,6 +30,13 @@ public class ClassroomNoteEntity {
     private Timestamp createdAt;
     /** 生成の起動を受理した時刻（落ちたままの `GENERATING` を見分ける）。 */
     private Timestamp generationStartedAt;
+    /**
+     * **この試行の識別子**（起動を受理するたびに新しくなる）。
+     *
+     * <p>完了・失敗の更新はこの値が一致するときだけ通る＝**遅れて返ってきた古い試行**が
+     * 新しい試行や既にできた結果を上書きしない。</p>
+     */
+    private String generationToken;
     private Timestamp updatedAt;
 
     public Long getNoteId() { return noteId; }
@@ -66,6 +73,8 @@ public class ClassroomNoteEntity {
     public void setGenerationStartedAt(Timestamp generationStartedAt) {
         this.generationStartedAt = generationStartedAt;
     }
+    public String getGenerationToken() { return generationToken; }
+    public void setGenerationToken(String generationToken) { this.generationToken = generationToken; }
     public Timestamp getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Timestamp updatedAt) { this.updatedAt = updatedAt; }
 }

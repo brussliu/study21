@@ -57,7 +57,14 @@ ALTER TABLE public."CR_授業記録情報"
 -- だれがいつ「生成を始めた」と言ったか（起動の受理）。プロセスが落ちて GENERATING のまま
 -- 残った行を、再起動後に**やり直せる**と判断するのに使う（永久に「作成中」で止めない）。
 ALTER TABLE public."CR_授業ノート情報"
-    ADD COLUMN IF NOT EXISTS "生成開始日時" TIMESTAMP NULL;
+    ADD COLUMN IF NOT EXISTS "生成開始日時" TIMESTAMP NULL,
+    -- **この試行の識別子**（起動を受理するたびに新しくなる）。
+    -- 完了・失敗の更新は「いまのトークンと一致するとき」だけ通す＝**遅れて返ってきた古い試行**が
+    -- 新しい試行や既にできた結果を上書きしない。
+    ADD COLUMN IF NOT EXISTS "生成トークン" VARCHAR(64) NULL;
+
+COMMENT ON COLUMN public."CR_授業ノート情報"."生成トークン" IS
+    '生成を受理した試行の識別子。条件つき更新の照合に使い、古い試行の遅い書き込みを捨てる';
 
 COMMENT ON COLUMN public."CR_授業ノート情報"."生成開始日時" IS
     '生成の起動を受理した時刻。一定時間より古い GENERATING は「落ちた」とみなしてやり直す';

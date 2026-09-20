@@ -510,6 +510,38 @@ export interface ClassroomEndResult {
   transcribe?: ClassroomTranscribeView | null
 }
 
+/**
+ * **最終まとめ（1 つのノート）の生成タスクの状態**（起動の受理を確かめる入口）。
+ *
+ * <p>`PENDING` は「user-api が行を作った」だけで、**admin-api の実行が受理された証拠ではない**。
+ * 受理されると `GENERATING` 以上になる。画面は `accepted` を見る。</p>
+ */
+export interface ClassroomNoteTaskStatus {
+  noteId: number
+  kind: string
+  /** `PENDING`（未受理）/ `GENERATING`（受理済み・実行中）/ `READY`（完成）/ `FAILED`（失敗）。 */
+  status: string
+  statusLabel: string
+  /** 実行が**受理されている**か（`GENERATING` 以上、または完成）。 */
+  accepted: boolean
+  /** もう一度起動を頼めるか（`PENDING`・`FAILED` は true）。 */
+  retryable: boolean
+  errorCode: string | null
+  errorMessage: string | null
+}
+
+/**
+ * **最終まとめ（1 つ）の状態**を取る（`GET /classroom/{id}/notes/{noteId}`）。
+ *
+ * <p>「FINAL の行があるか」ではなく、**その行の状態そのもの**を返す。起動の応答を失った回に
+ * 「受理されたのか、まだ始まっていないのか」を正しく見分けるために使う。</p>
+ */
+export function fetchClassroomNoteTaskStatus(
+  recordId: number, noteId: number
+): Promise<ApiResponse<ClassroomNoteTaskStatus>> {
+  return http.get<ClassroomNoteTaskStatus>(`${BASE}/${recordId}/notes/${noteId}`)
+}
+
 /** 書き起こし（認識）の収尾の状態（詳細・終了の応答が返す）。 */
 export interface ClassroomTranscribeView {
   /** `COMPLETE` / `INCOMPLETE` / `RUNNING` / `NO_AUDIO` / `UNKNOWN`。 */
