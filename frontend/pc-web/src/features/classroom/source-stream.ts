@@ -26,7 +26,9 @@ import {
 } from '@/api/classroom'
 import { ApiError } from '@study21/web-shared'
 import {
+  canFinishFinalize,
   normalizeSttFinalize,
+  needsFinalizeRetry,
   type SourceFinalizeResult,
   type SttFinalizePayload
 } from '@/features/classroom/stt-finalize'
@@ -880,20 +882,55 @@ export class SourceStream {
    * もう一度やり直せる**（画面が同じ音源だけをやり直すため）。</p>
    */
   async finish(): Promise<void> {
+    /*
+     * **走っている収尾は 1 つ**（同時に来た呼び出しは同じ約束を共有する＝二重に送らない）。
+     */
     if (this.finishPromise !== null) return this.finishPromise
-    this.finishError = null
     const promise = this.runFinish()
     this.finishPromise = promise
     try {
       await promise
     } finally {
-      // 失敗したときは約束を捨てる（やり直しを塞がない）。成功したら残す（二重に締めない）
-      if (this.finishError !== null) this.finishPromise = null
+      /*
+       * **もう一度やり直せる結果のときは約束を捨てる**。
+       *
+       * <p>見るのは `finishError` **だけでは足りない**: `UNKNOWN`（確認できない）と `PENDING`
+       * （まだ途中）は `finishError` を立てないので、約束を残したままだと【続きをやり直す】を
+       * 押しても**古い約束が返るだけで後端へ行かない**（永久に終われない）。逆に、完全に成功した
+       * 音源や「やり直しても直らない終端」は**約束を残す**（同じ音を二度締めない・成功した音源を
+       * もう一度収尾しない）。</p>
+       */
+      if (needsFinalizeRetry(this.finalizeResult) || this.finishError !== null) {
+        this.finishPromise = null
+      }
     }
+  }
+
+  /**
+   * 収尾の**結果が「終わり」と言っているか**（ページが次の段へ進んでよいか）。
+   *
+   * <p>`finish()` が投げなかったことを成功の印にしない。結果が無い（約束がまだ／例外で
+   * 終わった）ときは false。</p>
+   */
+  finishSettled(): boolean {
+    return canFinishFinalize(this.finalizeResult)
   }
 
   /** 収尾の本体（{@link finish} から 1 回だけ呼ばれる）。 */
   private async runFinish(): Promise<void> {
+    /*
+     * **この回の一時状態を戻してから始める**。
+     *
+     * <p>前の回の `finished = true`（常時接続の `finished` が届いた印）が残っていると、
+     * 新しい回は**待たずにすぐ「届いた」と見なして**しまう（後端の結果を取りに行かない）。
+     * 結果と失敗の理由も戻す（前の回の `UNKNOWN`／`PENDING` を今回の結果と混同しない）。</p>
+     *
+     * <p>**音声のキュー・フレーム番号・時間軸・欠落の記録は触らない**（送り直しに必要）。</p>
+     */
+    this.finished = false
+    this.finishError = null
+    this.finalizeResult = null
+    this.options.onInterim('')
     const socket = this.socket
     const useSocket = this.socketReady && socket !== null
     this.stop()

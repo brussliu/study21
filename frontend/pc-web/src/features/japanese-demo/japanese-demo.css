@@ -942,3 +942,168 @@
     flex-basis: 4rem;
   }
 }
+
+/* ==========================================================================
+   Excel 風の入力表（TODO の新規登録にある「子タスク」の表と同じ作り）
+   ・セルは「選ぶ」と「入力する」を分ける（クリックでは入力欄を出さない）
+   ・選択は緑、入力中は枠で示す（色だけに頼らない）
+   ========================================================================== */
+
+.jp-sheet {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+  table-layout: fixed;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+}
+
+.jp-sheet th,
+.jp-sheet td {
+  border: 1px solid var(--color-border);
+  box-sizing: border-box;
+}
+
+.jp-sheet thead th {
+  height: 2.25rem;
+  padding: 0 var(--sp-2);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.jp-sheet tbody td {
+  position: relative;
+  height: 2rem;
+  padding: 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  vertical-align: middle;
+}
+
+/* 編集中でないセルは値をテキストで出す（クリックしただけでは入力欄を出さない） */
+.jp-sheet td[data-col] .jp-sheet__value {
+  display: block;
+  overflow: hidden;
+  padding: 0 var(--sp-2);
+  line-height: calc(2rem - 2px);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 表そのものにもフォーカスが移る（選んだセルを方向キーで動かすため） */
+.jp-sheet:focus {
+  outline: none;
+}
+
+.jp-sheet:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* 入力中のセルは白地のまま（選択の緑は残しつつ、枠で「入力中」を示す） */
+.jp-sheet td.is-editing {
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-primary);
+}
+
+/* セルの中の入力は枠を持たない（セル全体が入力欄に見えるように） */
+.jp-sheet td[data-col] input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  height: calc(2rem - 2px);
+  margin: 0;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  box-shadow: none;
+}
+
+.jp-sheet td[data-col] input:focus {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+}
+
+.jp-sheet td.jp-sheet__no {
+  text-align: center;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  font-variant-numeric: tabular-nums;
+}
+
+.jp-sheet td.jp-sheet__remove {
+  padding: 0;
+  text-align: center;
+  background: var(--color-surface-alt);
+}
+
+.jp-sheet thead th.jp-sheet__no-head {
+  text-align: center;
+}
+
+/* 列の幅を変えるつまみ（見出しの右端） */
+.jp-sheet__resizer {
+  position: absolute;
+  top: 0;
+  right: -2px;
+  width: 10px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+}
+
+.jp-sheet__resizer::after {
+  content: '';
+  position: absolute;
+  top: 20%;
+  left: 8px;
+  width: 1px;
+  height: 60%;
+  background: var(--color-border);
+}
+
+.jp-sheet__resizer:hover::after,
+.jp-sheet__resizer:focus-visible::after {
+  left: 7px;
+  width: 2px;
+  background: var(--color-primary);
+}
+
+/* 見出しはドラッグ中に文字が選択されないようにする（列幅の操作だけにする） */
+.jp-sheet thead {
+  user-select: none;
+}
+
+.jp-sheet__resizer:focus-visible {
+  outline: none;
+}
+
+/* 選択中のセル（1 つだけ選んでいるとき） */
+.jp-sheet td.is-selected {
+  background: var(--color-success-soft);
+  box-shadow: inset 0 0 0 2px var(--color-success);
+}
+
+/* ドラッグで選んだ範囲 */
+.jp-sheet td.is-range {
+  background: var(--color-success-soft);
+}
+
+.jp-sheet td.is-range-top { border-top-color: var(--color-success); }
+.jp-sheet td.is-range-bottom { border-bottom-color: var(--color-success); }
+.jp-sheet td.is-range-left { border-left-color: var(--color-success); }
+.jp-sheet td.is-range-right { border-right-color: var(--color-success); }
+
+.jp-sheet__hint {
+  margin: var(--sp-2) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}

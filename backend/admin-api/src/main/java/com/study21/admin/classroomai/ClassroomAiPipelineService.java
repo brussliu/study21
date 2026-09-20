@@ -65,14 +65,19 @@ public class ClassroomAiPipelineService {
 
     private final BatchService batchService;
     private final ClassroomNoteMapper noteMapper;
-    /** 実行中かどうかを**実行記録**で確かめる（経過時間だけで「死んだ」と決めない）。 */
-    private final com.study21.admin.batch.BatchExecutionMapper executionMapper;
+    /*
+     * 実行の生存は `ClassroomNoteMapper.findGenerationExecution`（**そのノートに紐づいた実行**だけを
+     * 引く 1 文）で確かめる。`BatchExecutionMapper` の「バッチコードで走っている実行」を使うと
+     * **別の授業の実行**を自分の実行と取り違えるので使わない。
+     */
+    /** このプロセスの起動識別子（**別プロセスの実行**を遺留と判定するのに使う）。 */
+    private final com.study21.admin.batch.ProcessRunId processRunId;
 
     public ClassroomAiPipelineService(BatchService batchService, ClassroomNoteMapper noteMapper,
-                                      com.study21.admin.batch.BatchExecutionMapper executionMapper) {
+                                      com.study21.admin.batch.ProcessRunId processRunId) {
         this.batchService = batchService;
         this.noteMapper = noteMapper;
-        this.executionMapper = executionMapper;
+        this.processRunId = processRunId;
     }
 
     /**
@@ -97,7 +102,7 @@ public class ClassroomAiPipelineService {
         }
         ClassroomNoteEntity current = noteMapper.findById(noteId);
         String status = current == null ? null : current.getStatus();
-        if ("GENERATING".equals(status) && !isBeingExecuted(current)) {
+        if ("GENERATING".equals(status) && livenessOf(current) == Liveness.LOST) {
             /*
              * **実行が本当に生きているかを実行記録で確かめた**うえで、失われていれば引き取る。
              * 経過時間だけで「死んだ」と決めない（長い AI 呼び出しを二重に走らせない）。
@@ -182,36 +187,170 @@ public class ClassroomAiPipelineService {
         }
     }
 
+    /** 実行の生存の判定（**分からない**を「死んだ」と決めない）。 */
+    public enum Liveness {
+        /** **このまとめの実行が生きている**（実行記録が `QUEUED`/`RUNNING` で、このプロセスのもの）。 */
+        RUNNING,
+        /**
+         * 受理したが**実行記録がまだ無い**（実行の準備中）。
+         *
+         * <p>正常な短い窓なので**回収しない**。ただし長く続くなら失联とみなす。</p>
+         */
+        BINDING,
+        /** 実行記録が終わっている・消えている（**失联**）。 */
+        LOST,
+        /** 実行記録を**確かめられなかった**（DB エラーなど）。**回収しない**。 */
+        UNKNOWN
+    }
+
+    /** 1 つのまとめの回復の資格（画面に出す形）。 */
+    public record RecoveryView(
+            long noteId,
+            /** いまの生成状態。 */
+            String status,
+            /** 実行の生存の判定。 */
+            String liveness,
+            /** 回復（やり直し）の入口を出してよいか。 */
+            boolean recoverable,
+            /** 実行を再開したか（この呼び出しで回復したとき true）。 */
+            boolean recovered,
+            /** 画面に出す理由（日本語）。 */
+            String reason) {
+    }
+
     /**
-     * **失われた実行を回復する**（`GENERATING` のまま残ったノートをやり直せる失敗に戻す）。
+     * **このまとめの実行が生きているか**を、**その実行記録**で確かめる。
      *
-     * <p>既存のバッチ実行の仕組みで拾える形にする（画面からも叩ける入口を
-     * {@code ClassroomAiBatchController} に置く）。判定は**実行記録**で行う:</p>
+     * <p>見る順:</p>
      * <ol>
-     *   <li>そのバッチが `QUEUED`/`RUNNING` の実行を持っていれば**生きている**（触らない）。</li>
-     *   <li>持っていなくて、開始から猶予（{@value #STALE_GENERATION_MINUTES} 分）を過ぎていれば
-     *       **失われた**とみなし、`NOTE_ENGINE_BUSY`（やり直せる失敗）に戻す。</li>
+     *   <li>ノートに紐づいた実行記録（`生成実行ID`）を引く。**別の授業の実行は見ない**。</li>
+     *   <li>実行記録が `QUEUED`/`RUNNING` で、**このプロセスの起動識別子**なら生きている。
+     *       別プロセスの実行なら**失联**（そのプロセスはもう居ない）。</li>
+     *   <li>実行記録が終わっている（SUCCESS/FAILED/SKIPPED）なら、ノートの状態だけが
+     *       取り残されている＝**失联**。</li>
+     *   <li>`生成実行ID` がまだ無い（受理直後の短い窓）… 開始から猶予内なら**準備中**として
+     *       回収しない。猶予を過ぎていれば失联。</li>
+     *   <li>確かめられなかった（例外）… **分からない**として回収しない。</li>
      * </ol>
-     * <p>古い試行が遅れて返ってきても、**トークンが変わっている**ので結果は書かれない
-     * （{@code 生成トークン} の照合）。</p>
+     */
+    public Liveness livenessOf(ClassroomNoteEntity note) {
+        if (note == null || !"GENERATING".equals(note.getStatus())) {
+            return Liveness.RUNNING;
+        }
+        Long executionId = note.getGenerationExecutionId();
+        if (executionId == null) {
+            // 実行記録がまだ無い（受理直後の短い窓）。猶予を過ぎていれば失联
+            return isWithinBindingGrace(note) ? Liveness.BINDING : Liveness.LOST;
+        }
+        try {
+            com.study21.admin.batch.BatchExecutionEntity execution =
+                    noteMapper.findGenerationExecution(note.getNoteId(), executionId);
+            if (execution == null) {
+                // 実行記録が消えている（掃除・ロールバック）。**失联**
+                return Liveness.LOST;
+            }
+            String status = execution.getStatus();
+            boolean active = "QUEUED".equals(status) || "RUNNING".equals(status);
+            if (!active) {
+                // 実行は終わっているのにノートが GENERATING のまま＝**取り残し**
+                return Liveness.LOST;
+            }
+            String runId = processRunId.value();
+            if (execution.getRunId() != null && runId != null && !runId.equals(execution.getRunId())) {
+                // **別のプロセスの実行**（サーバーが再起動した）。そのプロセスはもう居ない
+                return Liveness.LOST;
+            }
+            return Liveness.RUNNING;
+        } catch (RuntimeException cause) {
+            log.warn("could not check the generation execution. noteId={} executionId={}",
+                    note.getNoteId(), executionId, cause);
+            // **確かめられない**を「死んだ」と決めない（生きている実行を二重に走らせない）
+            return Liveness.UNKNOWN;
+        }
+    }
+
+    /** 受理直後の「実行記録がまだ無い」窓の猶予（この間は回収しない）。 */
+    private static boolean isWithinBindingGrace(ClassroomNoteEntity note) {
+        Timestamp startedAt = note.getGenerationStartedAt();
+        if (startedAt == null) {
+            return false;
+        }
+        return startedAt.toInstant().isAfter(Instant.now().minus(BINDING_GRACE));
+    }
+
+    /**
+     * **1 つのまとめの回復の資格**を返し、失联していればやり直せる失敗に戻す。
      *
-     * @return 回復した（失敗に戻した）ノートの ID
+     * <p>画面はこれを呼んで「状態を確認／復旧」を出す（**前端が勝手に「失联」と断言しない**）。</p>
+     */
+    public RecoveryView recoverOne(long noteId) {
+        ClassroomNoteEntity note = noteMapper.findById(noteId);
+        if (note == null) {
+            throw new NotFoundException("授業ノートが見つかりません: " + noteId);
+        }
+        String status = note.getStatus() == null ? "PENDING" : note.getStatus();
+        if (!"GENERATING".equals(status)) {
+            return new RecoveryView(noteId, status, Liveness.RUNNING.name(), false, false,
+                    "この最終まとめは実行中ではありません（状態: " + status + "）。");
+        }
+        Liveness liveness = livenessOf(note);
+        switch (liveness) {
+            case RUNNING -> {
+                return new RecoveryView(noteId, status, liveness.name(), false, false,
+                        "この最終まとめは実行中です（このままお待ちください）。");
+            }
+            case BINDING -> {
+                return new RecoveryView(noteId, status, liveness.name(), false, false,
+                        "この最終まとめの実行を準備しています（少し待ってからもう一度お試しください）。");
+            }
+            case UNKNOWN -> {
+                return new RecoveryView(noteId, status, liveness.name(), false, false,
+                        "実行の状態を確認できませんでした（少し待ってからもう一度お試しください）。");
+            }
+            case LOST -> {
+                // **失联を確認**した: やり直せる失敗に戻す（**旧試行のトークンで条件つき**）
+                int updated = noteMapper.markGenerationFailed(noteId, CODE_BUSY,
+                        "生成の実行が失われていました（サーバーの再起動など）。もう一度実行してください。",
+                        note.getGenerationToken());
+                if (updated == 1) {
+                    log.warn("lost classroom note generation recovered. noteId={} executionId={} token={}",
+                            noteId, note.getGenerationExecutionId(), note.getGenerationToken());
+                    return new RecoveryView(noteId, "FAILED", liveness.name(), true, true,
+                            "実行が失われていたため、やり直せる状態に戻しました。");
+                }
+                // 既に別の試行が状態を進めている（触らない）
+                ClassroomNoteEntity fresh = noteMapper.findById(noteId);
+                String freshStatus = fresh == null ? status : fresh.getStatus();
+                return new RecoveryView(noteId, freshStatus, liveness.name(), false, false,
+                        "この最終まとめは既に別の操作で進んでいます（状態: " + freshStatus + "）。");
+            }
+            default -> {
+                return new RecoveryView(noteId, status, liveness.name(), false, false,
+                        "この最終まとめの状態を確認できませんでした。");
+            }
+        }
+    }
+
+    /**
+     * **失われた実行を一括で回復する**（管理者向け。既存の実行記録で生存を確かめてから）。
+     *
+     * <p>実行記録が生きているもの・**確かめられなかったもの**は触らない（一括リセットしない）。</p>
      */
     public java.util.List<Long> recoverLostGenerations(int limit) {
         int max = limit <= 0 ? 50 : Math.min(limit, 500);
         java.util.List<Long> recovered = new java.util.ArrayList<>();
         for (ClassroomNoteEntity candidate : noteMapper.findStaleGenerating(staleBefore(), max)) {
-            if (isBeingExecuted(candidate)) {
-                // 実行記録が生きている（長い AI 呼び出しの最中）。**触らない**
+            if (livenessOf(candidate) != Liveness.LOST) {
+                // 生きている・準備中・**分からない**は触らない
                 continue;
             }
-            String token = candidate.getGenerationToken();
             if (noteMapper.markGenerationFailed(candidate.getNoteId(), CODE_BUSY,
                     "生成の実行が失われていました（サーバーの再起動など）。もう一度実行してください。",
-                    token) == 1) {
+                    candidate.getGenerationToken()) == 1) {
                 recovered.add(candidate.getNoteId());
-                log.warn("lost classroom note generation recovered. noteId={} startedAt={} token={}",
-                        candidate.getNoteId(), candidate.getGenerationStartedAt(), token);
+                log.warn("lost classroom note generation recovered. noteId={} startedAt={} executionId={}",
+                        candidate.getNoteId(), candidate.getGenerationStartedAt(),
+                        candidate.getGenerationExecutionId());
             }
         }
         return recovered;
@@ -219,6 +358,9 @@ public class ClassroomAiPipelineService {
 
     /** 「失われた」とみなす猶予（分）。実行記録が無いままこれを過ぎたら回復する。 */
     public static final int STALE_GENERATION_MINUTES = 30;
+
+    /** 受理直後の「実行記録がまだ無い」窓の猶予（この間は回収しない）。 */
+    private static final Duration BINDING_GRACE = Duration.ofMinutes(STALE_GENERATION_MINUTES);
 
     /** 受理したのに実行できなかったことを**やり直せる失敗**として書く。 */
     private void markGenerationFailed(long noteId, String token, String code, String message) {
@@ -278,26 +420,6 @@ public class ClassroomAiPipelineService {
             return false;
         }
         return !Boolean.FALSE.equals(result.get("success"));
-    }
-
-    /**
-     * その `GENERATING` が**いま実行されている**か（実行記録で確かめる）。
-     *
-     * <p>経過時間だけで「死んだ」と決めない（長い AI 呼び出しを二重に走らせない）。実行記録に
-     * `QUEUED`/`RUNNING` があれば生きている。無ければ失われた可能性が高い。</p>
-     */
-    private boolean isBeingExecuted(ClassroomNoteEntity note) {
-        if (executionMapper == null) {
-            return false;
-        }
-        try {
-            return executionMapper.findRunningByBatchCode("batC62") != null
-                    || executionMapper.findRunningByBatchCode("batC61") != null;
-        } catch (RuntimeException cause) {
-            // 確かめられないときは「生きている」とみなす（二重起動の方が害が大きい）
-            log.warn("could not check the running batch state. noteId={}", note.getNoteId(), cause);
-            return true;
-        }
     }
 
     /** 「落ちた」とみなす境目（`GENERATING` の開始から一定時間より前）。 */

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MissingRangeStore, SourceStream, type MissingRange } from '@/features/classroom/source-stream'
+import { summarizeSttFinalize } from '@/features/classroom/stt-finalize'
 
 /** 送った内容を覚える偽の WebSocket（実際のソケットは使わない）。 */
 class FakeSocket {
@@ -61,7 +62,15 @@ function mockStream(options: { failTimes?: number } = {}): { calls: Call[] } {
     const bodySize = init?.body instanceof Blob ? init.body.size : 0
     calls.push({ url: String(url), bodySize })
     if (String(url).includes('/stt/stream/finish')) {
-      return ok({ interim: '', added: [], error: null })
+      /*
+       * 後端は収尾の欄も返す。**欄が無いと画面は「確認できない」と見る**（それが正しい振る舞い）
+       * ので、正常系を確かめるモックは後端と同じ形にする。
+       */
+      return ok({
+        interim: '', added: [], error: null,
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        savedCount: 1, pendingCount: 0, notice: null
+      })
     }
     attempts += 1
     if (attempts <= (options.failTimes ?? 0)) {
@@ -1279,6 +1288,344 @@ describe('授業録音：収尾の結果の読み取り（不完整な終わり�
       expect(stream.finalizeOutcome()?.kind).toBe('UNKNOWN')
       expect(stream.finalizeOutcome()?.complete).toBe(false)
       expect(stream.finalizeOutcome()?.canFinish).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * **やり直しが本当に送り直される**ことの検証（利用者の指摘 ①）。
+ *
+ * <p>以前は `finish()` の約束を `finishError` があるときだけ捨てていた。`UNKNOWN`／`PENDING` は
+ * `finishError` を立てないので、画面が【続きをやり直す】を出しても**古い約束が返るだけ**で
+ * 後端へ行かず、永久に終われなかった。ここで「どの結果なら約束を捨てるか」を固定する。</p>
+ */
+describe('授業録音：収尾のやり直しが本当に送り直される', () => {
+  /** 応答を順番に差し替えられるモック（呼び出し回数を数える）。 */
+  function mockFinishSequence(responses: Record<string, unknown>[]): { finishCalls: () => number } {
+    let finishCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const isFinish = String(url).includes('/finish')
+      if (isFinish) finishCalls += 1
+      const data = isFinish
+        ? responses[Math.min(finishCalls - 1, responses.length - 1)]
+        : { interim: '', added: [], error: null }
+      return new Response(JSON.stringify({
+        success: true, code: 'OK', message: 'OK', timestamp: '', data
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    return { finishCalls: () => finishCalls }
+  }
+
+  /** 収尾を 1 回走らせて、その結果を返す。 */
+  async function runFinish(stream: SourceStream): Promise<void> {
+    const finishing = stream.finish()
+    await vi.advanceTimersByTimeAsync(1_000)
+    await finishing
+  }
+
+  it('A: HTTP が UNKNOWN を返したら、やり直しで**本当に 2 回目を送る**（成功で終われる）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { finishCalls } = mockFinishSequence([
+        // 1 回目: 欄が欠けている（旧い後端・応答の欠落）＝確認できない
+        { interim: '', added: [], error: null },
+        // 2 回目: 完全に成功
+        {
+          interim: '', added: [], error: null,
+          finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+          savedCount: 2, pendingCount: 0, notice: null
+        }
+      ])
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      await runFinish(stream)
+      expect(stream.finalizeOutcome()?.kind).toBe('UNKNOWN')
+      // **終われない**（画面は【続きをやり直す】を出す）
+      expect(stream.finishSettled()).toBe(false)
+      expect(finishCalls()).toBe(1)
+
+      // やり直し
+      await runFinish(stream)
+      expect(finishCalls()).toBe(2)
+      expect(stream.finalizeOutcome()?.kind).toBe('COMPLETE')
+      expect(stream.finishSettled()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('B: HTTP が PENDING（retryable=true）を返したら、やり直しで 2 回目を送る', async () => {
+    vi.useFakeTimers()
+    try {
+      const { finishCalls } = mockFinishSequence([
+        {
+          interim: '', added: [], error: null,
+          finalizeStatus: 'FINALIZING', finalizeCompleted: false, retryable: true,
+          savedCount: 1, pendingCount: 1, notice: null
+        },
+        {
+          interim: '', added: [], error: null,
+          finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+          savedCount: 2, pendingCount: 0, notice: null
+        }
+      ])
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      await runFinish(stream)
+      expect(stream.finalizeOutcome()?.kind).toBe('PENDING')
+      expect(stream.finishSettled()).toBe(false)
+
+      await runFinish(stream)
+      expect(finishCalls()).toBe(2)
+      expect(stream.finishSettled()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('C: 常時接続で確認できない結果になったら、やり直しは後端へ**もう一度**行く（古い finished を引きずらない）', async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: string[] = []
+      let finishHttp = 0
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        const target = String(url)
+        calls.push(target)
+        if (target.includes('/stt/stream/finish')) finishHttp += 1
+        return new Response(JSON.stringify({
+          success: true, code: 'OK', message: 'OK', timestamp: '',
+          data: target.includes('/stt/stream/finish')
+            ? {
+              interim: '', added: [], error: null,
+              finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+              savedCount: 3, pendingCount: 0, notice: null
+            }
+            : { interim: '', added: [], error: null }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }))
+      const { stream } = newStream({
+        useSocket: true,
+        socketFactory: (url: string) => new FakeSocket(url) as unknown as WebSocket
+      })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      const socket = FakeSocket.instances.at(-1)!
+      socket.open()
+      await vi.advanceTimersByTimeAsync(500)
+
+      // 1 回目: finished に収尾の欄が無い（**確認できない**＝終われない）
+      const first = stream.finish()
+      await vi.advanceTimersByTimeAsync(100)
+      socket.deliver({ type: 'finished', added: [], error: null })
+      await vi.advanceTimersByTimeAsync(300)
+      await first
+      expect(stream.finalizeOutcome()?.kind).toBe('UNKNOWN')
+      expect(stream.finishSettled()).toBe(false)
+      const finishMessagesFirst = socket.texts().filter((text) => text.includes('"finish"')).length
+
+      /*
+       * やり直し。**前回の `finished=true` が残っていると、「もう届いた」と見なして後端へ
+       * 行かない**（＝永久に終われない）。ここでは、やり直しで**本当に後端へ行く**ことを見る
+       * （この回は接続を張り直していないので、既存の仕組みどおり HTTP へ退避して送る）。
+       */
+      const second = stream.finish()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await second
+
+      expect(finishHttp).toBe(1)
+      expect(calls.some((call) => call.includes('/stt/stream/finish'))).toBe(true)
+      // 1 回目は常時接続へ「終わり」を伝えていた（その回の経路は変わっていない）
+      expect(finishMessagesFirst).toBeGreaterThan(0)
+      expect(stream.finalizeOutcome()?.kind).toBe('COMPLETE')
+      expect(stream.finishSettled()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('D: 走っているあいだの二度呼びは 1 回だけ送る（同じ約束を共有する）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { finishCalls } = mockFinishSequence([{
+        interim: '', added: [], error: null,
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        savedCount: 1, pendingCount: 0, notice: null
+      }])
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      // 同時に 2 回（連打）
+      const first = stream.finish()
+      const second = stream.finish()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await Promise.all([first, second])
+
+      expect(finishCalls()).toBe(1)
+      expect(stream.finishSettled()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('F: 収尾が例外で終わったら、次のやり直しはもう一度送る（失敗した約束を残さない）', async () => {
+    vi.useFakeTimers()
+    try {
+      let finishCalls = 0
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).includes('/finish')) {
+          finishCalls += 1
+          if (finishCalls === 1) {
+            // 1 回目は通信そのものが失敗する
+            throw new Error('ネットワークエラー')
+          }
+          return new Response(JSON.stringify({
+            success: true, code: 'OK', message: 'OK', timestamp: '',
+            data: {
+              interim: '', added: [], error: null,
+              finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+              savedCount: 1, pendingCount: 0, notice: null
+            }
+          }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        }
+        return new Response(JSON.stringify({
+          success: true, code: 'OK', message: 'OK', timestamp: '',
+          data: { interim: '', added: [], error: null }
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }))
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      await runFinish(stream)
+      // 結果が無い＝**終われない**
+      expect(stream.finishSettled()).toBe(false)
+      expect(stream.finalizeOutcome()).toBeNull()
+
+      await runFinish(stream)
+      expect(finishCalls).toBe(2)
+      expect(stream.finishSettled()).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('成功した音源は、やり直しでもう一度収尾しない（約束を残す）', async () => {
+    vi.useFakeTimers()
+    try {
+      const { finishCalls } = mockFinishSequence([{
+        interim: '', added: [], error: null,
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        savedCount: 2, pendingCount: 0, notice: null
+      }])
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      await runFinish(stream)
+      expect(finishCalls()).toBe(1)
+
+      // もう一度（ページのやり直しが全音源へ来た場合）: **送り直さない**
+      await runFinish(stream)
+      expect(finishCalls()).toBe(1)
+      expect(stream.finalizeOutcome()?.kind).toBe('COMPLETE')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+/**
+ * **音源ごとに独立**して収尾をやり直せることの検証（利用者の指摘 ① E）。
+ *
+ * <p>片方が成功・片方が要やり直しのとき、やり直しで**成功した音源をもう一度締めない**
+ * （同じ音を二度送らない・同じ文を二度入れない）。未完了の音源だけを送り直す。</p>
+ */
+describe('授業録音：片方だけをやり直す（音源ごとの独立）', () => {
+  it('E: 成功した音源は締め直さず、未完了の音源だけをもう一度締める', async () => {
+    vi.useFakeTimers()
+    try {
+      const finishBySource: Record<string, number> = {}
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        const target = String(url)
+        const source = new URL(target, 'http://localhost').searchParams.get('source') ?? 'mic'
+        const ok = (data: unknown): Response => new Response(JSON.stringify({
+          success: true, code: 'OK', message: 'OK', timestamp: '', data
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        if (target.includes('/stt/stream/finish')) {
+          const count = (finishBySource[source] ?? 0) + 1
+          finishBySource[source] = count
+          if (source === 'mic') {
+            // マイクは 1 回目で完全に成功する
+            return ok({
+              interim: '', added: [], error: null,
+              finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+              savedCount: 2, pendingCount: 0, notice: null
+            })
+          }
+          // 共有の音は 1 回目はやり直せる失敗、2 回目で成功する
+          return ok(count === 1
+            ? {
+              interim: '', added: [], error: '保存できなかった文があります。',
+              finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: true,
+              recovery: 'RESAVE_PENDING', savedCount: 1, pendingCount: 1, notice: null
+            }
+            : {
+              interim: '', added: [], error: null,
+              finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+              savedCount: 3, pendingCount: 0, notice: null
+            })
+        }
+        return ok({ interim: '', added: [], error: null })
+      }))
+      const mic = newStream({ source: 'mic', useSocket: false })
+      const shared = newStream({ source: 'shared', useSocket: false })
+      for (const item of [mic.stream, shared.stream]) {
+        item.append(samples(1), 48_000)
+        item.start()
+      }
+      await vi.advanceTimersByTimeAsync(300)
+
+      // 1 回目の収尾（両方）
+      const first = [mic.stream.finish(), shared.stream.finish()]
+      await vi.advanceTimersByTimeAsync(1_000)
+      await Promise.all(first)
+
+      expect(finishBySource.mic).toBe(1)
+      expect(finishBySource.shared).toBe(1)
+      expect(mic.stream.finalizeOutcome()?.kind).toBe('COMPLETE')
+      expect(shared.stream.finalizeOutcome()?.kind).toBe('RETRYABLE_FAILURE')
+      // ページのまとめ: マイクは済み、共有は要やり直し → **まだ終われない**
+      const summary = summarizeSttFinalize(
+        [mic.stream.finalizeOutcome(), shared.stream.finalizeOutcome()],
+        [{ source: 'mic', label: 'マイク' }, { source: 'shared', label: '共有の音' }])
+      expect(summary.canFinish).toBe(false)
+      expect(summary.retryableSources.map((item) => item.source)).toEqual(['shared'])
+
+      // やり直し（**両方に finish() を呼ぶ**＝ページのやり直しと同じ形）
+      const second = [mic.stream.finish(), shared.stream.finish()]
+      await vi.advanceTimersByTimeAsync(1_000)
+      await Promise.all(second)
+
+      // 成功したマイクは**締め直していない**、未完了の共有だけをもう一度締めた
+      expect(finishBySource.mic).toBe(1)
+      expect(finishBySource.shared).toBe(2)
+      const after = summarizeSttFinalize(
+        [mic.stream.finalizeOutcome(), shared.stream.finalizeOutcome()],
+        [{ source: 'mic', label: 'マイク' }, { source: 'shared', label: '共有の音' }])
+      expect(after.canFinish).toBe(true)
+      expect(after.complete).toBe(true)
     } finally {
       vi.useRealTimers()
     }

@@ -931,6 +931,31 @@ export interface ClassroomNoteAcceptance {
 }
 
 /**
+ * **1 つのまとめの状態を確かめ、失联していれば回復してもらう**（admin-api の入口）。
+ *
+ * <p>画面は「失联」と**断言しない**（前端では実行の生存を確かめられない）。後端が実行記録で
+ * 確かめ、実行中なら何もしない（`recovered=false`）。失联していたときだけ**やり直せる失敗**に戻る。</p>
+ */
+export interface ClassroomNoteRecovery {
+  noteId: number
+  /** 確かめたあとの生成状態（`GENERATING` / `FAILED` / `READY` …）。 */
+  status: string
+  /** 実行の生存の判定（`RUNNING` / `BINDING` / `LOST` / `UNKNOWN`）。 */
+  liveness: string
+  /** 回復（やり直し）の入口を出してよいか。 */
+  recoverable: boolean
+  /** この呼び出しで回復したか。 */
+  recovered: boolean
+  /** 画面に出す理由（日本語）。 */
+  reason: string
+}
+
+export function recoverClassroomNote(noteId: number): Promise<ApiResponse<ClassroomNoteRecovery>> {
+  return adminHttp.post<ClassroomNoteRecovery>(
+    `/api/admin/batch/classroom/notes/${noteId}/recover`, { body: { operator: 'classroom-detail-view' } })
+}
+
+/**
  * AI 授業ノートの生成の**起動を受理してもらう**（admin-api の薄い入口）。
  *
  * <p>このエンドポイントは「AI を実行し終えた」ではなく「**タスクを受け付けた**」を返す

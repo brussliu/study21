@@ -72,9 +72,14 @@ function mockApi(options: Parameters<typeof detail>[0] & {
   retryFails?: boolean
   /** 再試行のあとに読み直すノート（既定は GENERATING になる）。 */
   afterRetry?: Record<string, unknown>[]
+  /** 「状態を確認／復旧」の応答。`null` は問い合わせ自体の失敗。 */
+  recovery?: Record<string, unknown> | null
+  /** 復旧のあとに読み直すノート。 */
+  afterRecovery?: Record<string, unknown>[]
 }): { calls: Call[] } {
   const calls: Call[] = []
   let retried = false
+  let recovered = false
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase()
     calls.push({ url: String(url), method })
@@ -82,6 +87,18 @@ function mockApi(options: Parameters<typeof detail>[0] & {
       JSON.stringify({ success: true, code: 'OK', message: 'OK', data, timestamp: '' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
     const target = String(url)
+    if (target.includes('/recover')) {
+      if (options.recovery === null) {
+        return new Response(JSON.stringify({
+          success: false, code: 'INTERNAL_ERROR', message: '確認できません', data: null
+        }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (options.afterRecovery !== undefined) recovered = true
+      return ok(options.recovery ?? {
+        noteId: 91, status: 'GENERATING', liveness: 'RUNNING', recoverable: false, recovered: false,
+        reason: 'この最終まとめは実行中です（このままお待ちください）。'
+      })
+    }
     if (target.includes('/api/admin/batch/classroom/notes/')) {
       if (options.retryFails === true) {
         return new Response(JSON.stringify({
@@ -92,6 +109,9 @@ function mockApi(options: Parameters<typeof detail>[0] & {
       return ok(options.acceptance ?? {
         noteId: 91, accepted: true, status: 'GENERATING', message: '最終まとめの作成を始めました。'
       })
+    }
+    if (recovered) {
+      return ok(detail({ ...options, notes: options.afterRecovery ?? [finalNote('FAILED')] }))
     }
     return ok(detail(retried
       ? { ...options, notes: options.afterRetry ?? [finalNote('GENERATING')] }
@@ -288,5 +308,77 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
     const { wrapper } = await open({ notes: [] })
 
     expect(wrapper.find('[data-cr-final-note]').exists()).toBe(false)
+  })
+
+  it('実行中のまとめには「状態を確認／復旧」を出す（完了・失敗には出さない）', async () => {
+    const running = await open({ notes: [finalNote('GENERATING')] })
+    expect(running.wrapper.find('[data-cr-final-note-recover]').exists()).toBe(true)
+    // **重複起動**の入口は出さない（実行中）
+    expect(running.wrapper.find('[data-cr-final-note-retry]').exists()).toBe(false)
+
+    const ready = await open({ notes: [finalNote('READY')] })
+    expect(ready.wrapper.find('[data-cr-final-note-recover]').exists()).toBe(false)
+
+    const failed = await open({ notes: [finalNote('FAILED')] })
+    expect(failed.wrapper.find('[data-cr-final-note-recover]').exists()).toBe(false)
+  })
+
+  it('「状態を確認／復旧」は後端の判定をそのまま出す（実行中なら何も変えない）', async () => {
+    const { wrapper, calls } = await open({ notes: [finalNote('GENERATING')] })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await vi.waitFor(() => {
+      expect(calls.some((call) => call.url.includes('/notes/91/recover'))).toBe(true)
+    }, { timeout: 3000 })
+    await flushPromises()
+
+    // 実行中なので状態は変わらない（「作成しています」のまま・再試行も出ない）
+    expect(wrapper.get('[data-cr-final-note-notice]').text()).toContain('実行中')
+    expect(wrapper.get('[data-cr-final-note]').text()).toContain('作成しています')
+    expect(wrapper.find('[data-cr-final-note-retry]').exists()).toBe(false)
+  })
+
+  it('失联していたときは、回復して【最終まとめを再試行】が出る', async () => {
+    const { wrapper } = await open({
+      notes: [finalNote('GENERATING')],
+      recovery: {
+        noteId: 91, status: 'FAILED', liveness: 'LOST', recoverable: true, recovered: true,
+        reason: '実行が失われていたため、やり直せる状態に戻しました。'
+      },
+      afterRecovery: [finalNote('FAILED')]
+    })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text()).toContain('やり直せる状態に戻しました')
+    // 回復後は**やり直しの入口**が出る（＝ユーザーが再開できる）
+    expect(wrapper.get('[data-cr-final-note-retry]').text()).toContain('再試行')
+    expect(wrapper.find('[data-cr-final-note-recover]').exists()).toBe(false)
+  })
+
+  it('状態の問い合わせが失敗したら「確認できない」と出す（失联と断言しない）', async () => {
+    const { wrapper } = await open({ notes: [finalNote('GENERATING')], recovery: null })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text()).toContain('確認できませんでした')
+    // 実行中のまま（勝手に失敗にしない）
+    expect(wrapper.get('[data-cr-final-note]').text()).toContain('作成しています')
+  })
+
+  it('「状態を確認／復旧」は録音の終了や STT の収尾を呼ばない', async () => {
+    const { wrapper, calls } = await open({ notes: [finalNote('GENERATING')] })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(0)
+    expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(0)
   })
 })

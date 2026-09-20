@@ -1642,11 +1642,20 @@ async function runSttFinish(): Promise<SttOutcome> {
     if (summary.complete || nothingToFinalize) dropSourceStreams()
     return outcome
   } catch (cause) {
-    sttFinishOutcome = null
     return { kind: 'retryable', reason: '書き起こしの収尾に失敗しました（'
       + `${cause instanceof Error ? cause.message : String(cause)}）。` }
   } finally {
+    /*
+     * **走っている約束は毎回捨てる**（結果は `sttFinishOutcome` に持つ）。
+     *
+     * <p>残したままだと、やり直し（{@link retryFinalize}）が「まだ走っている」と見て
+     * **前の失敗した結果をそのまま返し**、後端へ行かない（利用者には永久に終われない画面）。</p>
+     */
     sttFinishing = null
+    if (sttFinishOutcome === null || sttFinishOutcome.kind === 'retryable') {
+      // やり直せる結果のときは「済んだ」印も残さない（次は本当に送り直す）
+      sttFinishOutcome = null
+    }
   }
 }
 
@@ -2260,11 +2269,13 @@ function confirmIncompleteTranscript(): void {
  * 押しても直らなければ同じ案内がまた出る（**無限に待たせない**）。</p>
  */
 function retrySttFinalize(): void {
+  sttFinishing = null
   sttFinishOutcome = null
   sttFinalized = false
   sttIncompleteAccepted.value = false
   sttIncompleteNotice.value = ''
-  void requestFinalize('stop')
+  // **元の操作の続き**としてやり直す（停止の途中なら停止のまま。終了まで進めていたら終了へ）
+  void requestFinalize(finalizeKind.value)
 }
 
 /** 「不完全なまま終了」を押したときの確認（押し間違いで音を失わない）。 */
@@ -2457,6 +2468,19 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
  * <p>押すたびに `requestFinalize` を通すので、二度押しで 2 つ走ることはない。</p>
  */
 function retryFinalize(): void {
+  /*
+   * **やり直しの前に、書き起こしの収尾の状態を捨てる**。
+   *
+   * <p>ページ側の `sttFinishing` / `sttFinishOutcome` を残したままだと、`finishSttOnce()` が
+   * **前の結果をそのまま返して**後端へ行かない（`SourceStream` 側で約束を捨てていても、
+   * ページ側で止まってしまう）。捨てるのは**収尾の状態だけ**で、音声のキュー・フレーム番号・
+   * 時間軸・欠落の記録には触らない。</p>
+   */
+  if (sttFinishOutcome === null || sttFinishOutcome.kind === 'retryable') {
+    sttFinishing = null
+    sttFinishOutcome = null
+    sttFinalized = false
+  }
   void requestFinalize(finalizeKind.value)
 }
 

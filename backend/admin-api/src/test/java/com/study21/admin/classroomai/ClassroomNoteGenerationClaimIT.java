@@ -56,6 +56,8 @@ class ClassroomNoteGenerationClaimIT {
     private ClassroomNoteMapper noteMapper;
     @Autowired
     private ClassroomAiPipelineService pipelineService;
+    @Autowired
+    private com.study21.admin.batch.ProcessRunId processRunId;
     /** バッチの代役（忙しい・例外・失敗を差し込む）。 */
     @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
     private BatchService batchService;
@@ -265,6 +267,205 @@ class ClassroomNoteGenerationClaimIT {
             assertThat(acceptance.status()).isEqualTo("READY");
             assertThat(statusOf(noteId)).isEqualTo("READY");
         } finally {
+            deleteNote(noteId);
+        }
+    }
+
+    /** 実行記録を 1 行作って ID を返す（ノートに紐づける）。 */
+    private long createExecution(long noteId, String batchCode, String status, String runId) {
+        Long executionId = jdbc.queryForObject("""
+                INSERT INTO public."BAT_バッチ実行履歴情報"
+                    ("バッチコード", "バッチ種別", "起動種別", "状態", "起動識別子", "開始時刻")
+                -- 起動種別は 1 文字（'C'=他の処理から / 'L'=ログイン / 'R'=復旧 / 'S'=予約）
+                VALUES (?, 'C', 'R', ?, ?, CURRENT_TIMESTAMP)
+                RETURNING "実行ID"
+                """, Long.class, batchCode, status, runId);
+        return executionId == null ? 0L : executionId;
+    }
+
+    private void deleteExecution(long executionId) {
+        jdbc.update("DELETE FROM public.\"BAT_バッチ実行履歴情報\" WHERE \"実行ID\" = ?", executionId);
+    }
+
+    /**
+     * 「受理された回」の状態を作る（**トークンが入り、実行record にも紐づいた** `GENERATING`）。
+     *
+     * <p>本番の順序（受理 → 実行記録の作成 → `markGenerating`）と同じ形にする。</p>
+     */
+    private void bindExecution(long noteId, long executionId) {
+        jdbc.update("""
+                UPDATE public."CR_授業ノート情報" SET "生成実行ID" = ?
+                 WHERE "授業ノートID" = ?
+                """, executionId, noteId);
+    }
+
+    private ClassroomAiPipelineService.Liveness livenessOf(long noteId) {
+        return pipelineService.livenessOf(noteMapper.findById(noteId));
+    }
+
+    @Test
+    @DisplayName("A: 別の授業の batC62 が走っていても、本まとめの失联判定は変わらない")
+    void anotherLessonExecutionDoesNotAffectThisNote() {
+        long noteId = createNote("PENDING");
+        long otherNoteId = createNote("PENDING");
+        long otherExecution = createExecution(otherNoteId, "batC62", "RUNNING", processRunId.value());
+        try {
+            // 本まとめは受理だけ（実行記録はまだ無い）＝**別の授業の実行は見ない**
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            assertThat(livenessOf(noteId))
+                    .as("別の授業の実行を、このまとめの実行と取り違えてはいけない")
+                    .isEqualTo(ClassroomAiPipelineService.Liveness.BINDING);
+
+            // 本まとめの実行が**別プロセスの**記録として残っている（サーバー再起動後）＝失联
+            long ownExecution = createExecution(noteId, "batC62", "RUNNING", "20260101T000000-deadbeef");
+            bindExecution(noteId, ownExecution);
+            assertThat(livenessOf(noteId)).isEqualTo(ClassroomAiPipelineService.Liveness.LOST);
+            // 回復の入口でやり直せる失敗に戻る
+            ClassroomAiPipelineService.RecoveryView view = pipelineService.recoverOne(noteId);
+            assertThat(view.recovered()).isTrue();
+            assertThat(view.status()).isEqualTo("FAILED");
+            deleteExecution(ownExecution);
+        } finally {
+            deleteExecution(otherExecution);
+            deleteNote(otherNoteId);
+            deleteNote(noteId);
+        }
+    }
+
+    @Test
+    @DisplayName("B: 本まとめの実行が生きているあいだは、回復も再起動もしない（長く走っても同じ）")
+    void liveExecutionIsNotRecovered() {
+        long noteId = createNote("PENDING");
+        long executionId = createExecution(noteId, "batC62", "RUNNING", processRunId.value());
+        try {
+            // 受理済み（GENERATING）にして、実行記録を結び付ける
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            bindExecution(noteId, executionId);
+            // **1 時間前**に始まっていても、実行記録が生きていれば失联ではない
+            jdbc.update("""
+                    UPDATE public."CR_授業ノート情報" SET "生成開始日時" = ?
+                     WHERE "授業ノートID" = ?
+                    """, Timestamp.from(Instant.now().minusSeconds(60 * 60)), noteId);
+
+            assertThat(livenessOf(noteId)).isEqualTo(ClassroomAiPipelineService.Liveness.RUNNING);
+            ClassroomAiPipelineService.RecoveryView view = pipelineService.recoverOne(noteId);
+            assertThat(view.recovered()).isFalse();
+            assertThat(view.recoverable()).isFalse();
+            assertThat(statusOf(noteId)).isEqualTo("GENERATING");
+
+            // 受理もしない（**二重に走らせない**）
+            ClassroomAiPipelineService.Acceptance acceptance = pipelineService.accept(noteId, "it-live");
+            assertThat(acceptance.accepted()).isFalse();
+            assertThat(acceptance.status()).isEqualTo("GENERATING");
+            assertThat(statusOf(noteId)).isEqualTo("GENERATING");
+        } finally {
+            deleteExecution(executionId);
+            deleteNote(noteId);
+        }
+    }
+
+    @Test
+    @DisplayName("C: サーバー再起動で残った GENERATING は、記録を確かめたうえで回復できる")
+    void leftoverGenerationIsRecoveredThroughTheEntryPoint() {
+        long noteId = createNote("PENDING");
+        // 実行記録は**別プロセスの起動識別子**で RUNNING のまま残っている（そのプロセスはもう居ない）
+        long executionId = createExecution(noteId, "batC62", "RUNNING", "20260101T000000-cafebabe");
+        try {
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            bindExecution(noteId, executionId);
+            ClassroomAiPipelineService.RecoveryView view = pipelineService.recoverOne(noteId);
+            assertThat(view.recovered()).isTrue();
+            assertThat(view.liveness()).isEqualTo(ClassroomAiPipelineService.Liveness.LOST.name());
+            assertThat(statusOf(noteId)).isEqualTo("FAILED");
+            // やり直せる（FAILED は受理できる）
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            // **帰属は新しい試行のために外れる**（前の実行IDを引きずらない）
+            assertThat(noteMapper.findById(noteId).getGenerationExecutionId()).isNull();
+        } finally {
+            deleteExecution(executionId);
+            deleteNote(noteId);
+        }
+    }
+
+    @Test
+    @DisplayName("D: 受理したばかりで実行記録がまだ無い窓は、回収しない")
+    void freshClaimWithoutExecutionIsNotRecovered() {
+        long noteId = createNote("PENDING");
+        try {
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            // 実行記録はまだ無いが、始まったばかり（＝準備中）
+            assertThat(livenessOf(noteId)).isEqualTo(ClassroomAiPipelineService.Liveness.BINDING);
+            ClassroomAiPipelineService.RecoveryView view = pipelineService.recoverOne(noteId);
+            assertThat(view.recovered()).isFalse();
+            assertThat(statusOf(noteId)).isEqualTo("GENERATING");
+        } finally {
+            deleteNote(noteId);
+        }
+    }
+
+    @Test
+    @DisplayName("E: 同じまとめを同時に回復しても、有効な状態変更は 1 回だけ")
+    void concurrentRecoveryChangesStateOnce() throws Exception {
+        long noteId = createNote("PENDING");
+        long executionId = createExecution(noteId, "batC62", "RUNNING", "20260101T000000-abcdef01");
+        try {
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            bindExecution(noteId, executionId);
+            int threads = 6;
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            java.util.List<Thread> workers = new java.util.ArrayList<>();
+            AtomicInteger recovered = new AtomicInteger();
+            for (int index = 0; index < threads; index += 1) {
+                Thread worker = new Thread(() -> {
+                    try {
+                        start.await(5, TimeUnit.SECONDS);
+                    } catch (InterruptedException cause) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                    if (pipelineService.recoverOne(noteId).recovered()) {
+                        recovered.incrementAndGet();
+                    }
+                });
+                workers.add(worker);
+                worker.start();
+            }
+            start.countDown();
+            for (Thread worker : workers) {
+                worker.join(20_000);
+            }
+
+            assertThat(recovered.get()).isEqualTo(1);
+            assertThat(statusOf(noteId)).isEqualTo("FAILED");
+        } finally {
+            deleteExecution(executionId);
+            deleteNote(noteId);
+        }
+    }
+
+    @Test
+    @DisplayName("F: 回復したあとに旧スレッドが遅れて返っても、回復した状態を上書きしない")
+    void lateOldThreadCannotOverwriteRecoveredState() {
+        long noteId = createNote("PENDING");
+        long executionId = createExecution(noteId, "batC62", "RUNNING", "20260101T000000-abcdef02");
+        try {
+            assertThat(noteMapper.claimGeneration(noteId, token())).isEqualTo(1);
+            bindExecution(noteId, executionId);
+            String oldToken = tokenOf(noteId);
+            ClassroomNoteEntity beforeRecovery = noteMapper.findById(noteId);
+            assertThat(pipelineService.recoverOne(noteId).recovered()).isTrue();
+            assertThat(statusOf(noteId)).isEqualTo("FAILED");
+
+            // 旧スレッドが遅れて成功を書き込もうとする（**トークンは回復前のまま**）
+            assertThat(noteMapper.updateReady(noteId, "{\"テーマ\":\"古い\"}", 999L,
+                    beforeRecovery.getVersion(), oldToken))
+                    .as("回復した状態を旧スレッドが上書きしてはいけない")
+                    .isZero();
+            assertThat(noteMapper.updateFailed(noteId, "AI_ERROR", "旧スレッドの失敗",
+                    beforeRecovery.getVersion(), oldToken)).isZero();
+            assertThat(statusOf(noteId)).isEqualTo("FAILED");
+        } finally {
+            deleteExecution(executionId);
             deleteNote(noteId);
         }
     }

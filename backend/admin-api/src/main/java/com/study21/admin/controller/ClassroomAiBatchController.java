@@ -49,7 +49,19 @@ public class ClassroomAiBatchController {
     }
 
     /**
-     * **失われた実行を回復する**（`GENERATING` のまま残ったノートをやり直せる失敗に戻す）。
+     * **1 つのまとめの状態を確かめ、失联していれば回復する**（画面の【状態を確認／復旧】の入口）。
+     *
+     * <p>前端は「失联」と断言しない。**後端が実行記録で確かめて**から回復する。
+     * 実行中のものは**何もしない**（生きている実行を二重に走らせない）。</p>
+     */
+    @PostMapping("/notes/{noteId}/recover")
+    public ApiResponse<ClassroomAiPipelineService.RecoveryView> recoverOne(@PathVariable long noteId) {
+        ClassroomAiPipelineService.RecoveryView view = pipelineService.recoverOne(noteId);
+        return ApiResponse.ok(view, view.reason());
+    }
+
+    /**
+     * **失われた実行をまとめて回復する**（管理者向け。実行記録が生きているものは触らない）。
      *
      * <p>サーバーが落ちて実行が消えた回を、利用者がここから戻せる（画面の【最終まとめを再試行】が
      * 効かない状態の回復）。**実行記録が生きているものは触らない**（長い AI 呼び出しを止めない）。</p>

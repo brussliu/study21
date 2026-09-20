@@ -203,8 +203,8 @@ describe('単語情報管理デモ：ストア', () => {
     vi.useFakeTimers()
     const store = useStore()
 
-    store.pasteText = ['デモ新語一', 'デモ新語二', 'デモ新語三'].join('\n')
-    store.parseRegisterText()
+    // 表に入れて解釈させる（Excel から貼り付けたのと同じ経路）
+    store.setRegisterHeadings(['デモ新語一', 'デモ新語二', 'デモ新語三'])
 
     // 読みと中国語の意味は入れない（あとで AI から取得する）
     expect(store.registerWords.map((word) => word.heading)).toEqual(['デモ新語一', 'デモ新語二', 'デモ新語三'])
@@ -266,7 +266,7 @@ describe('単語情報管理デモ：ストア', () => {
 
     store.registerBookMode = 'EXISTING'
     store.registerBookName = 'みんなの日本語 初級'
-    store.pasteText = [inBasic.heading, inOther.heading, 'まったく新しい語'].join('\n')
+    store.setRegisterHeadings([inBasic.heading, inOther.heading, 'まったく新しい語'])
 
     // ① この書籍の中の重複だけ飛ばす（既定）
     store.registerDuplicateMode = 'BOOK'
@@ -284,8 +284,7 @@ describe('単語情報管理デモ：ストア', () => {
 
   it('入力の中で重複した単語は飛ばし、Unit の位置も使わない', () => {
     const store = useStore()
-    store.pasteText = ['新しい語A', '新しい語B', '新しい語A'].join('\n')
-    store.parseRegisterText()
+    store.setRegisterHeadings(['新しい語A', '新しい語B', '新しい語A'])
 
     expect(store.parsedRows.map((row) => row.state)).toEqual(['OK', 'OK', 'DUPLICATE'])
     expect(store.registerWords.length).toBe(2)
@@ -296,23 +295,18 @@ describe('単語情報管理デモ：ストア', () => {
     expect(store.allocation.summaries.map((summary) => summary.count)).toEqual([2])
   })
 
-  it('Excel 風の表で行を足す・消す・貼り付けられる', () => {
+  it('表の値を丸ごと入れ替えると、解釈し直す', () => {
     const store = useStore()
-    store.pasteRegisterText('りんご\nみかん')
-
+    store.setRegisterHeadings(['りんご', 'みかん'])
     expect(store.registerHeadings).toEqual(['りんご', 'みかん'])
-    store.setRegisterHeading(1, 'バナナ')
-    expect(store.registerHeadings).toEqual(['りんご', 'バナナ'])
-    store.addRegisterRow()
-    expect(store.registerHeadings.length).toBe(3)
-    store.removeRegisterRow(0)
-    expect(store.registerHeadings).toEqual(['バナナ', ''])
+    expect(store.parsedRows.length).toBe(2)
+    expect(store.registerWords.map((word) => word.heading)).toEqual(['りんご', 'みかん'])
 
-    // 貼り付けは 1 列目だけを使う（Excel で余計な列が混ざっていても無視する）
-    store.pasteRegisterText('ぶどう\t葡萄\nもも\t桃子')
-    expect(store.registerHeadings).toContain('ぶどう')
-    expect(store.registerHeadings).toContain('もも')
-    expect(store.registerHeadings.join(' ')).not.toContain('葡萄')
+    // 空の行は表には残す（そこへ入力できる）が、取り込み対象にはしない
+    store.setRegisterHeadings(['りんご', '', 'もも'])
+    expect(store.registerHeadings).toEqual(['りんご', '', 'もも'])
+    // 空の行は取り込み対象から外れる
+    expect(store.registerWords.map((word) => word.heading)).toEqual(['りんご', 'もも'])
   })
 
   it('デモをリセットすると、初期の仮データに戻る', async () => {
@@ -324,8 +318,7 @@ describe('単語情報管理デモ：ストア', () => {
       .map((word) => word.id)
       .sort()
 
-    store.pasteText = 'リセット確認用の語'
-    store.parseRegisterText()
+    store.setRegisterHeadings(['リセット確認用の語'])
     store.registerBookMode = 'NEW'
     store.registerBookName = 'リセット用'
     store.registerUnitSizeInput = 20

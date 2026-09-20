@@ -698,11 +698,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     const existing = registerDuplicateMode.value === 'ALL'
       ? headingsInAllBooks()
       : headingsInSelectedBook()
-    parsedRows.value = parseWords(pasteText.value, existing, registerDuplicateMode.value)
-    // グリッドの単語も、解釈した結果に合わせる（人が直した内容は残す）
-    registerHeadings.value = parsedRows.value
-      .filter((row) => row.state !== 'BLANK_WORD')
-      .map((row) => row.heading)
+    parsedRows.value = parseWords(registerHeadings.value.join('\n'), existing, registerDuplicateMode.value)
     registerError.value = ''
   }
 
@@ -712,48 +708,16 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     parseRegisterText()
   }
 
-  /** グリッドの操作（Excel 風。行の追加・削除・貼り付け）。 */
+  /** グリッドの操作（Excel 風の表は部品が持ち、ここは値を受けるだけ）。 */
 
-  /** 1 行の単語を書き換える。 */
-  function setRegisterHeading(index: number, value: string): void {
-    const next = [...registerHeadings.value]
-    if (index < 0 || index >= next.length) {
-      return
-    }
-    next[index] = value
-    registerHeadings.value = next
-  }
-
-  /** 末尾に空の行を足す。 */
-  function addRegisterRow(): void {
-    registerHeadings.value = [...registerHeadings.value, '']
-  }
-
-  /** 行を消す。 */
-  function removeRegisterRow(index: number): void {
-    registerHeadings.value = registerHeadings.value.filter((_, rowIndex) => rowIndex !== index)
-  }
-
-  /**
-   * Excel からの貼り付け（タブ区切りでも改行区切りでも受ける）。
-   * 1 列目だけを単語として取り込む（余計な列は無視する）。
-   */
-  function pasteRegisterText(text: string): number {
-    const rows = text
-      .split(/\r?\n/)
-      .map((line) => line.split('\t')[0]?.trim() ?? '')
-      .filter((heading) => heading !== '')
-    if (rows.length === 0) {
-      return 0
-    }
-    // 空の行だけのときは置き換える（1 行だけの表をそのまま使えるように）
-    const onlyEmpty = registerHeadings.value.length === 0
-      || registerHeadings.value.every((heading) => heading.trim() === '')
-    registerHeadings.value = onlyEmpty ? rows : [...registerHeadings.value, ...rows]
-    pasteText.value = registerHeadings.value.join('\n')
+  /** 表の値を丸ごと入れ替えて、解釈し直す。 */
+  function setRegisterHeadings(values: string[]): void {
+    registerHeadings.value = [...values]
     parseRegisterText()
-    return rows.length
   }
+
+
+
 
   function gotoRegisterStep(step: number): void {
     registerStep.value = Math.min(Math.max(1, step), 3)
@@ -1022,10 +986,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerCounts,
     allocation,
     parseRegisterText,
-    setRegisterHeading,
-    addRegisterRow,
-    removeRegisterRow,
-    pasteRegisterText,
+    setRegisterHeadings,
     fillSample,
     gotoRegisterStep,
     resetRegister,

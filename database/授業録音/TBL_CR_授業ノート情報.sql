@@ -34,6 +34,8 @@ CREATE TABLE IF NOT EXISTS public."CR_授業ノート情報" (
     "生成開始日時"      TIMESTAMP    NULL,
     -- 受理した**試行の識別子**（遅れて返った古い試行の書き込みを捨てる照合に使う）
     "生成トークン"      VARCHAR(64)  NULL,
+    -- **この試行を実行しているバッチ実行記録**の ID（別の授業の実行と混同しないための帰属）
+    "生成実行ID"        BIGINT       NULL,
 
     -- ---- 2.1 の共通規約 ----
     "バージョン"         INTEGER      NOT NULL DEFAULT 1,

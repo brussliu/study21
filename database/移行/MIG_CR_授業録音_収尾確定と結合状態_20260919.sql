@@ -66,6 +66,15 @@ ALTER TABLE public."CR_授業ノート情報"
 COMMENT ON COLUMN public."CR_授業ノート情報"."生成トークン" IS
     '生成を受理した試行の識別子。条件つき更新の照合に使い、古い試行の遅い書き込みを捨てる';
 
+-- **この試行を実行しているバッチ実行記録**（`BAT_バッチ実行履歴情報`.`実行ID`）。
+-- 「そのまとめの実行が生きているか」を**別の授業の実行と混同せずに**判断するために持つ
+-- （`AI呼出履歴ID` は AI 呼び出しログの ID なので**混用しない**）。
+ALTER TABLE public."CR_授業ノート情報"
+    ADD COLUMN IF NOT EXISTS "生成実行ID" BIGINT NULL;
+
+COMMENT ON COLUMN public."CR_授業ノート情報"."生成実行ID" IS
+    'この生成を実行しているバッチ実行記録の ID（実行ID）。失联判定を「その実行」で行うために使う';
+
 COMMENT ON COLUMN public."CR_授業ノート情報"."生成開始日時" IS
     '生成の起動を受理した時刻。一定時間より古い GENERATING は「落ちた」とみなしてやり直す';
 

@@ -95,12 +95,18 @@ function stubRecorder(): void {
 }
 
 /** 収尾の応答（`/stt/stream/finish`）を差し替えられる API のモック。 */
-function mockApi(options: { finish?: Record<string, unknown>[] } = {}): {
+function mockApi(options: {
+  /** 収尾の応答（**音源ごとの**配列。足りなくなったら最後のものを繰り返す）。 */
+  finishBySource?: Record<string, Record<string, unknown>[]>
+  finish?: Record<string, unknown>[]
+} = {}): {
   calls: Call[]
   finishCalls: () => number
+  finishCallsOf: (source: string) => number
 } {
   const calls: Call[] = []
   let finishCalls = 0
+  const finishBySourceCalls: Record<string, number> = {}
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = (init?.method ?? 'GET').toUpperCase()
     const body = typeof init?.body === 'string'
@@ -111,8 +117,17 @@ function mockApi(options: { finish?: Record<string, unknown>[] } = {}): {
       { status: 200, headers: { 'Content-Type': 'application/json' } })
     const target = String(url)
     if (target.includes('/stt/stream/finish')) {
-      const scripted = options.finish?.[Math.min(finishCalls, (options.finish?.length ?? 1) - 1)]
+      const source = new URL(target, 'http://localhost').searchParams.get('source') ?? 'mic'
       finishCalls += 1
+      const list = options.finishBySource?.[source]
+      let scripted: Record<string, unknown> | undefined
+      if (list !== undefined && list.length > 0) {
+        const index = finishBySourceCalls[source] ?? 0
+        scripted = list[Math.min(index, list.length - 1)]
+        finishBySourceCalls[source] = index + 1
+      } else {
+        scripted = options.finish?.[Math.min(finishCalls - 1, (options.finish?.length ?? 1) - 1)]
+      }
       return ok(scripted ?? {
         interim: '', added: [], error: null,
         finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
@@ -160,7 +175,11 @@ function mockApi(options: { finish?: Record<string, unknown>[] } = {}): {
       hasAudio: false, audioMime: null, version: 2
     })
   }))
-  return { calls, finishCalls: () => finishCalls }
+  return {
+    calls,
+    finishCalls: () => finishCalls,
+    finishCallsOf: (source: string) => finishBySourceCalls[source] ?? 0
+  }
 }
 
 /** 音源つきで画面を開く（`audioMode=mic-pc` で二音源）。 */

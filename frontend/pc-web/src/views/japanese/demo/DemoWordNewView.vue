@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, nextTick, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
+import DemoWordGrid from '@/features/japanese-demo/components/DemoWordGrid.vue'
 import { useJapaneseDemoStore } from '@/features/japanese-demo/store/japaneseDemo'
 import type { ParsedRowState } from '@/features/japanese-demo/logic'
 import { DEMO_PASTE_SAMPLE } from '@/features/japanese-demo/mock/demoWords'
@@ -52,27 +53,30 @@ const counts = computed(() => store.registerCounts)
 
 const saving = ref(false)
 
-/** 貼り付けの対象（表の中の入力欄。フォーカスが無ければ表全体で受ける）。 */
-function onPaste(event: ClipboardEvent): void {
-  const text = event.clipboardData?.getData('text/plain') ?? ''
-  if (text.trim() === '') {
-    return
+/** 表の値（1 行 1 語）。表を編集すると、そのまま解釈し直す。 */
+const gridValues = computed({
+  get: () => store.registerHeadings,
+  set: (next: string[]) => {
+    store.setRegisterHeadings(next)
+    pasteNotice.value = ''
   }
-  event.preventDefault()
-  const added = store.pasteRegisterText(text)
-  pasteNotice.value = added > 0 ? `${added} 件の単語を取り込みました。Excel から貼り付けられます。` : ''
+})
+
+/** 表からの知らせ（取り込んだ件数）。 */
+function onGridNotice(message: string): void {
+  pasteNotice.value = message
 }
 
-/** 表の外（ダイアログ全体）でも貼り付けを受けられるようにする。 */
-function onDialogPaste(event: ClipboardEvent): void {
-  if ((event.target as HTMLElement | null)?.closest('[data-demo-word-grid]') !== null) {
-    return
-  }
-  onPaste(event)
+/** 表の部品（列の幅や行の操作は部品が持つ）。 */
+const gridRef = ref<InstanceType<typeof DemoWordGrid> | null>(null)
+
+/** 見出しの【行追加】は、表の部品に任せる。 */
+function addRow(): void {
+  gridRef.value?.addRowFromOutside()
 }
 
 function loadSample(): void {
-  store.fillSample(DEMO_PASTE_SAMPLE)
+  store.setRegisterHeadings(DEMO_PASTE_SAMPLE.split('\n').map((line) => line.trim()).filter((line) => line !== ''))
   pasteNotice.value = `${store.registerHeadings.length} 件の入力例を入れました。`
 }
 
@@ -80,7 +84,7 @@ function loadSample(): void {
 function loadScenarioNewBook(): void {
   store.resetRegister()
   const lines = Array.from({ length: 45 }, (_, index) => `追加単語${String(index + 1).padStart(2, '0')}`)
-  store.pasteRegisterText(lines.join('\n'))
+  store.setRegisterHeadings(lines)
   chooseBook(NEW_BOOK)
   store.registerBookName = '追加用の書籍'
   store.registerUnitSizeInput = 20
@@ -92,7 +96,7 @@ function loadScenarioNewBook(): void {
 function loadScenarioAppend(): void {
   store.resetRegister()
   const lines = Array.from({ length: 5 }, (_, index) => `追加語${index + 1}`)
-  store.pasteRegisterText(lines.join('\n'))
+  store.setRegisterHeadings(lines)
   const book = store.bookNameOptions[1] ?? store.bookNameOptions[0] ?? ''
   bookChoice.value = book
   chooseBook(book)
@@ -149,14 +153,6 @@ function cancel(): void {
   emit('close')
 }
 
-/** 入力欄の後ろに足す（Enter で次の行を作る）。 */
-async function addRowAndFocus(): Promise<void> {
-  store.addRegisterRow()
-  await nextTick()
-  const inputs = document.querySelectorAll<HTMLInputElement>('[data-demo-word-input]')
-  inputs[inputs.length - 1]?.focus()
-}
-
 onMounted(() => {
   store.resetRegister()
   bookChoice.value = store.registerBookName
@@ -167,7 +163,7 @@ onMounted(() => {
   <div class="overlay">
     <section
       class="dialog dialog--lg" role="dialog" aria-modal="true"
-      aria-labelledby="jpNewWordTitle" data-demo-new-dialog @paste="onDialogPaste"
+      aria-labelledby="jpNewWordTitle" data-demo-new-dialog
     >
       <div class="dialog__head">
         <h2 id="jpNewWordTitle" class="dialog__title">
@@ -203,52 +199,21 @@ onMounted(() => {
               <button type="button" class="btn btn--secondary btn--sm" data-demo-sample @click="loadSample">
                 <AppIcon name="copy" size="sm" /> 入力例を入れる
               </button>
-              <button type="button" class="btn btn--secondary btn--sm" data-demo-add-row @click="addRowAndFocus">
+              <button type="button" class="btn btn--secondary btn--sm" data-demo-add-row @click="addRow">
                 <AppIcon name="plus" size="sm" /> 行追加
               </button>
             </span>
           </div>
 
           <!--
-            Excel 風の表（1 列）。貼り付けは表の中でもダイアログ全体でも受ける。
-            セルを直接編集でき、× で行を消せる。
+            Excel 風の入力表（TODO の新規登録にある「子タスク」の表と同じ作り）。
+            セルを選んで貼り付け、ダブルクリック / F2 で入力、↑↓←→ で移動。
           -->
-          <table class="data-table" data-demo-word-grid>
-            <thead>
-              <tr>
-                <th class="col-narrow" style="width: 3.5rem">NO</th>
-                <th>単語</th>
-                <th style="width: 4rem">削除</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(heading, index) in rows" :key="index" :data-demo-word-row-index="index">
-                <td class="cell-muted">{{ index + 1 }}</td>
-                <td>
-                  <input
-                    class="jp-demo-inline-input" :value="heading"
-                    :aria-label="`${index + 1} 行目の単語`" :data-demo-word-input="index"
-                    placeholder="例: 図書館"
-                    @input="store.setRegisterHeading(index, ($event.target as HTMLInputElement).value)"
-                    @keydown.enter.prevent="addRowAndFocus"
-                  >
-                </td>
-                <td>
-                  <button
-                    type="button" class="btn btn--icon btn--sm" :aria-label="`${index + 1} 行目を削除`"
-                    :data-demo-remove-row="index" @click="store.removeRegisterRow(index)"
-                  >
-                    <AppIcon name="x" size="sm" class="icon--danger" />
-                  </button>
-                </td>
-              </tr>
-              <tr v-if="rows.length === 0">
-                <td colspan="3" class="jp-hint">
-                  Excel から単語の列をコピーして、この表に貼り付けてください（1 行に 1 語）。
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <DemoWordGrid
+            ref="gridRef"
+            v-model:values="gridValues"
+            @notice="onGridNotice"
+          />
 
           <p v-if="pasteNotice !== ''" class="alert alert--info" data-demo-paste-notice>{{ pasteNotice }}</p>
 

@@ -7,6 +7,7 @@ import {
   classroomAudioUrl,
   deleteClassroomRecord,
   fetchClassroomRecord,
+  recoverClassroomNote,
   runClassroomNote,
   retryClassroomAssembly,
   orderClassroomSegments,
@@ -332,6 +333,43 @@ const finalNoteStateText = computed(() => {
 /** 最終まとめの起動を頼んでいる最中か（連打で二重に走らせない）。 */
 const retryingFinalNote = ref(false)
 
+/** 状態の確認／復旧を頼んでいる最中か。 */
+const checkingFinalNote = ref(false)
+
+/**
+ * **状態を確認／復旧**の入口を出すか。
+ *
+ * <p>`GENERATING` のときだけ出す（実行中かどうかは**後端が実行記録で確かめる**。画面は
+ * 「失联」と断言しない）。押しても**実行中なら何も起きない**ので、二重起動の害は無い。</p>
+ */
+const canCheckFinalNote = computed(() => finalNote.value?.status === 'GENERATING')
+
+/**
+ * **まとめの実行の状態を確かめ、失联していれば回復してもらう**。
+ *
+ * <p>サーバーが再起動して実行が消えた回は、これで**やり直せる失敗**に戻り、
+ * 【最終まとめを再試行】が出る。実行中ならそのまま「作成しています」を出し続ける。</p>
+ */
+async function checkFinalNote(): Promise<void> {
+  const noteId = finalNote.value?.noteId ?? null
+  if (noteId === null || checkingFinalNote.value) return
+  checkingFinalNote.value = true
+  finalNoteNotice.value = ''
+  try {
+    const response = await recoverClassroomNote(noteId)
+    finalNoteNotice.value = response.data.reason
+    // 状態を取り直す（回復していれば FAILED → 再試行の入口が出る）
+    await refresh()
+    if (finalNote.value?.status === 'GENERATING') startPolling()
+  } catch (caught) {
+    // **分からない**ことを「失敗」と言い切らない（確かめられなかった、と伝える）
+    finalNoteNotice.value = '最終まとめの状態を確認できませんでした（'
+      + messageOf(caught, '通信に失敗しました') + '）。少し待ってからもう一度お試しください。'
+  } finally {
+    checkingFinalNote.value = false
+  }
+}
+
 /** 最終まとめの起動の結果（日本語。空なら出さない）。 */
 const finalNoteNotice = ref('')
 
@@ -578,6 +616,17 @@ onBeforeUnmount(() => {
             :disabled="retryingFinalNote" data-cr-final-note-retry @click="retryFinalNote"
           >
             {{ retryingFinalNote ? '頼んでいます...' : finalNoteActionLabel }}
+          </button>
+          <!--
+            **状態を確認／復旧**（利用者の指摘 ②）。実行中かどうかは**後端が実行記録で確かめる**
+            （前端は「失联」と断言しない）。サーバーが再起動して実行が消えた回は、これで
+            やり直せる状態に戻る（実行中なら何も起きない）。
+          -->
+          <button
+            v-if="canCheckFinalNote" type="button" class="btn btn--ghost btn--sm"
+            :disabled="checkingFinalNote" data-cr-final-note-recover @click="checkFinalNote"
+          >
+            {{ checkingFinalNote ? '確認しています...' : '状態を確認／復旧' }}
           </button>
         </section>
 

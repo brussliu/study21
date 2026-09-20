@@ -20,6 +20,7 @@
         <result property="createdAt"       column="登録日時"/>
         <result property="generationStartedAt" column="生成開始日時"/>
         <result property="generationToken" column="生成トークン"/>
+        <result property="generationExecutionId" column="生成実行ID"/>
         <result property="updatedAt"       column="更新日時"/>
     </resultMap>
 
@@ -27,7 +28,7 @@
         "授業ノートID", "授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番",
         "ノートJSON"::text AS "ノートJSON", "生成状態", "AI呼出履歴ID", "エラーコード", "エラーメッセージ",
         "再試行回数", "バージョン", "登録者アカウントID", "登録日時", "生成開始日時", "生成トークン",
-        "更新日時"
+        "生成実行ID", "更新日時"
     </sql>
 
     <select id="findById" resultMap="NoteMap">
@@ -59,6 +60,22 @@
       `PENDING` / `FAILED` の行だけを取るので、**同時に 2 本来ても勝つのは 1 本**だけ
       （画面のボタンやメモリの真偽値では守らない）。0 行なら「別の要求が既に始めている」。
     -->
+    <!--
+      ノートに紐づいた実行記録（**実行ID がそのノートのものか**を同じ文で確かめる）。
+    -->
+    <select id="findGenerationExecution"
+            resultType="com.study21.admin.batch.BatchExecutionEntity">
+        SELECT e."実行ID"        AS "executionId",
+               e."バッチコード"  AS "batchCode",
+               e."状態"          AS "status",
+               e."起動識別子"    AS "runId",
+               e."開始時刻"      AS "startTime"
+          FROM public."BAT_バッチ実行履歴情報" e
+          JOIN public."CR_授業ノート情報" n ON n."生成実行ID" = e."実行ID"
+         WHERE n."授業ノートID" = #{noteId}
+           AND e."実行ID" = #{executionId}
+    </select>
+
     <select id="findStaleGenerating" resultMap="NoteMap">
         SELECT <include refid="NoteColumns"/>
           FROM public."CR_授業ノート情報"
@@ -73,6 +90,8 @@
            SET "生成状態"     = 'GENERATING',
                "生成開始日時" = CURRENT_TIMESTAMP,
                "生成トークン" = #{token},
+               -- 実行記録はこれから作られる。**前の試行の帰属を引きずらない**（NULL に戻す）
+               "生成実行ID"   = NULL,
                "更新元コード" = 'APP',
                "更新日時"     = CURRENT_TIMESTAMP
          WHERE "授業ノートID" = #{noteId}
@@ -87,6 +106,7 @@
         UPDATE public."CR_授業ノート情報"
            SET "生成開始日時" = CURRENT_TIMESTAMP,
                "生成トークン" = #{token},
+               "生成実行ID"   = NULL,
                "更新元コード" = 'APP',
                "更新日時"     = CURRENT_TIMESTAMP
          WHERE "授業ノートID" = #{noteId}
@@ -96,12 +116,17 @@
 
     <!--
       生成の**実行が始まった**ことを確定する（AI を呼ぶ直前）。
-      トークンが一致するときだけ通す＝**古い試行**の書き込みは捨てる（遅れて返っても上書きしない）。
+
+      <p>`生成実行ID` に**この試行を実行しているバッチ実行記録**を入れる（「そのまとめが
+      生きているか」を別の授業の実行と混同せずに判断するため）。**`AI呼出履歴ID` は触らない**
+      （あれは AI 呼び出しログの ID。実行IDを入れると意味が壊れる）。</p>
+
+      <p>トークンが一致するときだけ通す＝**古い試行**の書き込みは捨てる。</p>
     -->
     <update id="markGenerating">
         UPDATE public."CR_授業ノート情報"
            SET "生成状態"       = 'GENERATING',
-               "AI呼出履歴ID"   = #{executionId},
+               "生成実行ID"     = #{executionId},
                "バージョン"     = "バージョン" + 1,
                "更新元コード"   = 'BATCH',
                "更新日時"       = CURRENT_TIMESTAMP
@@ -160,11 +185,15 @@
                "エラーコード"   = #{errorCode},
                "エラーメッセージ" = #{errorMessage},
                "再試行回数"     = "再試行回数" + 1,
+               -- **版を進める**: 旧い試行が遅れて結果を書いても、楽観ロックで弾かれる
+               "バージョン"     = "バージョン" + 1,
                "更新元コード"   = 'APP',
                "更新日時"       = CURRENT_TIMESTAMP
          WHERE "授業ノートID" = #{noteId}
            AND "生成状態"     = 'GENERATING'
-           AND (#{token} IS NULL OR "生成トークン" = #{token})
+           <if test="token != null">
+           AND "生成トークン" = #{token}
+           </if>
     </update>
 
 

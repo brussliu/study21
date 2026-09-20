@@ -167,7 +167,7 @@ describe('単語情報管理：画面', () => {
     await wrapper.get('[data-demo-sample]').trigger('click')
     await flushPromises()
     expect(store.registerHeadings.length).toBeGreaterThan(5)
-    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(store.registerHeadings.length)
+    expect(wrapper.findAll('[data-demo-word-value]').length).toBe(store.registerHeadings.length)
     expect(wrapper.findAll('[data-demo-parsed-row]').length).toBeGreaterThan(5)
     expect(wrapper.find('[data-demo-paste-notice]').exists()).toBe(true)
 
@@ -185,6 +185,115 @@ describe('単語情報管理：画面', () => {
     await vi.waitFor(() => expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(false))
     expect(wrapper.get('[data-demo-notice-bar]').text()).toContain('登録しました')
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('Excel 風の表: クリックでは入力欄が出ず、ダブルクリック / F2 で入力する', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-demo-sample]').trigger('click')
+    await flushPromises()
+
+    // 値はテキストで出ていて、入力欄は出ていない（Excel と同じ）
+    expect(wrapper.findAll('[data-demo-word-value]').length).toBeGreaterThan(0)
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(0)
+
+    // セルをクリック＝選ぶだけ（入力欄は出ない・選択の印が付く）
+    const firstCell = wrapper.get('[data-demo-word-cell="0"]')
+    await firstCell.trigger('mousedown')
+    expect(firstCell.classes()).toContain('is-selected')
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(0)
+
+    // ダブルクリックで入力できる
+    await firstCell.trigger('dblclick')
+    await flushPromises()
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(1)
+    const input = wrapper.get('[data-demo-word-input="0"]')
+    expect((input.element as HTMLInputElement).value).toBe(store.registerHeadings[0])
+
+    // 入力すると、その場で表と解釈の両方に反映される
+    await input.setValue('書き換えた語')
+    await flushPromises()
+    expect(store.registerHeadings[0]).toBe('書き換えた語')
+    expect(store.parsedRows[0]?.heading).toBe('書き換えた語')
+
+    // Enter で確定すると、入力欄が閉じて次の行へ移る
+    await input.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(0)
+    expect(wrapper.get('[data-demo-word-cell="1"]').classes()).toContain('is-selected')
+  })
+
+  it('Excel 風の表: F2 で入力、Esc で取り消し、Delete で消せる', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    store.setRegisterHeadings(['りんご', 'みかん'])
+    await flushPromises()
+
+    // F2 で入力モード（クリックだけでは入らない）
+    await wrapper.get('[data-demo-word-cell="0"]').trigger('mousedown')
+    await wrapper.get('[data-demo-word-grid]').trigger('keydown', { key: 'F2' })
+    await flushPromises()
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(1)
+
+    // 書き換えてから Esc で取り消すと、元の値に戻る
+    const input = wrapper.get('[data-demo-word-input="0"]')
+    await input.setValue('りんご（書きかけ）')
+    await input.trigger('keydown', { key: 'Escape' })
+    await flushPromises()
+    expect(store.registerHeadings[0]).toBe('りんご')
+
+    // セルを選んで Delete で消せる
+    await wrapper.get('[data-demo-word-cell="1"]').trigger('mousedown')
+    await wrapper.get('[data-demo-word-grid]').trigger('keydown', { key: 'Delete' })
+    await flushPromises()
+    expect(store.registerHeadings[1]).toBe('')
+    expect(store.registerWords.map((word) => word.heading)).toEqual(['りんご'])
+  })
+
+  it('Excel 風の表: 選んだセルを起点に貼り付け、足りない行は増える', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    store.setRegisterHeadings(['既存の語'])
+    await flushPromises()
+
+    // 1 行目を選んでから、Excel のコピー（タブ区切り）を貼る
+    await wrapper.get('[data-demo-word-cell="0"]').trigger('mousedown')
+    const paste = (text: string) => wrapper.get('[data-demo-word-grid]').trigger('paste', {
+      clipboardData: { getData: () => text }
+    })
+    await paste('りんご\tapple\tリンゴ\nみかん\tmandarin\tミカン')
+    await flushPromises()
+
+    // 1 列目だけを使い、選んだセルから下へ流し込む（余計な列は無視する）
+    expect(store.registerHeadings).toEqual(['りんご', 'みかん'])
+    expect(wrapper.find('[data-demo-paste-notice]').exists()).toBe(true)
+
+    // 行が足りなければ自動で増える
+    await wrapper.get('[data-demo-word-cell="1"]').trigger('mousedown')
+    await paste('ぶどう\nもも\nなし')
+    await flushPromises()
+    expect(store.registerHeadings).toEqual(['りんご', 'ぶどう', 'もも', 'なし'])
+  })
+
+  it('Excel 風の表: 行の追加と削除', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-demo-add-row]').trigger('click')
+    await flushPromises()
+    expect(store.registerHeadings.length).toBe(1)
+
+    store.setRegisterHeadings(['あ', 'い', 'う'])
+    await flushPromises()
+    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(3)
+
+    await wrapper.get('[data-demo-remove-row="1"]').trigger('click')
+    await flushPromises()
+    expect(store.registerHeadings).toEqual(['あ', 'う'])
   })
 
   it('書籍はプルダウンで選び、最後の「新しい書籍を追加…」で入力欄が出る', async () => {
@@ -252,7 +361,8 @@ describe('単語情報管理：画面', () => {
     expect(store.words.length).toBe(before)
     expect(wrapper.find('[data-demo-new-dialog]').exists(), '失敗したら閉じない').toBe(true)
     expect(wrapper.get('[data-demo-register-error]').text()).toContain('登録できませんでした')
-    expect(store.pasteText).not.toBe('')
+    // 入力（表の中身）は残す（やり直せる）
+    expect(store.registerHeadings.length).toBeGreaterThan(0)
     vi.useRealTimers()
   })
 

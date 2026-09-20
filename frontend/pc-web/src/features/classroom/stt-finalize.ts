@@ -165,6 +165,27 @@ export function normalizeSttFinalize(
   }
 }
 
+/**
+ * この結果で**収尾を終わりにしてよいか**（＝約束を残して再利用してよいか）。
+ *
+ * <p>{@link SourceFinalizeResult.canFinish} と同じ意味だが、`null`（結果が無い）も扱う。
+ * **「分からない」を終わりにしない**（`null` は false）。</p>
+ */
+export function canFinishFinalize(result: SourceFinalizeResult | null): boolean {
+  return result !== null && result.canFinish
+}
+
+/**
+ * もう一度収尾をやり直す必要があるか（**約束を捨てて、次は本当に送り直す**）。
+ *
+ * <p>`PENDING`・`RETRYABLE_FAILURE`・`UNKNOWN` と、結果そのものが無い回は「やり直す」。
+ * これを間違えると、画面が【続きをやり直す】を出しても `finish()` が**古い約束を返すだけ**で
+ * 後端へ行かず、永久に終われない。</p>
+ */
+export function needsFinalizeRetry(result: SourceFinalizeResult | null): boolean {
+  return !canFinishFinalize(result)
+}
+
 /** 2 つの結果を**同じ意味で**比べる（同じ音源の結果を上書きしてよいかの判断に使う）。 */
 export function sameFinalizeResult(
   left: SourceFinalizeResult | null, right: SourceFinalizeResult | null

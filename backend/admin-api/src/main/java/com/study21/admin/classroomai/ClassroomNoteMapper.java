@@ -52,6 +52,15 @@ public interface ClassroomNoteMapper {
                        @Param("token") String token);
 
     /**
+     * **ノートに紐づいた実行記録**を引く（失联判定を「その実行」で行うため）。
+     *
+     * <p>`生成実行ID` がそのノートのものであることを**同じ 1 文で確かめる**。実行記録が
+     * 消えていれば null（＝帰属が確認できない）。</p>
+     */
+    com.study21.admin.batch.BatchExecutionEntity findGenerationExecution(
+            @Param("noteId") long noteId, @Param("executionId") long executionId);
+
+    /**
      * **失われた可能性のある `GENERATING`** を拾う（開始が古い・開始時刻が無い）。
      *
      * <p>呼び側は**実行記録**で「本当に走っているか」を確かめてから回復する

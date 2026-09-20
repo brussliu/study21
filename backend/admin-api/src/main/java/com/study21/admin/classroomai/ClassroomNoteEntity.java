@@ -37,6 +37,13 @@ public class ClassroomNoteEntity {
      * 新しい試行や既にできた結果を上書きしない。</p>
      */
     private String generationToken;
+    /**
+     * **この試行を実行しているバッチ実行記録**の ID（`BAT_バッチ実行履歴情報`.`実行ID`）。
+     *
+     * <p>`AI呼出履歴ID` とは**別物**（あちらは AI 呼び出しログの ID）。混ぜると、失联判定や
+     * 呼び出しの追跡が壊れる。</p>
+     */
+    private Long generationExecutionId;
     private Timestamp updatedAt;
 
     public Long getNoteId() { return noteId; }
@@ -75,6 +82,10 @@ public class ClassroomNoteEntity {
     }
     public String getGenerationToken() { return generationToken; }
     public void setGenerationToken(String generationToken) { this.generationToken = generationToken; }
+    public Long getGenerationExecutionId() { return generationExecutionId; }
+    public void setGenerationExecutionId(Long generationExecutionId) {
+        this.generationExecutionId = generationExecutionId;
+    }
     public Timestamp getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Timestamp updatedAt) { this.updatedAt = updatedAt; }
 }
