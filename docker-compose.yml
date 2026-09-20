@@ -95,6 +95,10 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-production}
       ALLOWED_ORIGINS: ${STUDY21_ALLOWED_ORIGINS:-http://localhost:8090,http://localhost:8091}
+      # サービス間（user-api → admin-api）の内部入口の合言葉。
+      # **未設定なら授業まとめの起動・回復は全て拒否**される（匿名には落ちない）。
+      # 値は setting/deploy.env に置き、ここには書かない
+      STUDY21_INTERNAL_TOKEN: ${STUDY21_INTERNAL_TOKEN:?请在 setting/deploy.env 中设置 STUDY21_INTERNAL_TOKEN}
       STUDY21_DATASOURCE_URL: ${STUDY21_DATASOURCE_URL:-jdbc:postgresql://192.168.0.100:54320/study21}
       STUDY21_DATASOURCE_USERNAME: ${STUDY21_DATASOURCE_USERNAME:-postgres}
       STUDY21_DATASOURCE_PASSWORD: ${STUDY21_DATASOURCE_PASSWORD:?请在 setting/deploy.env 中设置 STUDY21_DATASOURCE_PASSWORD}
@@ -122,12 +126,25 @@ services:
       # 授業録音の音声。**user-api と共有**する置き場（保存期間を過ぎた音声の削除を
       # admin-api の batR02 が行うため、同じパスを指す必要がある）
       STUDY21_CLASSROOM_STORAGE_ROOT: /app/data/classroom
+      # 学習モニターのスナップショット画像。**user-api と同じ置き場**を指す
+      # （batL02 が切り出して書き、user-api が配信する。DB の 保存パス はこの下からの相対パス）
+      STUDY21_STUDY_MONITOR_SNAPSHOT_ROOT: /app/data/snapshots
+      # ffmpeg / ffprobe のパス（イメージに入っているので既定のままでよい。
+      # 別の場所を使うときだけ deploy.env で上書きする）
+      STUDY21_STUDY_MONITOR_FFMPEG_COMMAND: ${STUDY21_STUDY_MONITOR_FFMPEG_COMMAND:-ffmpeg}
+      STUDY21_STUDY_MONITOR_FFPROBE_COMMAND: ${STUDY21_STUDY_MONITOR_FFPROBE_COMMAND:-ffprobe}
     volumes:
       - ${STUDY21_LOG_HOST_PATH:-../logs}:/app/logs
       # AI 生図の画像（user-api と同じホスト側ディレクトリをマウントする）
       - ${STUDY21_GEOMETRY_AI_STORAGE_HOST_PATH:-../files/geometry-ai}:/app/data/geometry-ai
       # 授業録音の音声（user-api と同じホスト側ディレクトリ＝<发布位置>/files/classroom）
       - ${STUDY21_CLASSROOM_STORAGE_HOST_PATH:-../files/classroom}:/app/data/classroom
+      # 学習モニターのスナップショット（**書き込み可**。user-api は読み取り専用で同じ場所を見る）
+      - ${STUDY21_STUDY_MONITOR_SNAPSHOT_HOST_PATH:-../files/snapshots}:/app/data/snapshots
+      # 監視カメラの録画フォルダ（batL02 が読み、取り込んだ動画を checked/ と bak/ へ移す）。
+      # **設定 STUDY_MONITOR_VIDEO_SOURCE_DIRECTORY と同じパス**にマウントする
+      # （設定値を変えるときは下のホスト側パスも合わせる）
+      - ${STUDY21_STUDY_MONITOR_SOURCE_HOST_PATH:-/vol5/1000/DATA0/XiaomiCamera_00_B88880D0F03E}:/vol5/1000/DATA0/XiaomiCamera_00_B88880D0F03E
     ports:
       - "${STUDY21_ADMIN_API_PORT:-8081}:8081"
       # プロキシ（端末側から見えるポート。コンテナ内の待ち受けと同じ番号にする）
@@ -174,6 +191,14 @@ services:
       # 授業録音の音声（分塊を追記して 1 ファイルにする。ここを指定しないと
       # コンテナ内の一時領域に書かれ、再起動で録音が消える）
       STUDY21_CLASSROOM_STORAGE_ROOT: /app/data/classroom
+      # まとめの内部入口（admin-api）の置き場と、サービス間の合言葉。
+      # 合言葉は admin-api と**同じ値**にする（未設定ならまとめの起動・回復は拒否される）
+      STUDY21_ADMIN_API_URL: ${STUDY21_ADMIN_API_URL:-http://admin-api:8081}
+      STUDY21_INTERNAL_TOKEN: ${STUDY21_INTERNAL_TOKEN:?请在 setting/deploy.env 中设置 STUDY21_INTERNAL_TOKEN}
+      # 続録（一時停止・開き直し）の音声を 1 本に結合する道具（イメージに ffmpeg が入っている）。
+      # 既定のままでよいが、別の場所を使うときだけ deploy.env で上書きする
+      STUDY21_CLASSROOM_FFMPEG_COMMAND: ${STUDY21_CLASSROOM_FFMPEG_COMMAND:-ffmpeg}
+      STUDY21_CLASSROOM_FFPROBE_COMMAND: ${STUDY21_CLASSROOM_FFPROBE_COMMAND:-ffprobe}
       # ログ出力（ホストの logs/ を /app/logs にマウント。実ファイルは /app/logs/backend/ 配下＝
       # ホストの logs/backend/ に app / sql / error の 3 ファイルが出る）
       STUDY21_LOG_DIR: /app/logs

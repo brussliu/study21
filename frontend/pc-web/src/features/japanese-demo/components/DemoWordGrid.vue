@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import '@/features/japanese-demo/japanese-demo.css'
 
@@ -348,37 +348,33 @@ function removeRow(row: number): void {
 
 /* ---------- 列の幅（見出しの右端をつまんで変える） ---------- */
 
-/** 列の幅（％）。NO / 単語 / 削除 で合計 100%。 */
-const DEFAULT_WIDTHS = [12, 76, 12]
-const widths = ref<number[]>([...DEFAULT_WIDTHS])
-const MIN_WIDTH = 8
+/**
+ * 単語の列の幅（**px**。画面の幅に左右されない）。
+ *
+ * **× と NO は固定**（TODO の表と同じで、つまみも置かない）。単語だけを px で持ち、
+ * 残りは表の幅が吸収するので、単語の幅を変えても × と NO は動かない。
+ */
+const MIN_WIDTH = 120
+const DEFAULT_WIDTH = 520
+const width = ref(DEFAULT_WIDTH)
 
-function resetWidths(): void {
-  widths.value = [...DEFAULT_WIDTHS]
+function resetWidth() {
+  width.value = DEFAULT_WIDTH
 }
 
-function startResize(index: number, event: MouseEvent): void {
+/** 単語の列の幅を変える（× と NO は固定なので動かない）。 */
+function startResize(event: MouseEvent): void {
   const element = table.value
   if (element === null) {
     return
   }
   const startX = event.clientX
-  const startWidths = [...widths.value]
+  const startWidth = width.value
   const tableWidth = element.getBoundingClientRect().width
   const move = (moveEvent: MouseEvent): void => {
-    if (tableWidth <= 0) {
-      return
-    }
-    const delta = ((moveEvent.clientX - startX) / tableWidth) * 100
-    const left = startWidths[index]! + delta
-    const right = startWidths[index + 1]! - delta
-    if (left < MIN_WIDTH || right < MIN_WIDTH) {
-      return
-    }
-    const next = [...widths.value]
-    next[index] = left
-    next[index + 1] = right
-    widths.value = next
+    // 単語の列だけを広げる／狭める（× と NO は固定なので触らない）
+    const max = tableWidth > 0 ? Math.max(MIN_WIDTH, tableWidth - 140) : 2000
+    width.value = Math.min(Math.max(startWidth + (moveEvent.clientX - startX), MIN_WIDTH), max)
   }
   const up = (): void => {
     window.removeEventListener('mousemove', move)
@@ -389,24 +385,30 @@ function startResize(index: number, event: MouseEvent): void {
 }
 
 /** つまみのキーボード操作（←→ で 1%、Shift で 5%）。 */
-function onResizeKeydown(index: number, event: KeyboardEvent): void {
-  const step = event.shiftKey ? 5 : 1
+function onResizeKeydown(event: KeyboardEvent): void {
+  const step = event.shiftKey ? 40 : 10
   const delta = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
   if (delta === 0) {
     return
   }
   event.preventDefault()
-  const next = [...widths.value]
-  const left = next[index]! + delta
-  const right = next[index + 1]! - delta
-  if (left < MIN_WIDTH || right < MIN_WIDTH) {
-    return
-  }
-  next[index] = left
-  next[index + 1] = right
-  widths.value = next
+  const tableWidth = table.value?.getBoundingClientRect().width ?? 0
+  const max = tableWidth > 0 ? Math.max(MIN_WIDTH, tableWidth - 140) : 2000
+  width.value = Math.min(Math.max(width.value + delta, MIN_WIDTH), max)
 }
 
+
+/*
+ * 表は常に**1 行以上**にする（全部消しても、空行 1 つを残して入力できるように）。
+ */
+watch(
+  () => props.values.length,
+  (count) => {
+    if (count === 0) {
+      writeValues([''])
+    }
+  }
+)
 
 /** 外からも行を足せるようにする（ダイアログの見出しのボタンから）。 */
 function addRowFromOutside(): void {
@@ -424,15 +426,22 @@ onBeforeUnmount(() => {
 <template>
   <table
     ref="table" class="jp-sheet" tabindex="0" aria-label="登録する単語" data-demo-word-grid
+    :style="{ width: `calc(7rem + ${width}px)` }"
+
     @copy="onCopy" @paste="onPaste" @keydown="onKeydown"
   >
     <colgroup>
+      <!--
+        左の 2 列（× と NO）は**固定**（TODO の表と同じ）。つまみも置かない。
+        残りを単語の列が取る（単語の幅を変えても、この 2 列は動かない）。
+      -->
       <col style="width: 3.5rem">
-      <col :style="{ width: `${widths[1]}%` }">
       <col style="width: 3.5rem">
+      <col :style="{ width: `${width}px` }">
     </colgroup>
     <thead>
       <tr>
+        <th class="jp-sheet__no-head" aria-label="削除" />
         <th class="jp-sheet__no-head">NO</th>
         <th data-col="word" style="position: relative">
           単語
@@ -440,16 +449,23 @@ onBeforeUnmount(() => {
             class="jp-sheet__resizer" role="separator" aria-orientation="vertical" tabindex="0"
             aria-label="単語の幅を変える" data-demo-col-resizer="word"
             title="ドラッグで幅を変えます（ダブルクリックで既定に戻す）"
-            @mousedown.stop.prevent="startResize(1, $event)"
-            @dblclick.stop="resetWidths()"
-            @keydown.stop="onResizeKeydown(1, $event)"
+            @mousedown.stop.prevent="startResize($event)"
+            @dblclick.stop="resetWidth()"
+            @keydown.stop="onResizeKeydown($event)"
           />
         </th>
-        <th class="jp-sheet__no-head">削除</th>
       </tr>
     </thead>
     <tbody data-demo-word-grid-body>
       <tr v-for="(value, row) in values" :key="row" :data-demo-word-row-index="row">
+        <td class="jp-sheet__remove">
+          <button
+            type="button" class="btn btn--icon btn--sm" :aria-label="`${row + 1} 行目を削除`"
+            :data-demo-remove-row="row" @click="removeRow(row)"
+          >
+            <AppIcon name="x" size="sm" class="icon--danger" />
+          </button>
+        </td>
         <td class="jp-sheet__no">{{ row + 1 }}</td>
         <td
           data-col="word" :data-cell="`${row}-0`" :data-demo-word-cell="row" :class="cellClasses(row, 0)"
@@ -467,31 +483,15 @@ onBeforeUnmount(() => {
           >
           <span v-else class="jp-sheet__value" :data-demo-word-value="row">{{ value }}</span>
         </td>
-        <td class="jp-sheet__remove">
-          <button
-            type="button" class="btn btn--icon btn--sm" :aria-label="`${row + 1} 行目を削除`"
-            :data-demo-remove-row="row" @click="removeRow(row)"
-          >
-            <AppIcon name="x" size="sm" class="icon--danger" />
-          </button>
-        </td>
       </tr>
       <tr v-if="values.length === 0">
         <td colspan="3" class="jp-hint" style="padding: var(--sp-3)">
           Excel から単語の列をコピーして、この表に貼り付けてください（1 行に 1 語）。
-          貼り付けは選んだセルを起点に流し込みます。
         </td>
       </tr>
     </tbody>
   </table>
 
-  <p class="jp-sheet__hint">
-    セルをクリックすると選ばれ、↑↓←→ で隣のセルへ移れます。
-    <strong>ダブルクリックか F2</strong> で入力、Enter で確定して下へ、Esc で取り消し。
-    Excel から範囲をコピーして、この表にそのまま貼り付けられます
-    （1 列目だけを使います。空行は無視します）。
-    <button type="button" class="jp-demo-linkbtn" data-demo-add-row @click="addRow">
-      <AppIcon name="plus" size="sm" /> 行追加
-    </button>
-  </p>
+  <!-- 行追加は画面には出さない（Excel の貼り付けで足りるため。動作確認用に残す） -->
+  <span hidden data-demo-add-row @click="addRow" />
 </template>

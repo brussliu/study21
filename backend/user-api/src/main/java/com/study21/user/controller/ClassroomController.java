@@ -257,6 +257,36 @@ public class ClassroomController {
         return ApiResponse.ok(classroomService.noteStatus(user, recordId, noteId));
     }
 
+    /**
+     * **最終まとめの生成の起動を依頼する**（画面の【最終まとめを作成／再試行】の入口）。
+     *
+     * <p>画面は admin-api を直接叩かない。ここで**ログイン・授業の所有権・noteId の帰属・種別**を
+     * 確かめ、通ってから user-api が admin-api の内部入口を呼ぶ（合言葉つき）。</p>
+     */
+    @PostMapping("/{recordId}/notes/run")
+    public ApiResponse<ClassroomModels.NoteTaskResult> runNote(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId,
+            @RequestParam(required = false) Long noteId) {
+        return ApiResponse.ok(classroomService.acceptNoteGeneration(user, recordId, noteId),
+                "授業ノートの作成を依頼しました。");
+    }
+
+    /**
+     * **最終まとめの状態を確かめ、失联していれば回復してもらう**（画面の【状態を確認／復旧】）。
+     *
+     * <p>確かめる順序は起動と同じ（ログイン → 所有権 → noteId の帰属 → 種別）。失联かどうかの
+     * 判断は**後端（admin-api）が実行記録で**行う（画面は断言しない）。</p>
+     */
+    @PostMapping("/{recordId}/notes/{noteId}/recover")
+    public ApiResponse<ClassroomModels.NoteTaskResult> recoverNote(
+            @AuthenticationPrincipal UserPrincipal user,
+            @PathVariable long recordId,
+            @PathVariable long noteId) {
+        return ApiResponse.ok(classroomService.recoverNoteGeneration(user, recordId, noteId),
+                "最終まとめの状態を確認しました。");
+    }
+
     @GetMapping("/{recordId}")
     public ApiResponse<ClassroomModels.RecordDetail> detail(
             @AuthenticationPrincipal UserPrincipal user,

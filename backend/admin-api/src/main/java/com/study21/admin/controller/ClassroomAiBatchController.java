@@ -17,9 +17,15 @@ import java.util.Map;
  * **このエンドポイントを 1 回だけ**呼ぶ。内部で PHASE→batC61 / FINAL→batC62 を実行する
  * （`GeometryAiBatchController` 相当。設計 §9）。</p>
  *
- * <p>**認証導入時の TODO**: 本スケルトンは認証未実装のため `/api/admin/batch/**` は許可されている。
- * このエンドポイントは「既存のノート行しか処理しない（新しいノートは作れない）」ので被害は限られるが、
- * 認証導入時は ADMIN ロールまたは当該ノートの所有者に制限する。</p>
+ * <p><b>認証（2026-09-19 改修 第 8 段）</b>: この入口は**画面から直接叩かない**。利用者の
+ * 権限（ログイン・授業の所有権・noteId の帰属）は user-api の
+ * {@code POST /api/user/classroom/{recordId}/notes/{noteId}/run|recover} で確かめ、**そこから
+ * サービス間の合言葉**（{@code X-Internal-Token}）付きで呼ばれる。したがってここは
+ * {@link com.study21.admin.internal.InternalServiceAuthorizer} で守られており、
+ * **匿名・利用者の session では通らない**（合言葉が未設定なら全て拒否）。</p>
+ *
+ * <p>管理者が直接叩く運用は想定していない（管理 UI から使うなら、別途「管理者の入口」を用意して
+ * そちらに ADMIN ロールを要求する。ここを開けると同じ穴が戻る）。</p>
  */
 @RestController
 @RequestMapping("/api/admin/batch/classroom")

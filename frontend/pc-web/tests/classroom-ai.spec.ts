@@ -27,7 +27,7 @@ import ClassroomAiSettingsSection from '@/views/admin/system-settings/ClassroomA
  * 授業録音 / AI 授業記録（画面の接続）。
  *
  * 画面は `src/api/classroom.ts` の関数だけを通して user-api（`/api/user/classroom`）と
- * admin-api の薄い入口（`/api/admin/batch/classroom/notes/{id}/run`）を呼ぶ。ここでは
+ * user-api の保護された入口（`/api/user/classroom/{id}/notes/run`）を呼ぶ。ここでは
  * ・共通の表示用ヘルパー（言語モード・前置詞・時刻・AI ノートの段落）
  * ・メニュー項目とルート（3 エリア）の登録
  * ・4 画面が**実際に API を呼び**、成功／失敗で表示が変わること
@@ -157,7 +157,7 @@ interface ApiOptions {
    */
   endErrorTimes?: number
   /**
-   * 最終まとめの起動（`/api/admin/batch/classroom/notes/{id}/run`）の応答。
+   * 最終まとめの起動（`/api/user/classroom/{id}/notes/run`）の応答。
    *
    * <p>後端は「AI を実行し終えた」ではなく「**受理した**」を返す。`{ status: 'GENERATING' }` が
    * 受理。ここを差し替えて「受理の前に成功と見なさない」「失敗を隠さない」を確かめる。</p>
@@ -213,7 +213,11 @@ function mockApi(options: ApiOptions = {}): { calls: Call[]; fetchMock: ReturnTy
         { status: 500, headers: { 'Content-Type': 'application/json' } }
       )
     }
-    if (String(url).includes('/api/admin/batch/classroom/notes/')) {
+    /*
+     * まとめの起動は **user-api の保護された入口**（`/api/user/classroom/{id}/notes/run`）へ行く。
+     * 画面から admin-api の内部入口は**呼ばない**（所有権と noteId の帰属を user-api が確かめる）。
+     */
+    if (/\/api\/user\/classroom\/\d+\/notes\/run/.test(String(url))) {
       if (options.holdNoteRun !== undefined) await options.holdNoteRun
       if (options.noteRunFails === true) {
         return new Response(JSON.stringify({
@@ -1695,7 +1699,8 @@ describe('授業録音：録音中', () => {
     // 応答の転写を画面へ足す
     expect(wrapper.get('[data-cr-transcript]').text()).toContain('比例のグラフについて学びます。')
     // トリガー成立なら admin-api の薄い入口（batC61）を 1 回だけ呼ぶ
-    expect(calls.find((call) => call.url === '/api/admin/batch/classroom/notes/91/run')?.method).toBe('POST')
+    expect(calls.find(
+      (call) => call.url.startsWith('/api/user/classroom/12/notes/run'))?.method).toBe('POST')
   })
 
   it('サーバー側認識のときは、書き起こし用の 16kHz PCM を分塊と一緒に送る', async () => {
@@ -2254,7 +2259,7 @@ describe('授業録音：録音中', () => {
       expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/chunks'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(1)
-      expect(calls.filter((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toHaveLength(1)
+      expect(calls.filter((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toHaveLength(1)
     } finally {
       vi.useRealTimers()
     }
@@ -2321,7 +2326,7 @@ describe('授業録音：録音中', () => {
 
       expect(calls.filter((call) => call.method === 'POST' && call.url.includes('/chunks'))).toHaveLength(1)
       expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(1)
-      expect(calls.filter((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toHaveLength(1)
+      expect(calls.filter((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toHaveLength(1)
       expect(router.currentRoute.value.path).toBe('/student/classroom/12')
     } finally {
       vi.useRealTimers()
@@ -2350,7 +2355,7 @@ describe('授業録音：録音中', () => {
     // 成功と言わない（記録を終えない・最終まとめを起動しない・詳細へ進まない）
     expect(wrapper.get('[data-cr-finalize-error]').text()).toContain('尾部の文を取り切れませんでした。')
     expect(calls.some((call) => call.url.includes('/classroom/12/end'))).toBe(false)
-    expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toBe(false)
+    expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toBe(false)
     expect(router.currentRoute.value.path).toBe('/student/classroom/12/live')
 
     // 1 回目のやり直し（まだ失敗する）: 済んでいない段（書き起こしの収尾）だけをやり直す
@@ -2369,7 +2374,7 @@ describe('授業録音：録音中', () => {
     await flushPromises()
     expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(3)
     expect(calls.some((call) => call.url.includes('/classroom/12/end'))).toBe(true)
-    expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toBe(true)
+    expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toBe(true)
     expect(router.currentRoute.value.path).toBe('/student/classroom/12')
     expect(wrapper.find('[data-cr-finalize-error]').exists()).toBe(false)
   })
@@ -2533,7 +2538,7 @@ describe('授業録音：録音中', () => {
     // 記録の終了（最終まとめの対象）は、両方ではなく**尾部を受け取ったあと**
     const finishIndex = calls.findIndex((call) => call.url.includes('/stt/stream/finish'))
     const endIndex = calls.findIndex((call) => call.url.includes('/classroom/12/end'))
-    const noteIndex = calls.findIndex((call) => call.url.includes('/api/admin/batch/classroom/notes/'))
+    const noteIndex = calls.findIndex((call) => call.url.includes('/api/user/classroom/12/notes/run'))
     expect(finishIndex).toBeGreaterThanOrEqual(0)
     expect(endIndex).toBeGreaterThan(finishIndex)
     expect(noteIndex).toBeGreaterThan(endIndex)
@@ -2589,7 +2594,7 @@ describe('授業録音：録音中', () => {
     // 理由を出して止まる（詳細へ進まない・最終まとめを起動しない）
     expect(wrapper.get('[data-cr-finalize-error]').text()).toContain('尾部の文を取り切れませんでした。')
     expect(wrapper.get('[data-cr-finish-phase]').text()).toContain('途中で止まりました')
-    expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toBe(false)
+    expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toBe(false)
     expect(router.currentRoute.value.path).toBe('/student/classroom/12/live')
 
     // やり直し（今度は完了する）→ ここで初めて成功と言い、詳細へ進む
@@ -2597,7 +2602,7 @@ describe('授業録音：録音中', () => {
     await flushPromises()
     await flushPromises()
     expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(2)
-    expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/'))).toBe(true)
+    expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run'))).toBe(true)
     expect(router.currentRoute.value.path).toBe('/student/classroom/12')
   })
 
@@ -3420,9 +3425,10 @@ describe('授業録音：録音中', () => {
     await flushPromises()
 
     expect(callTo(calls, '/api/user/classroom/12/end', 'POST')).toBeDefined()
-    // 返った runPath（admin-api の薄い入口）を 1 回だけ呼ぶ
-    const run = callTo(calls, '/api/admin/batch/classroom/notes/91/run', 'POST')
-    expect(run?.body).toEqual({ operator: 'classroom-live-view' })
+    // **user-api の保護された入口**を 1 回だけ呼ぶ（runPath を画面から叩かない）
+    const run = callTo(calls, '/api/user/classroom/12/notes/run', 'POST')
+    expect(run).toBeDefined()
+    expect(run?.url).toContain('noteId=91')
 
     expect(router.currentRoute.value.path).toBe('/student/classroom/12')
     expect(router.currentRoute.value.query).toMatchObject({ name: '数学 二次関数' })
@@ -3478,7 +3484,7 @@ describe('授業録音：録音中', () => {
     await flushPromises()
 
     // 最終まとめ（batC62）の入口は呼ばない（finalNoteId が null）
-    expect(callTo(calls, '/api/admin/batch/classroom/notes/', 'POST')).toBeUndefined()
+    expect(callTo(calls, '/api/user/classroom/12/notes/run', 'POST')).toBeUndefined()
     expect(wrapper.get('[data-cr-finish-notice]').text())
       .toContain('書き起こしが無かったため、最終まとめは作成しませんでした。')
     // それでも詳細へは進む（終了そのものは成功している）

@@ -641,6 +641,27 @@ public final class ClassroomModels {
             String errorMessage) {
     }
 
+    /**
+     * **まとめの起動・回復の結果**（画面に返す形。admin-api の応答をそのまま渡す）。
+     *
+     * @param noteId     対象のノート（終了の応答が返した `finalNoteId`）
+     * @param status     受理のあとの状態（`GENERATING` / `READY` / `FAILED`）
+     * @param accepted   実行が受理されているか
+     * @param message    画面に出す短い説明（日本語）
+     * @param liveness   回復のときだけ入る実行の生存（`RUNNING` / `BINDING` / `LOST` / `UNKNOWN`）
+     * @param recoverable 回復の入口を出してよいか（回復のときだけ）
+     * @param recovered  この呼び出しで回復したか（回復のときだけ）
+     */
+    public record NoteTaskResult(
+            long noteId,
+            String status,
+            boolean accepted,
+            String message,
+            String liveness,
+            boolean recoverable,
+            boolean recovered) {
+    }
+
     /** 終了の要求（不完全なまま終える明示と、送った分塊の一覧）。 */
     public record EndRequest(boolean force, ChunkManifest manifest) {
     }

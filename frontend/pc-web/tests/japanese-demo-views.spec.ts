@@ -152,32 +152,32 @@ describe('単語情報管理：画面', () => {
     }
   })
 
-  it('新規登録はダイアログで開き、3 ステップで進む', async () => {
+  it('新規登録は 1 ページのダイアログで、入力と書籍・Unit と確認が並ぶ', async () => {
     const { wrapper, store } = await mountList()
 
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(true)
+    // 手順を分けず、1 ページにまとめて出す
     expect(wrapper.find('[data-demo-step="1"]').exists()).toBe(true)
-    // 単語だけを入れる（読みと意味は入れない）
-    expect(wrapper.text()).toContain('単語だけを入力します')
+    expect(wrapper.find('[data-demo-step="2"]').exists()).toBe(true)
+    expect(wrapper.find('[data-demo-step="3"]').exists()).toBe(true)
+    // 説明・入力例・シナリオ・操作のヒントは置かない
+    expect(wrapper.text()).not.toContain('単語だけを入力します')
+    expect(wrapper.text()).not.toContain('セルをクリックすると選ばれ')
+    expect(wrapper.find('[data-demo-sample]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-scenario-new]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-scenario-append]').exists()).toBe(false)
+    // 開いた直後は空行 1 つ
+    expect(store.registerHeadings).toEqual([''])
+    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(1)
     expect(wrapper.text()).not.toContain('デモ')
 
-    // 入力例を入れると、表と解釈結果の両方に出る
-    await wrapper.get('[data-demo-sample]').trigger('click')
+    // 表に入れると、確認と Unit の割り当てに出る
+    store.setRegisterHeadings(['りんご', 'みかん', 'りんご'])
     await flushPromises()
-    expect(store.registerHeadings.length).toBeGreaterThan(5)
-    expect(wrapper.findAll('[data-demo-word-value]').length).toBe(store.registerHeadings.length)
-    expect(wrapper.findAll('[data-demo-parsed-row]').length).toBeGreaterThan(5)
-    expect(wrapper.find('[data-demo-paste-notice]').exists()).toBe(true)
-
-    // 入力の中で重複した行は「飛ばす」と分かる
-    expect(store.parsedRows.some((row) => row.state === 'DUPLICATE')).toBe(true)
-
-    await wrapper.get('[data-demo-next-1]').trigger('click')
-    expect(wrapper.find('[data-demo-step="2"]').exists()).toBe(true)
-    await wrapper.get('[data-demo-next-2]').trigger('click')
-    expect(wrapper.find('[data-demo-step="3"]').exists()).toBe(true)
+    expect(wrapper.get('[data-demo-count-fresh]').text()).toBe('2')
+    expect(wrapper.get('[data-demo-count-skipped]').text()).toBe('1')
     expect(wrapper.get('[data-demo-confirm-units]').text()).toContain('Unit')
 
     await wrapper.get('[data-demo-save]').trigger('click')
@@ -191,7 +191,7 @@ describe('単語情報管理：画面', () => {
     const { wrapper, store } = await mountList()
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-demo-sample]').trigger('click')
+    store.setRegisterHeadings(['りんご', 'みかん', 'ぶどう'])
     await flushPromises()
 
     // 値はテキストで出ていて、入力欄は出ていない（Excel と同じ）
@@ -283,9 +283,11 @@ describe('単語情報管理：画面', () => {
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
 
+    // 開いた直後は空行 1 つ。行追加で 2 行になる
+    expect(store.registerHeadings).toEqual([''])
     await wrapper.get('[data-demo-add-row]').trigger('click')
     await flushPromises()
-    expect(store.registerHeadings.length).toBe(1)
+    expect(store.registerHeadings.length).toBe(2)
 
     store.setRegisterHeadings(['あ', 'い', 'う'])
     await flushPromises()
@@ -301,9 +303,7 @@ describe('単語情報管理：画面', () => {
 
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-demo-sample]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-demo-next-1]').trigger('click')
+    store.setRegisterHeadings(['りんご', 'みかん'])
     await flushPromises()
 
     // 既存の書籍: 1 Unit の語数は本から自動で計算される（入力欄は出ない）
@@ -326,11 +326,6 @@ describe('単語情報管理：画面', () => {
 
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
-    // 重複の設定は手順 2（書籍・Unit）にある
-    await wrapper.get('[data-demo-sample]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-demo-next-1]').trigger('click')
-    await flushPromises()
     // 既定は「この書籍の中で重複した単語を飛ばす」
     expect(store.registerDuplicateMode).toBe('BOOK')
     expect((wrapper.get('[data-demo-duplicate-book]').element as HTMLInputElement).checked).toBe(true)
@@ -350,7 +345,7 @@ describe('単語情報管理：画面', () => {
 
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
-    await wrapper.get('[data-demo-scenario-append]').trigger('click')
+    store.setRegisterHeadings(['失敗確認用の語'])
     await flushPromises()
     const before = store.words.length
 

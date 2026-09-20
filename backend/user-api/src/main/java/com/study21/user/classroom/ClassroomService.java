@@ -118,6 +118,21 @@ public interface ClassroomService {
      */
     ClassroomModels.NoteStatusView noteStatus(UserPrincipal user, long recordId, long noteId);
 
+    /**
+     * **まとめの生成の起動を依頼する**（画面からはここだけを呼ぶ）。
+     *
+     * <p>順序: ①ログイン（Spring Security）②**授業の所有権**（recordId）③**noteId がその記録の
+     * ものか** ④種別が `FINAL`。すべて通ってから admin-api の内部入口を呼ぶ。</p>
+     */
+    ClassroomModels.NoteTaskResult acceptNoteGeneration(UserPrincipal user, long recordId, Long noteId);
+
+    /**
+     * **まとめの状態を確かめ、失联していれば回復してもらう**（画面からはここだけを呼ぶ）。
+     *
+     * <p>確かめる順序は {@link #acceptNoteGeneration} と同じ。</p>
+     */
+    ClassroomModels.NoteTaskResult recoverNoteGeneration(UserPrincipal user, long recordId, long noteId);
+
     /** 一覧（学生=自分 / 保護者=家族 / 管理者=全体、ページング）。 */
     ClassroomModels.RecordListResult list(UserPrincipal user, String status, int page, int size);
 

@@ -950,7 +950,12 @@
    ========================================================================== */
 
 .jp-sheet {
-  width: 100%;
+  /*
+   * 幅は「× ＋ NO（固定 7rem）＋ 単語（px）」で決める。
+   * 表の幅は JS 側で `calc(7rem + Npx)` として渡す（余りを各列に配らせない＝
+   * `table-layout: fixed` が余白を均等に配って、固定したい列まで広がるのを防ぐ）。
+   */
+  max-width: 100%;
   border-collapse: collapse;
   border-spacing: 0;
   table-layout: fixed;

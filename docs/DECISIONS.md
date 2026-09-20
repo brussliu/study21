@@ -1791,3 +1791,29 @@ padding と gap を測る）で確かめる。
 `RUNNING`/`BINDING`/`UNKNOWN` は**何もしない**。回復は**版を進める**ので、旧スレッドが遅れて
 **成功を書いても楽観ロックで弾かれる**（トークンの照合と二重に守る）。
 管理者向けの一括回復 `POST .../notes/recover` も残す（実行記録が生きているものは触らない）。
+
+## なぜ授業まとめの起動・回復を user-api 経由にしたか（2026-09-19 改修・第 8 段）
+
+**決めたこと**: 画面は admin-api の内部入口（`/api/admin/batch/classroom/notes/**`）を**直接叩かない**。
+画面 → `POST /api/user/classroom/{recordId}/notes/run?noteId=` / `.../notes/{noteId}/recover`
+（**user-api**）→ サービス間の合言葉つきで admin-api、という順にする。
+
+**なぜか**: admin-api の内部入口は `noteId` しか見ておらず、`/api/admin/batch/**` は既存のバッチ管理
+UI の都合で `permitAll` だった。そのため**noteId を差し替えるだけで他人のまとめを起動・回復**できた
+（`noteId` は連番なので推測も容易）。「内網だから」「画面にボタンを出さないから」は守りにならない。
+
+**確かめる順序（user-api）**: ①ログイン（Spring Security・`/api/user/classroom/**` は認証必須）
+②**授業の所有権**（`requireOwner`。他人の記録は 404＝存在を漏らさない／見えるが操作できない記録は 403）
+③**noteId がその recordId のものか**（別の記録・他人のノートは **404**）
+④回復は**種別が `FINAL`** だけ（途中のフェーズ分析は 400）。前端から来た accountId・operator・
+ロールは**認証の根拠にしない**（operator は監査用に user-api が `user:{accountId}` を作る）。
+
+**admin-api 側**: `/api/admin/batch/classroom/**` に**具体的な規則を広い `permitAll` より前**に置き、
+サービス間の合言葉（`X-Internal-Token`）を要求する（`InternalServiceAuthorizer`）。合言葉が
+**未設定なら全て拒否**（匿名に落とさない）。値は環境変数 `STUDY21_INTERNAL_TOKEN` から読み、
+リポジトリ・前端・URL・ログには置かない。定数時間で比較する。無関係な `/api/admin/batch/**`
+（スケジュール設定など）は**そのまま**（閉めると別の機能が止まる）。
+
+**失敗の見せ方**: 下流が拒否・不調なら「成功」を返さない（`ClassroomNoteAdminClient` は例外にする）。
+画面は 401（入り直し）・403（権限）・404（見つからない）を**区別した文言**で出し、
+**無限に再試行しない**。まとめの起動・回復は録音の終了や STT の収尾を呼び直さない。

@@ -110,10 +110,19 @@ study21:
     # admin-api のバッチ（batR02 の掃除）も同じ場所を読むので、配備では両サービスに
     # 同じボリュームを割り当てる（geometry-ai と同じ考え方）。
     storage-root: "${STUDY21_CLASSROOM_STORAGE_ROOT:${user.dir}/data/classroom}"
+    # まとめの内部入口（admin-api）の置き場。配備では compose のサービス名を使う。
+    admin-api-url: "${STUDY21_ADMIN_API_URL:http://admin-api:8081}"
+    # 1 回の呼び出しの上限（秒）。**AI の完了は待たない**受付 API なので短くてよい
+    admin-api-timeout-seconds: "${STUDY21_ADMIN_API_TIMEOUT_SECONDS:15}"
     # 続録（一時停止・画面の開き直し）の音声を 1 本に結合する道具。
     # イメージに ffmpeg を入れてあるので既定のままでよい（別の場所を使うときだけ上書き）。
     ffmpeg-command: "${STUDY21_CLASSROOM_FFMPEG_COMMAND:ffmpeg}"
     ffprobe-command: "${STUDY21_CLASSROOM_FFPROBE_COMMAND:ffprobe}"
+  # サービス間（user-api → admin-api）の内部入口。
+  internal:
+    # 合言葉。**既定は空（未設定）＝内部入口は呼べない**（匿名で叩きに行かない）。
+    # 配備では STUDY21_INTERNAL_TOKEN を admin-api と**同じ値**で両方に渡す。
+    token: "${STUDY21_INTERNAL_TOKEN:}"
   classroom-ai:
     # true にすると STT を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
     stub: "${STUDY21_CLASSROOM_AI_STUB:false}"

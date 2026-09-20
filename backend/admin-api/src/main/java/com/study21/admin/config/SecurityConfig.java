@@ -1,6 +1,7 @@
 package com.study21.admin.config;
 
 import com.study21.common.security.config.SecurityConfigUtil;
+import com.study21.admin.internal.InternalServiceAuthorizer;
 import jakarta.servlet.DispatcherType;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -17,12 +18,18 @@ import java.util.List;
 
 /**
  * admin-api 安全配置：health / system/info / actuator 允许匿名，其余默认拒绝。
+ *
+ * <p>**順序が意味を持つ**: `/api/admin/batch/**` は既存のバッチ管理 UI の都合で許可されている。
+ * そのため、授業まとめの内部入口（`/api/admin/batch/classroom/**`）を**その許可より前**に置き、
+ * サービス間の合言葉（{@link InternalServiceAuthorizer}）を要求する。順序を入れ替えると、
+ * 「特定の行だけ認証」のつもりが**広い許可に食われて素通り**する。</p>
  */
 @Configuration
 public class SecurityConfig {
 
     @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource)
+    public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource,
+                                                   InternalServiceAuthorizer internalServiceAuthorizer)
             throws Exception {
         http
                 .csrf(csrf -> csrf.disable())
@@ -33,6 +40,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/health", "/api/admin/system/info", "/actuator/health").permitAll()
                         // 管理者ログイン（認証前の公開エンドポイント）
                         .requestMatchers("/api/admin/login").permitAll()
+                        // **授業まとめの内部入口**（user-api からのみ呼ぶ）。
+                        // 広い `/api/admin/batch/**` の許可より**前**に置く（順序が意味を持つ）。
+                        .requestMatchers("/api/admin/batch/classroom", "/api/admin/batch/classroom/**")
+                        .access(internalServiceAuthorizer.authorizeFromHeaderOnlyAdmin())
                         // バッチ管理・システム設定（管理者機能）。
                         // 注: 本スケルトンは認証未実装のため当面許可。認証導入時は ADMIN ロール必須とする。
                         .requestMatchers("/api/admin/batch/**", "/api/admin/settings/**", "/api/admin/setting/**").permitAll()

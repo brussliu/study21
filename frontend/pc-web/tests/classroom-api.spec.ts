@@ -12,6 +12,7 @@ import {
   fetchClassroomSegments,
   mergeClassroomSegments,
   orderClassroomSegments,
+  recoverClassroomNote,
   runClassroomNote,
   searchClassroomRecords,
   segmentSpeakerOf,
@@ -347,31 +348,47 @@ describe('授業録音 API: 転写の表示（並び・統合・話者）', () =
   })
 })
 
-describe('授業録音 API: admin-api の薄い入口（AI ノート生成）', () => {
+describe('授業録音 API: まとめの起動は user-api の保護された入口を通す', () => {
   let fetchMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
-    fetchMock = vi.fn(async () => ok({ noteId: 91, kind: 'FINAL', batchCode: 'batC62', status: 'READY' }))
+    fetchMock = vi.fn(async () => ok({
+      noteId: 91, status: 'GENERATING', accepted: true, message: '最終まとめの作成を始めました。'
+    }))
     vi.stubGlobal('fetch', fetchMock)
   })
 
-  it('runPath を user-api の baseUrl を付けずそのまま POST する（operator つき）', async () => {
-    await runClassroomNote('/api/admin/batch/classroom/notes/91/run')
+  it('admin-api の内部入口を直接叩かず、user-api の入口へ記録IDとノートIDを渡す', async () => {
+    await runClassroomNote(12, 91)
 
-    expect(recorded(fetchMock).at(-1)).toMatchObject({
-      url: '/api/admin/batch/classroom/notes/91/run',
-      method: 'POST',
-      json: { operator: 'classroom-ai-view' }
-    })
+    const call = recorded(fetchMock).at(-1) as { url: string; method: string }
+    expect(call.method).toBe('POST')
+    // **user-api の保護された入口**（所有権・noteId の帰属は user-api が確かめる）
+    expect(call.url).toBe('/api/user/classroom/12/notes/run?noteId=91')
+    // 画面から admin-api の内部入口（`/api/admin/batch/...`）は**呼ばない**
+    expect(call.url).not.toContain('/api/admin/')
   })
 
-  it('AI は時間がかかるため、タイムアウトを延ばして呼べる', async () => {
-    await runClassroomNote('/api/admin/batch/classroom/notes/91/run', 'classroom-detail', 600_000)
+  it('noteId を知らない回（分塊・文字起こしのトリガー）は noteId 無しで頼む', async () => {
+    await runClassroomNote(12)
 
-    expect(recorded(fetchMock).at(-1)).toMatchObject({
-      url: '/api/admin/batch/classroom/notes/91/run',
-      json: { operator: 'classroom-detail' }
-    })
+    const call = recorded(fetchMock).at(-1) as { url: string }
+    expect(call.url).toBe('/api/user/classroom/12/notes/run')
+  })
+
+  it('回復も user-api の保護された入口を通す（記録IDとノートIDの両方を渡す）', async () => {
+    // 応答の形は回復の 1 つ（状態・生存・回復の可否）
+    fetchMock.mockImplementation(async () => ok({
+      noteId: 91, status: 'FAILED', liveness: 'LOST', recoverable: true, recovered: true,
+      message: '実行が失われていたため、やり直せる状態に戻しました。'
+    }))
+
+    await recoverClassroomNote(12, 91)
+
+    const call = recorded(fetchMock).at(-1) as { url: string; method: string }
+    expect(call.method).toBe('POST')
+    expect(call.url).toBe('/api/user/classroom/12/notes/91/recover')
+    expect(call.url).not.toContain('/api/admin/')
   })
 })
 

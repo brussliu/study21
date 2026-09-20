@@ -128,7 +128,7 @@ function mockApi(options: Options = {}): { calls: Call[] } {
       JSON.stringify({ success: true, code: 'OK', message: 'OK', data, timestamp: '' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
     const target = String(url)
-    if (/\/api\/user\/classroom\/\d+\/notes\/\d+/.test(target)) {
+    if (/\/api\/user\/classroom\/\d+\/notes\/\d+$/.test(target)) {
       if (options.noteStatus === null) {
         return new Response(JSON.stringify({
           success: false, code: 'INTERNAL_ERROR', message: '確認できません', data: null
@@ -142,7 +142,7 @@ function mockApi(options: Options = {}): { calls: Call[] } {
         errorMessage: state.status === 'FAILED' ? 'AI が応答しませんでした。' : null
       })
     }
-    if (target.includes('/api/admin/batch/classroom/notes/')) {
+    if (/\/api\/user\/classroom\/\d+\/notes\/run/.test(target)) {
       if (options.holdNoteRun !== undefined) await options.holdNoteRun
       if (options.noteRunFails === true) {
         return new Response(JSON.stringify({
@@ -256,7 +256,7 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     release()
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
   })
@@ -272,7 +272,7 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     await wrapper.get('[data-cr-finish]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
@@ -299,14 +299,14 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     await wrapper.get('[data-cr-finish]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
 
     // 起動は 1 回だけ（記録に行があるので「もう一度起こす」とは判断しない）
     const noteRuns = calls.filter(
-      (call) => call.url.includes('/api/admin/batch/classroom/notes/91/run'))
+      (call) => call.url.includes('/api/user/classroom/12/notes/run'))
     expect(noteRuns).toHaveLength(1)
   })
 
@@ -324,7 +324,7 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     await wrapper.get('[data-cr-finish]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
@@ -350,7 +350,7 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     await wrapper.get('[data-cr-finish]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
@@ -372,7 +372,7 @@ describe('授業録音：最終まとめの起動（受理を待つ）', () => {
     await wrapper.get('[data-cr-finish]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()

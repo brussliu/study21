@@ -67,6 +67,8 @@ public class ClassroomServiceImpl implements ClassroomService {
     private final ClassroomAiSettings settings;
     private final ClassroomSttClient sttClient;
     private final ClassroomSttStreamService streamService;
+    /** まとめの内部入口（admin-api）を呼ぶクライアント（**所有権を確かめてから**使う）。 */
+    private final ClassroomNoteAdminClient noteAdminClient;
     /**
      * ストリーミング書き起こし（話しながら文字が出る）のセッション。
      *
@@ -76,6 +78,7 @@ public class ClassroomServiceImpl implements ClassroomService {
     private final ClassroomRecordingStorage storage;
     private final AccountMapper accountMapper;
 
+    @org.springframework.beans.factory.annotation.Autowired
     public ClassroomServiceImpl(ClassroomRecordMapper recordMapper,
                                 ClassroomSegmentMapper segmentMapper,
                                 ClassroomRecordingChunkMapper chunkMapper,
@@ -86,7 +89,8 @@ public class ClassroomServiceImpl implements ClassroomService {
                                 ClassroomSttClient sttClient,
                                 ClassroomRecordingStorage storage,
                                 AccountMapper accountMapper,
-                               ClassroomSttStreamService streamService) {
+                                ClassroomSttStreamService streamService,
+                                ClassroomNoteAdminClient noteAdminClient) {
         this.recordMapper = recordMapper;
         this.segmentMapper = segmentMapper;
         this.chunkMapper = chunkMapper;
@@ -98,6 +102,28 @@ public class ClassroomServiceImpl implements ClassroomService {
         this.streamService = streamService;
         this.storage = storage;
         this.accountMapper = accountMapper;
+        this.noteAdminClient = noteAdminClient;
+    }
+
+    /**
+     * 試験・単体検証用の口（まとめの内部入口を呼ばない）。
+     *
+     * <p>まとめの起動・回復を呼ぶと分かるように失敗する（**呼ばれないはずの経路**を黙って
+     * 通さない）。</p>
+     */
+    public ClassroomServiceImpl(ClassroomRecordMapper recordMapper,
+                                ClassroomSegmentMapper segmentMapper,
+                                ClassroomRecordingChunkMapper chunkMapper,
+                                ClassroomRecordingAssembler assembler,
+                                ClassroomNoteMapper noteMapper,
+                                ClassroomPresetMapper presetMapper,
+                                ClassroomAiSettings settings,
+                                ClassroomSttClient sttClient,
+                                ClassroomRecordingStorage storage,
+                                AccountMapper accountMapper,
+                                ClassroomSttStreamService streamService) {
+        this(recordMapper, segmentMapper, chunkMapper, assembler, noteMapper, presetMapper, settings,
+                sttClient, storage, accountMapper, streamService, null);
     }
 
     // ------------------------------------------------------------------ 設定
@@ -694,6 +720,114 @@ public class ClassroomServiceImpl implements ClassroomService {
                 noteStatusLabel(status), accepted,
                 "PENDING".equals(status) || "FAILED".equals(status),
                 note.getErrorCode(), note.getErrorMessage());
+    }
+
+    @Override
+    public ClassroomModels.NoteTaskResult acceptNoteGeneration(UserPrincipal user, long recordId, Long noteId) {
+        /*
+         * `noteId` が無い呼び出し（分塊のトリガー・文字起こしのトリガー）は、**その記録の
+         * まだ生成していないノート**を user-api が決める（画面が noteId を知らない回）。
+         * どのみち**その記録のノートしか選ばない**ので、他人のまとめは操作できない。
+         */
+        ClassroomNoteEntity note = noteId == null
+                ? requirePendingNoteOf(user, recordId)
+                : requireOwnedNote(user, recordId, noteId, false);
+        String operator = "user:" + user.accountId();
+        log.info("classroom note generation requested. accountId={} recordId={} noteId={}",
+                user.accountId(), recordId, noteId);
+        requireAdminClient();
+        com.fasterxml.jackson.databind.JsonNode data = noteAdminClient.accept(note.getNoteId(), operator);
+        return toTaskResult(note.getNoteId(), data, false);
+    }
+
+    @Override
+    public ClassroomModels.NoteTaskResult recoverNoteGeneration(UserPrincipal user, long recordId, long noteId) {
+        // 回復は**最終まとめ専用**（途中のフェーズ分析は回復の対象ではない）
+        ClassroomNoteEntity note = requireOwnedNote(user, recordId, noteId, true);
+        log.info("classroom note recovery requested. accountId={} recordId={} noteId={}",
+                user.accountId(), recordId, noteId);
+        requireAdminClient();
+        com.fasterxml.jackson.databind.JsonNode data = noteAdminClient.recover(note.getNoteId());
+        return toTaskResult(note.getNoteId(), data, true);
+    }
+
+    /**
+     * **所有権と帰属を確かめて**、対象の最終まとめの行を返す（画面の入口はすべてここを通る）。
+     *
+     * <p>見る順:</p>
+     * <ol>
+     *   <li>**授業の所有権**（{@link #requireOwner}）: 他人の記録は 404、見えるが操作できない記録は 403。</li>
+     *   <li>**noteId がその記録のものか**: 別の記録のノートを指定されたら**存在しない扱い**（404）。
+     *       ここを省くと、自分の recordId に他人の noteId を混ぜて操作できてしまう。</li>
+     *   <li>**種別が `FINAL` か**: この入口は最終まとめ専用（フェーズ分析は別の入口）。</li>
+     * </ol>
+     *
+     * <p>前端から来た accountId・ownerId・operator・ロールは**一切見ない**（認証の根拠にしない）。</p>
+     */
+    private ClassroomNoteEntity requireOwnedNote(UserPrincipal user, long recordId, long noteId,
+                                                 boolean finalOnly) {
+        requireOwner(user, recordId);
+        ClassroomNoteEntity note = noteMapper.findByRecord(recordId).stream()
+                .filter(candidate -> candidate.getNoteId() != null && candidate.getNoteId() == noteId)
+                .findFirst()
+                .orElseThrow(() -> new NotFoundException("授業ノートが見つかりません。"));
+        if (finalOnly && !ClassroomModels.NOTE_FINAL.equals(note.getKind())) {
+            // 回復は**最終まとめ専用**（途中のフェーズ分析は対象外）
+            throw ClassroomApiException.invalid("最終まとめ以外はこの入口から操作できません。");
+        }
+        return note;
+    }
+
+    /**
+     * その記録の**まだ生成していないノート**（`PENDING` / `FAILED`）を 1 つ返す。
+     *
+     * <p>画面が noteId を知らない回（分塊・文字起こしのトリガー）に使う。**その記録のノートしか
+     * 見ない**ので、他人のまとめは選べない。無ければ「対象なし」として断る。</p>
+     */
+    private ClassroomNoteEntity requirePendingNoteOf(UserPrincipal user, long recordId) {
+        requireOwner(user, recordId);
+        return noteMapper.findByRecord(recordId).stream()
+                .filter(note -> note.getNoteId() != null)
+                .filter(note -> ClassroomModels.NOTE_PENDING.equals(note.getStatus())
+                        || ClassroomModels.NOTE_FAILED.equals(note.getStatus()))
+                .findFirst()
+                .orElseThrow(() -> new ConflictException("生成するノートがありません"
+                        + "（すでに作成済みか、作成中です）。"));
+    }
+
+    /** まとめの内部入口が使える状態か（設定漏れを「動いているように」見せない）。 */
+    private void requireAdminClient() {
+        if (noteAdminClient == null) {
+            throw new ConflictException("まとめの内部入口が設定されていません。");
+        }
+    }
+
+    /** admin-api の応答を画面の形にする（**失敗を成功に見せない**）。 */
+    private static ClassroomModels.NoteTaskResult toTaskResult(
+            long noteId, com.fasterxml.jackson.databind.JsonNode data, boolean recovery) {
+        if (data == null || data.isNull()) {
+            throw new ConflictException("まとめの操作の応答を確認できませんでした。"
+                    + "少し待ってから、もう一度お試しください。");
+        }
+        String status = data.hasNonNull("status") ? data.get("status").asText() : null;
+        if (status == null) {
+            // 状態が読めない応答は**成功と見なさない**（受理を確認できない）
+            throw new ConflictException("まとめの操作の応答を確認できませんでした。"
+                    + "少し待ってから、もう一度お試しください。");
+        }
+        String message = data.hasNonNull("message") ? data.get("message").asText() : null;
+        if (recovery) {
+            return new ClassroomModels.NoteTaskResult(noteId, status, "READY".equals(status)
+                    || "GENERATING".equals(status),
+                    message == null ? "状態を確認しました。" : message,
+                    data.hasNonNull("liveness") ? data.get("liveness").asText() : null,
+                    data.hasNonNull("recoverable") && data.get("recoverable").asBoolean(),
+                    data.hasNonNull("recovered") && data.get("recovered").asBoolean());
+        }
+        boolean accepted = data.hasNonNull("accepted") && data.get("accepted").asBoolean();
+        return new ClassroomModels.NoteTaskResult(noteId, status, accepted,
+                message == null ? (accepted ? "最終まとめの作成を始めました。" : "この最終まとめは作成中です。") : message,
+                null, false, false);
     }
 
     /** ノートの状態の表示名（日本語）。 */

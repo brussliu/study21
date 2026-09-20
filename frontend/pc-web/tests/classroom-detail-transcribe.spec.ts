@@ -76,6 +76,10 @@ function mockApi(options: Parameters<typeof detail>[0] & {
   recovery?: Record<string, unknown> | null
   /** 復旧のあとに読み直すノート。 */
   afterRecovery?: Record<string, unknown>[]
+  /** 起動を拒否する（HTTP の状態コード。401 / 403 の見え方を確かめる）。 */
+  runStatus?: number
+  /** 回復を拒否する（HTTP の状態コード）。 */
+  recoverStatus?: number
 }): { calls: Call[] } {
   const calls: Call[] = []
   let retried = false
@@ -87,7 +91,13 @@ function mockApi(options: Parameters<typeof detail>[0] & {
       JSON.stringify({ success: true, code: 'OK', message: 'OK', data, timestamp: '' }),
       { status: 200, headers: { 'Content-Type': 'application/json' } })
     const target = String(url)
-    if (target.includes('/recover')) {
+    if (/\/api\/user\/classroom\/\d+\/notes\/\d+\/recover/.test(target)) {
+      if (options.recoverStatus !== undefined) {
+        return new Response(JSON.stringify({
+          success: false, code: options.recoverStatus === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN',
+          message: 'アクセス権限がありません', data: null
+        }), { status: options.recoverStatus, headers: { 'Content-Type': 'application/json' } })
+      }
       if (options.recovery === null) {
         return new Response(JSON.stringify({
           success: false, code: 'INTERNAL_ERROR', message: '確認できません', data: null
@@ -99,7 +109,13 @@ function mockApi(options: Parameters<typeof detail>[0] & {
         reason: 'この最終まとめは実行中です（このままお待ちください）。'
       })
     }
-    if (target.includes('/api/admin/batch/classroom/notes/')) {
+    if (/\/api\/user\/classroom\/\d+\/notes\/run/.test(target)) {
+      if (options.runStatus !== undefined) {
+        return new Response(JSON.stringify({
+          success: false, code: options.runStatus === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN',
+          message: 'アクセス権限がありません', data: null
+        }), { status: options.runStatus, headers: { 'Content-Type': 'application/json' } })
+      }
       if (options.retryFails === true) {
         return new Response(JSON.stringify({
           success: false, code: 'INTERNAL_ERROR', message: 'AI を開始できませんでした。', data: null
@@ -211,7 +227,7 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
     await wrapper.get('[data-cr-final-note-retry]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
@@ -265,7 +281,7 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
     await wrapper.get('[data-cr-final-note-retry]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/api/admin/batch/classroom/notes/91/run')))
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/run')))
         .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
@@ -329,7 +345,8 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
     await wrapper.get('[data-cr-final-note-recover]').trigger('click')
     await flushPromises()
     await vi.waitFor(() => {
-      expect(calls.some((call) => call.url.includes('/notes/91/recover'))).toBe(true)
+      expect(calls.some((call) => call.url.includes('/api/user/classroom/12/notes/91/recover')))
+        .toBe(true)
     }, { timeout: 3000 })
     await flushPromises()
 
@@ -380,5 +397,45 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
 
     expect(calls.filter((call) => call.url.includes('/classroom/12/end'))).toHaveLength(0)
     expect(calls.filter((call) => call.url.includes('/stt/stream/finish'))).toHaveLength(0)
+  })
+
+  it('認証が切れていたら（401）、入り直しを促す（成功とも失敗とも偽らない・再試行しない）', async () => {
+    const { wrapper, calls } = await open({ notes: [finalNote('FAILED')], runStatus: 401 })
+
+    await wrapper.get('[data-cr-final-note-retry]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const notice = wrapper.get('[data-cr-final-note-notice]').text()
+    expect(notice).toContain('ログインの有効期限が切れています')
+    // **「始めました」とは言わない**
+    expect(notice).not.toContain('開始できませんでした')
+    // 1 回だけ（無限に再試行しない）
+    expect(calls.filter((call) => call.url.includes('/notes/run'))).toHaveLength(1)
+  })
+
+  it('権限が無いとき（403）は、権限の問題として伝える（ネットワーク失敗に紛れさせない）', async () => {
+    const { wrapper, calls } = await open({ notes: [finalNote('FAILED')], runStatus: 403 })
+
+    await wrapper.get('[data-cr-final-note-retry]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text())
+      .toContain('操作する権限がありません')
+    expect(calls.filter((call) => call.url.includes('/notes/run'))).toHaveLength(1)
+  })
+
+  it('回復が 403 のときも、権限の問題として伝える（回復したと偽らない）', async () => {
+    const { wrapper } = await open({ notes: [finalNote('GENERATING')], recoverStatus: 403 })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text())
+      .toContain('操作する権限がありません')
+    // 実行中のまま（勝手に失敗にしたり、回復した扱いにしない）
+    expect(wrapper.get('[data-cr-final-note]').text()).toContain('作成しています')
   })
 })

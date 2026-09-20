@@ -360,8 +360,9 @@ function sendTranscript(text: string, offsetSeconds: number): void {
       appendSegments(response.data.appendedSegments)
       nextSegmentSeq.value = Math.max(nextSegmentSeq.value, response.data.nextSeq)
       const runPath = response.data.runPath
-      if (response.data.triggered && runPath !== null && runPath !== '') {
-        void runClassroomNote(runPath, 'classroom-live-view').catch((cause: unknown) => {
+      if (response.data.triggered && runPath !== null && runPath !== '' && id !== null) {
+        // 画面が noteId を知らない回: user-api が**その授業の未生成ノート**を選ぶ
+        void runClassroomNote(id).catch((cause: unknown) => {
           syncError.value = messageOf(cause, 'AI ノートの生成を開始できませんでした。')
         })
       }
@@ -632,9 +633,10 @@ async function uploadOne(id: number, chunk: PendingChunk): Promise<void> {
     rememberUploadedChunk(chunk.seq)
     schedulePendingRetry()
     const runPath = response.data.runPath
-    if (response.data.triggered && runPath !== null && runPath !== '') {
-      // フェーズ分析（batC61）を 1 回だけ起動する（結果はポーリングで取る）
-      void runClassroomNote(runPath, 'classroom-live-view').catch((cause: unknown) => {
+    if (response.data.triggered && runPath !== null && runPath !== '' && id !== null) {
+      // フェーズ分析（batC61）を 1 回だけ起動する（結果はポーリングで取る）。
+      // 画面が noteId を知らない回は user-api が**その授業の未生成ノート**を選ぶ
+      void runClassroomNote(id).catch((cause: unknown) => {
         const message = messageOf(cause, 'AI ノートの生成を開始できませんでした。')
         syncError.value = message
       })
@@ -1478,11 +1480,17 @@ let noteStartPromise: Promise<boolean> | null = null
  *
  * @return 受理を確認できたら true（既に走っている・作成済みも true）
  */
-async function acceptClassroomNote(runPath: string, noteId: number | null): Promise<boolean> {
+async function acceptClassroomNote(noteId: number | null): Promise<boolean> {
   if (noteStartPromise !== null) return noteStartPromise
   noteStartPromise = (async () => {
     try {
-      const response = await runClassroomNote(runPath, 'classroom-live-view', 30_000)
+      const id = recordId.value
+      if (id === null || noteId === null) {
+        // 記録と結び付いていない（画面の流れだけ）: 起動を頼めない
+        return false
+      }
+      // **user-api の保護された入口**を呼ぶ（所有権は user-api が確かめる）
+      const response = await runClassroomNote(id, noteId, 30_000)
       const data = response.data as { status?: string } | null
       /*
        * **受理されたかを状態で確かめる**。
@@ -2420,7 +2428,7 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
        * 「タスクを受け付けた」だけ（AI の完了は待たない）。結果は詳細画面のポーリングで読む。</p>
        */
       finishPhase.value = 'note'
-      const accepted = await acceptClassroomNote(runPath, outcome.result.finalNoteId ?? null)
+      const accepted = await acceptClassroomNote(outcome.result.finalNoteId ?? null)
       if (!accepted) {
         /*
          * **起動できなかった**。録音の保存は成功しているので**そこは戻さない**

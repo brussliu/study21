@@ -37,6 +37,12 @@ app:
   environment: "${APP_ENV:development}"
 
 study21:
+  # サービス間（user-api → admin-api）の内部入口の合言葉。
+  # **既定は空（未設定）＝内部入口はすべて拒否**（匿名に落とさない）。
+  # 配備では STUDY21_INTERNAL_TOKEN を admin-api と user-api の**両方**に同じ値で渡す。
+  # リポジトリ・前端・URL・ログには置かない。
+  internal:
+    token: "${STUDY21_INTERNAL_TOKEN:}"
   cors:
     allowed-origins: "${ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174}"
   geometry-ai:

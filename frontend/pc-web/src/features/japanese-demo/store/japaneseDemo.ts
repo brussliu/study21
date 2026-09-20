@@ -578,8 +578,11 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
   const registerStep = ref(1)
   const pasteText = ref('')
   const parsedRows = ref<ParsedRow[]>([])
-  /** 取り込む単語（1 行 1 語。読みと意味はここでは入れない）。 */
-  const registerHeadings = ref<string[]>([])
+  /**
+   * 取り込む単語（1 行 1 語。読みと意味はここでは入れない）。
+   * 開いた直後は**空行 1 つ**から始める（すぐ入力・貼り付けできるように）。
+   */
+  const registerHeadings = ref<string[]>([''])
   const registerBookMode = ref<'EXISTING' | 'NEW'>('EXISTING')
   /** 既定は先頭の書籍（未選択のまま行き止まりにしない）。 */
   const registerBookName = ref(DEMO_BOOKS[0]?.name ?? '')
@@ -728,7 +731,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerStep.value = 1
     pasteText.value = ''
     parsedRows.value = []
-    registerHeadings.value = []
+    registerHeadings.value = ['']
     registerBookMode.value = 'EXISTING'
     registerBookName.value = books.value[0]?.name ?? ''
     registerUnitSizeInput.value = null

@@ -604,13 +604,6 @@ export const CLASSROOM_TITLE_MAX = 200
 const http = new HttpClient({ baseUrl: '/api/user' })
 /** 授業録音の API の前置き（`/api/user/classroom`）。 */
 const BASE = '/classroom'
-/**
- * AI ノート生成（admin-api の薄い入口）用。
- * 起動 API は admin-api のパス（`/api/admin/batch/...`）なので、user-api 用の baseUrl では
- * 前置きが余計に付いてしまう。**baseUrl を空にした別のクライアント**で叩く（AI 生図と同じ）。
- */
-const adminHttp = new HttpClient({ baseUrl: '' })
-
 /** 画面が使う設定（有効／無効・分塊長・録音最大時間・保存期間・日次上限）。 */
 export function fetchClassroomOptions(): Promise<ApiResponse<ClassroomOptions>> {
   return http.get<ClassroomOptions>(`${BASE}/options`)
@@ -950,9 +943,18 @@ export interface ClassroomNoteRecovery {
   reason: string
 }
 
-export function recoverClassroomNote(noteId: number): Promise<ApiResponse<ClassroomNoteRecovery>> {
-  return adminHttp.post<ClassroomNoteRecovery>(
-    `/api/admin/batch/classroom/notes/${noteId}/recover`, { body: { operator: 'classroom-detail-view' } })
+export function recoverClassroomNote(
+  recordId: number, noteId: number
+): Promise<ApiResponse<ClassroomNoteRecovery>> {
+  /*
+   * **user-api の保護された入口**を呼ぶ。
+   *
+   * <p>画面から admin-api の内部入口（`/api/admin/batch/**`）を直接叩かない: あちらは
+   * noteId しか見ないので、**他人のまとめを回復できてしまう**。user-api でログイン・授業の
+   * 所有権・noteId の帰属を確かめてから、サービス間の合言葉つきで admin-api を呼ぶ。</p>
+   */
+  return http.post<ClassroomNoteRecovery>(
+    `${BASE}/${recordId}/notes/${noteId}/recover`, { body: {} })
 }
 
 /**
@@ -966,7 +968,16 @@ export function recoverClassroomNote(noteId: number): Promise<ApiResponse<Classr
  * 確かめる（受理されたのに応答を失った回に、もう一度タスクを作らない）。</p>
  */
 export function runClassroomNote(
-  runPath: string, operator = 'classroom-ai-view', timeoutMs = 30_000
+  recordId: number, noteId: number | null = null, timeoutMs = 30_000
 ): Promise<ApiResponse<ClassroomNoteAcceptance>> {
-  return adminHttp.post<ClassroomNoteAcceptance>(runPath, { body: { operator }, timeoutMs })
+  /*
+   * **user-api の保護された入口**を呼ぶ（`runPath` を画面から叩かない）。
+   * 理由は {@link recoverClassroomNote} と同じ: 内部入口は**利用者の権限を確かめない**。
+   *
+   * <p>`noteId` を省略できるのは、分塊・文字起こしのトリガー（画面が noteId を知らない回）。
+   * そのときは user-api が**その授業の未生成のノート**を自分で選ぶ（他人のまとめは選べない）。</p>
+   */
+  const query = noteId === null ? '' : `?noteId=${noteId}`
+  return http.post<ClassroomNoteAcceptance>(
+    `${BASE}/${recordId}/notes/run${query}`, { body: {}, timeoutMs })
 }

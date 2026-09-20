@@ -330,6 +330,28 @@ const finalNoteStateText = computed(() => {
   return '最終まとめはまだ作成していません（下のボタンから作成できます）。'
 })
 
+/**
+ * まとめの操作が失敗した理由（日本語）。
+ *
+ * <p>認証切れ（401）と権限不足（403）は**原因が違う**: 前者は入り直せば直る、後者はそもそも
+ * その操作が許されていない。ネットワークの失敗と混ぜない（利用者が次に何をすればよいか
+ * 分からなくなる）。**どちらも無限に再試行しない**（文言で入り直し／権限を伝える）。</p>
+ */
+function noteFailureReason(caught: unknown): string {
+  const code = caught instanceof ApiError ? caught.code : undefined
+  if (code === 'UNAUTHENTICATED') {
+    return 'ログインの有効期限が切れています。もう一度ログインしてからお試しください。'
+  }
+  if (code === 'FORBIDDEN') {
+    return 'この授業の最終まとめを操作する権限がありません。'
+  }
+  if (code === 'NOT_FOUND') {
+    return '最終まとめが見つかりませんでした（画面を開き直してください）。'
+  }
+  return '最終まとめの生成を開始できませんでした（'
+    + messageOf(caught, '通信に失敗しました') + '）。'
+}
+
 /** 最終まとめの起動を頼んでいる最中か（連打で二重に走らせない）。 */
 const retryingFinalNote = ref(false)
 
@@ -356,7 +378,9 @@ async function checkFinalNote(): Promise<void> {
   checkingFinalNote.value = true
   finalNoteNotice.value = ''
   try {
-    const response = await recoverClassroomNote(noteId)
+    const recordIdForCall = detail.value?.recordId ?? recordId.value
+    if (recordIdForCall === null) return
+    const response = await recoverClassroomNote(recordIdForCall, noteId)
     finalNoteNotice.value = response.data.reason
     // 状態を取り直す（回復していれば FAILED → 再試行の入口が出る）
     await refresh()
@@ -364,7 +388,7 @@ async function checkFinalNote(): Promise<void> {
   } catch (caught) {
     // **分からない**ことを「失敗」と言い切らない（確かめられなかった、と伝える）
     finalNoteNotice.value = '最終まとめの状態を確認できませんでした（'
-      + messageOf(caught, '通信に失敗しました') + '）。少し待ってからもう一度お試しください。'
+      + noteFailureReason(caught) + '）少し待ってからもう一度お試しください。'
   } finally {
     checkingFinalNote.value = false
   }
@@ -386,8 +410,8 @@ async function retryFinalNote(): Promise<void> {
   retryingFinalNote.value = true
   finalNoteNotice.value = ''
   try {
-    const response = await runClassroomNote(`/api/admin/batch/classroom/notes/${noteId}/run`,
-      'classroom-detail-view')
+    // **user-api の保護された入口**を呼ぶ（所有権と noteId の帰属は user-api が確かめる）
+    const response = await runClassroomNote(id, noteId)
     // 状態を取り直して、**受理されたかを記録で確かめる**（応答の文面を信じない）
     await refresh()
     if (finalNote.value?.status === 'GENERATING' || finalNote.value?.status === 'READY') {
@@ -412,9 +436,12 @@ async function retryFinalNote(): Promise<void> {
       finalNoteNotice.value = '最終まとめの作成を始めました。'
       startPolling()
     } else {
-      // **失敗を隠さない**（録音の保存は成功していることも一緒に伝える）
-      finalNoteNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした（'
-        + messageOf(caught, '通信に失敗しました') + '）。'
+      /*
+       * **失敗を隠さない**（録音の保存は成功していることも一緒に伝える）。
+       * 認証切れ（401）と権限不足（403）は原因が違うので区別した文言にする
+       * （ネットワーク失敗に紛れさせない・無限に再試行しない）。
+       */
+      finalNoteNotice.value = `録音は保存しました。${noteFailureReason(caught)}`
     }
   } finally {
     retryingFinalNote.value = false
