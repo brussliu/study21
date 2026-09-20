@@ -201,23 +201,56 @@ const assembly = computed(() => detail.value?.assembly ?? null)
 const audioNote = computed(() => {
   if (audioFailed.value) return '録音の音声を読み込めませんでした（保存期間を過ぎた可能性があります）。'
   if (audioUrl.value === '') return 'この授業の音声はありません（保存期間を過ぎると消えます）。'
+  /*
+   * **欠落がある回は「音声は保存されています」と言い切らない**。
+   * 一部の区間は残っていないので、残っている数と失った連番を出す。
+   */
+  if (lostNotice.value !== '') return lostNotice.value
   const state = assembly.value
   if (state === null || state === undefined) return '録音した音声をそのまま再生できます。'
   if (state.state === 'READY' && state.complete) {
     return '録音した音声をそのまま再生できます（音声は保存されています）。'
   }
-  if (state.state === 'FAILED' || state.state === 'INCOMPLETE') {
+  if (state.state === 'FAILED') {
     return `音声は保存されています（${state.storedChunks} 件）。`
       + '再生用の音声はまだ作れていません（作り直せます）。'
   }
-  return `音声は保存されています（${state.storedChunks} 件）。再生用の音声を作成中です。`
+  if (state.state === 'INCOMPLETE') {
+    // 結合しないと決めた回（欠落がある）。**音が欠けていること**を先に言う
+    return `音声の一部が残っていません（保存できたのは ${state.storedChunks} 件）。`
+      + '再生用の音声は、欠けている区間があるため作りません。'
+  }
+  if (state.state === 'QUEUED' || state.state === 'PROCESSING') {
+    return `音声は保存されています（${state.storedChunks} 件）。再生用の音声を作成中です。`
+  }
+  // NOT_STARTED: **「作成中」とは言わない**（永久に待つ画面にしない）
+  return `音声は保存されています（${state.storedChunks} 件）。`
+    + '再生用の音声はまだ作っていません。'
+})
+
+/**
+ * **不完全なまま終えた回**の案内（日本語。空なら欠落していない）。
+ *
+ * <p>終了のときに利用者が確認して失った範囲（{@code lossSeqs}）を、詳細画面で**出し続ける**
+ * （一度きりの通知にしない。あとから見た人にも「どこが失われたか」が分かる）。</p>
+ */
+const lostNotice = computed(() => {
+  const lost = detail.value?.lossSeqs ?? []
+  if (lost.length === 0) return ''
+  return `この授業は音声の一部（連番 ${lost.join('、')}）を保存できずに終了しています。`
+    + 'その区間の音は残っていません（書き起こしのテキストは残っています）。'
 })
 
 /** 再生用の 1 本を作り直せるか（作れなかったときだけ出す）。 */
 const canRetryAssembly = computed(() => {
   const state = assembly.value
-  return state !== null && state !== undefined
-    && (state.state === 'FAILED' || state.state === 'INCOMPLETE')
+  if (state === null || state === undefined) return false
+  /*
+   * `NOT_STARTED` も出す（作る必要があるのに作っていない回＝再起動などで取りこぼした回）。
+   * `QUEUED` / `PROCESSING` は作成中なので出さない（押しても同じ結果）。`INCOMPLETE` は
+   * 欠落があるので、結合そのものはもう一度試せる（音は消さない）。
+   */
+  return state.state === 'FAILED' || state.state === 'NOT_STARTED' || state.state === 'INCOMPLETE'
 })
 
 /** 作り直しの実行中か（連打で二重に走らせない）。 */

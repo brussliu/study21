@@ -59,7 +59,7 @@ public class ClassroomServiceImpl implements ClassroomService {
     private final ClassroomRecordMapper recordMapper;
     private final ClassroomSegmentMapper segmentMapper;
     /** 録音の分塊（1 塊 1 行 1 ファイル）。転写セグメントとは**別の連番**を持つ。 */
-    private final ClassroomRecordingChunkMapper chunkMapper;
+    private ClassroomRecordingChunkMapper chunkMapper;
     /** 保存した分塊から再生用の 1 本を組立てる（分塊が無ければ何もしない）。 */
     private final ClassroomRecordingAssembler assembler;
     private final ClassroomNoteMapper noteMapper;
@@ -667,7 +667,9 @@ public class ClassroomServiceImpl implements ClassroomService {
                 segments, notes, versionOf(record),
                 iso(record.getCreatedAt()), iso(record.getUpdatedAt()),
                 // 結合の状態（「音声は保存されている」と「再生できる」を分けて出す）
-                assemblyViewOf(record));
+                assemblyViewOf(record),
+                // 不完全なまま終えた回に失った連番（詳細画面が出し続ける）
+                missingSeqsOf(record));
     }
 
     @Override
@@ -1361,6 +1363,18 @@ public class ClassroomServiceImpl implements ClassroomService {
             // 背景の仕組みが使えない環境（古い JVM・停止中の実行器）: その場で走らせる（結果は同じ）
             log.debug("背景で走らせられないため、その場で組立てます。recordId={}", recordId);
             task.run();
+        }
+    }
+
+    /**
+     * 分塊表の入口を差し替える（**試験で待ち合わせるため**。本番は Spring が入れたもの）。
+     *
+     * <p>「分塊を受け入れているトランザクションのあいだ、収尾が待つ」ことを確かめるのに使う
+     * （行ロックが効いているかの決定的な検証）。</p>
+     */
+    void setChunkMapperForTest(ClassroomRecordingChunkMapper mapper) {
+        if (mapper != null) {
+            this.chunkMapper = mapper;
         }
     }
 

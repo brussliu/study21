@@ -303,6 +303,12 @@ export interface ClassroomRecordDetail {
    * （失敗しても分塊は残っている＝やり直せる）。</p>
    */
   assembly?: ClassroomAssemblyView | null
+  /**
+   * **不完全なまま終えた回に失った連番**（音が残っていない区間）。
+   *
+   * <p>詳細画面が「どこが失われたか」を出し続けるために使う（空なら欠落していない）。</p>
+   */
+  lossSeqs?: number[]
 }
 
 /** 一覧の 1 行。 */

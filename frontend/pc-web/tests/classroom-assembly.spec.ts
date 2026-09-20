@@ -118,10 +118,26 @@ describe('授業録音：再生用の音声（結合）の状態', () => {
     expect(wrapper.get('[data-cr-assembly-retry]').text()).toContain('作り直す')
   })
 
-  it('まだ作っていないあいだは「作成中」と出す（成功とも失敗とも言わない）', async () => {
+  it('まだ作っていない回は「作成中」と言わない（永久に待つ画面にしない）', async () => {
     const { wrapper } = await open({
       assembly: {
-        state: 'NONE', complete: false, storedChunks: 3, durationSeconds: null,
+        state: 'NOT_STARTED', complete: false, storedChunks: 3, durationSeconds: null,
+        missingSeqs: [], reason: null
+      }
+    })
+
+    const note = wrapper.get('[data-cr-audio-note]').text()
+    // **作成中とは言わない**（誰も作っていないのに待たせない）＋ 作り直す入口を出す
+    expect(note).not.toContain('作成中')
+    expect(note).toContain('まだ作っていません')
+    expect(note).toContain('3 件')
+    expect(wrapper.get('[data-cr-assembly-retry]').text()).toContain('作り直す')
+  })
+
+  it('受け付けた／作成中は「作成中」と出す（成功とも失敗とも言わない）', async () => {
+    const { wrapper } = await open({
+      assembly: {
+        state: 'PROCESSING', complete: false, storedChunks: 3, durationSeconds: null,
         missingSeqs: [], reason: null
       }
     })

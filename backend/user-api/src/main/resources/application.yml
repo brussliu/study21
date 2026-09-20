@@ -110,6 +110,10 @@ study21:
     # admin-api のバッチ（batR02 の掃除）も同じ場所を読むので、配備では両サービスに
     # 同じボリュームを割り当てる（geometry-ai と同じ考え方）。
     storage-root: "${STUDY21_CLASSROOM_STORAGE_ROOT:${user.dir}/data/classroom}"
+    # 続録（一時停止・画面の開き直し）の音声を 1 本に結合する道具。
+    # イメージに ffmpeg を入れてあるので既定のままでよい（別の場所を使うときだけ上書き）。
+    ffmpeg-command: "${STUDY21_CLASSROOM_FFMPEG_COMMAND:ffmpeg}"
+    ffprobe-command: "${STUDY21_CLASSROOM_FFPROBE_COMMAND:ffprobe}"
   classroom-ai:
     # true にすると STT を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
     stub: "${STUDY21_CLASSROOM_AI_STUB:false}"

@@ -296,6 +296,32 @@ class ClassroomManifestProtocolTest {
         assertThat(result.complete()).isTrue();
     }
 
+    @Test
+    @DisplayName("⑤ 貼り付けだけ（音声も分塊も無い）記録は、**分塊の一覧**の理由で断らない")
+    void textOnlyRecordIsNotCheckedAgainstChunks() {
+        /*
+         * 音声が 1 つも無い記録（貼り付けだけ）。分塊の行も無い。
+         *
+         * <p>確かめるのは「一覧が無いことを理由に断らない」こと。音声が無いこと自体は
+         * **別の理由（NO_CHUNKS）**で返す（「音声がそろっていない」という分塊の話にしない）。</p>
+         */
+        ClassroomRecordEntity empty = recordingRecord();
+        empty.setAudioPath(null);
+        empty.setAudioName(null);
+        empty.setAudioMime(null);
+        when(recordMapper.findById(RECORD_ID)).thenReturn(empty);
+        allowFinalize();
+
+        // 旧い画面（一覧を送らない）でも、一覧の矛盾や「足りない連番」では断らない
+        ChunkChecklistException refusal = org.junit.jupiter.api.Assertions.assertThrows(
+                ChunkChecklistException.class, () -> service.end(student, RECORD_ID, false, null));
+        assertThat(refusal.checklist().reasonCode()).isEqualTo(ClassroomModels.CHECK_NO_CHUNKS);
+        assertThat(refusal.checklist().missingSeqs()).isEmpty();
+
+        // 分塊を持たないのは取り込み（mp3）と同じ扱いなので、**一覧さえ正しければ**通る道は残る
+        assertThat(ClassroomModels.CHECK_NO_CHUNKS).isNotEqualTo(ClassroomModels.CHECK_MISSING);
+    }
+
     /* ---------------- ⑥ 明示の不完全終了 ---------------- */
 
     @Test
