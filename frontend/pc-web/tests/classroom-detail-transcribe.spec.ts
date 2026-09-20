@@ -104,9 +104,10 @@ function mockApi(options: Parameters<typeof detail>[0] & {
         }), { status: 500, headers: { 'Content-Type': 'application/json' } })
       }
       if (options.afterRecovery !== undefined) recovered = true
+      // **user-api の欄**（`message`）。admin-api の `reason` は user-api が写す
       return ok(options.recovery ?? {
         noteId: 91, status: 'GENERATING', liveness: 'RUNNING', recoverable: false, recovered: false,
-        reason: 'この最終まとめは実行中です（このままお待ちください）。'
+        message: 'この最終まとめは実行中です（このままお待ちください）。'
       })
     }
     if (/\/api\/user\/classroom\/\d+\/notes\/run/.test(target)) {
@@ -361,7 +362,7 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
       notes: [finalNote('GENERATING')],
       recovery: {
         noteId: 91, status: 'FAILED', liveness: 'LOST', recoverable: true, recovered: true,
-        reason: '実行が失われていたため、やり直せる状態に戻しました。'
+        message: '実行が失われていたため、やり直せる状態に戻しました。'
       },
       afterRecovery: [finalNote('FAILED')]
     })
@@ -437,5 +438,74 @@ describe('授業詳細：最終まとめの状態と再試行', () => {
       .toContain('操作する権限がありません')
     // 実行中のまま（勝手に失敗にしたり、回復した扱いにしない）
     expect(wrapper.get('[data-cr-final-note]').text()).toContain('作成しています')
+  })
+
+  it('実行中のままなら、その理由をそのまま出す（状態は変えない）', async () => {
+    const { wrapper } = await open({
+      notes: [finalNote('GENERATING')],
+      recovery: {
+        noteId: 91, status: 'GENERATING', liveness: 'RUNNING', recoverable: false, recovered: false,
+        message: 'この最終まとめは実行中です（このままお待ちください）。'
+      }
+    })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const notice = wrapper.get('[data-cr-final-note-notice]').text()
+    expect(notice).toContain('実行中')
+    expect(notice).not.toContain('undefined')
+    expect(wrapper.find('[data-cr-final-note-retry]').exists()).toBe(false)
+  })
+
+  it('実行の準備中なら、その理由をそのまま出す（勝手に失敗にしない）', async () => {
+    const { wrapper } = await open({
+      notes: [finalNote('GENERATING')],
+      recovery: {
+        noteId: 91, status: 'GENERATING', liveness: 'BINDING', recoverable: false, recovered: false,
+        message: 'この最終まとめの実行を準備しています（少し待ってからもう一度お試しください）。'
+      }
+    })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text()).toContain('準備しています')
+  })
+
+  it('確認できないときは「確認できませんでした」を出す（失敗とも成功とも言わない）', async () => {
+    const { wrapper } = await open({
+      notes: [finalNote('GENERATING')],
+      recovery: {
+        noteId: 91, status: 'GENERATING', liveness: 'UNKNOWN', recoverable: false, recovered: false,
+        message: '実行の状態を確認できませんでした（少し待ってからもう一度お試しください）。'
+      }
+    })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.get('[data-cr-final-note-notice]').text()).toContain('確認できませんでした')
+  })
+
+  it('回復の理由が空でも、兜底を出して undefined を表示しない', async () => {
+    const { wrapper } = await open({
+      notes: [finalNote('GENERATING')],
+      recovery: {
+        noteId: 91, status: 'GENERATING', liveness: 'RUNNING', recoverable: false, recovered: false,
+        message: ''
+      }
+    })
+
+    await wrapper.get('[data-cr-final-note-recover]').trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const notice = wrapper.get('[data-cr-final-note-notice]').text()
+    expect(notice).toContain('確認しました')
+    expect(notice).not.toContain('undefined')
   })
 })

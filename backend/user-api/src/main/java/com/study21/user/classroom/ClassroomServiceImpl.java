@@ -803,6 +803,19 @@ public class ClassroomServiceImpl implements ClassroomService {
     }
 
     /** admin-api の応答を画面の形にする（**失敗を成功に見せない**）。 */
+    /**
+     * admin-api の応答を画面の形にする（**失敗を成功に見せない**）。
+     *
+     * <p><b>欄の出どころ</b>（admin-api の応答は入口ごとに違う）:</p>
+     * <ul>
+     *   <li>起動（`/run`）… `{noteId, accepted, status, message}`</li>
+     *   <li>回復（`/recover`）… `{noteId, status, liveness, recoverable, recovered, reason}`
+     *       … 回復は**理由**が `reason` なので、ここで `message` へ写す（画面は 1 つの欄だけを見る）。</li>
+     * </ul>
+     *
+     * <p>理由が空でも **undefined/null を出さない**（段階に応じた兜底を入れる）。
+     * `accepted`（起動の受理）と `recovered`（回復した）は**混ぜない**。</p>
+     */
     private static ClassroomModels.NoteTaskResult toTaskResult(
             long noteId, com.fasterxml.jackson.databind.JsonNode data, boolean recovery) {
         if (data == null || data.isNull()) {
@@ -815,19 +828,61 @@ public class ClassroomServiceImpl implements ClassroomService {
             throw new ConflictException("まとめの操作の応答を確認できませんでした。"
                     + "少し待ってから、もう一度お試しください。");
         }
-        String message = data.hasNonNull("message") ? data.get("message").asText() : null;
+        // 起動は `message`、回復は `reason`。**空文字・空白は「無し」と同じ**に扱う
+        String reason = textOf(data, "message");
+        if (reason == null) {
+            reason = textOf(data, "reason");
+        }
         if (recovery) {
-            return new ClassroomModels.NoteTaskResult(noteId, status, "READY".equals(status)
-                    || "GENERATING".equals(status),
-                    message == null ? "状態を確認しました。" : message,
-                    data.hasNonNull("liveness") ? data.get("liveness").asText() : null,
+            String liveness = textOf(data, "liveness");
+            boolean recovered = data.hasNonNull("recovered") && data.get("recovered").asBoolean();
+            return new ClassroomModels.NoteTaskResult(noteId, status,
+                    "READY".equals(status) || "GENERATING".equals(status),
+                    reason == null ? recoveryFallback(status, liveness, recovered) : reason,
+                    liveness,
                     data.hasNonNull("recoverable") && data.get("recoverable").asBoolean(),
-                    data.hasNonNull("recovered") && data.get("recovered").asBoolean());
+                    recovered);
         }
         boolean accepted = data.hasNonNull("accepted") && data.get("accepted").asBoolean();
         return new ClassroomModels.NoteTaskResult(noteId, status, accepted,
-                message == null ? (accepted ? "最終まとめの作成を始めました。" : "この最終まとめは作成中です。") : message,
+                reason == null
+                        ? (accepted ? "最終まとめの作成を始めました。" : "この最終まとめは作成中です。")
+                        : reason,
                 null, false, false);
+    }
+
+    /**
+     * 回復の理由が空のときの兜底（**段階ごとに違うことを言う**）。
+     *
+     * <p>「状態を確認しました」で全部を塗り潰すと、利用者に必要な情報（実行中なのか・準備中なのか・
+     * 確かめられなかったのか・やり直せるようになったのか）が消える。</p>
+     */
+    private static String recoveryFallback(String status, String liveness, boolean recovered) {
+        if (recovered) {
+            return "実行が失われていたため、やり直せる状態に戻しました。";
+        }
+        String livenessCode = liveness == null ? "" : liveness;
+        return switch (livenessCode) {
+            case "RUNNING" -> "この最終まとめは実行中です（このままお待ちください）。";
+            case "BINDING" -> "この最終まとめの実行を準備しています"
+                    + "（少し待ってからもう一度お試しください）。";
+            case "UNKNOWN" -> "実行の状態を確認できませんでした"
+                    + "（少し待ってからもう一度お試しください）。";
+            case "LOST" -> "実行が失われていました。もう一度実行してください。";
+            default -> "READY".equals(status) ? "最終まとめはすでに作成済みです。"
+                    : "FAILED".equals(status) ? "最終まとめの作成に失敗しています"
+                    + "（【最終まとめを再試行】からやり直せます）。"
+                    : "状態を確認しました（状態: " + status + "）。";
+        };
+    }
+
+    /** 欄の文字列（空白だけなら null）。 */
+    private static String textOf(com.fasterxml.jackson.databind.JsonNode data, String field) {
+        if (!data.hasNonNull(field)) {
+            return null;
+        }
+        String value = data.get(field).asText(null);
+        return value == null || value.isBlank() ? null : value;
     }
 
     /** ノートの状態の表示名（日本語）。 */

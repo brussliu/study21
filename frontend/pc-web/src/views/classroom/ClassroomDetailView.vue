@@ -381,7 +381,11 @@ async function checkFinalNote(): Promise<void> {
     const recordIdForCall = detail.value?.recordId ?? recordId.value
     if (recordIdForCall === null) return
     const response = await recoverClassroomNote(recordIdForCall, noteId)
-    finalNoteNotice.value = response.data.reason
+    // 理由は **message**（欄の名前は user-api で統一）。空なら兜底（undefined を出さない）
+    finalNoteNotice.value = response.data.message === undefined || response.data.message === null
+      || response.data.message === ''
+      ? '最終まとめの状態を確認しました。'
+      : response.data.message
     // 状態を取り直す（回復していれば FAILED → 再試行の入口が出る）
     await refresh()
     if (finalNote.value?.status === 'GENERATING') startPolling()

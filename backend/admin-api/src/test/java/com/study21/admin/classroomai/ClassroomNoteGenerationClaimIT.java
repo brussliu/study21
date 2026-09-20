@@ -37,20 +37,39 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>を確かめる。</p>
  *
  * <p>実行には DB とパスワードが要る（無いときはスキップする）:
- * {@code STUDY21_DATASOURCE_URL=... STUDY21_DATASOURCE_PASSWORD=... mvn -pl admin-api test}。
+ * {@code STUDY21_TEST_DATASOURCE_URL=... STUDY21_DATASOURCE_PASSWORD=... mvn -pl admin-api test}。
  * 下見用の DB は {@code tmp/tools/study21-testdb.sh start} で作れる。</p>
  */
 @SpringBootTest(properties = {
-    // 起動時のバッチ復旧・スケジューラは止める（受理の検証には要らない）
-    "study21.batch.auto-run.recovery-enabled=false",
-    "study21.batch.auto-run.schedule-enabled=false"
+    // 起動時の自動バッチ（本物の業務）を**すべて**止める
+    "study21.batch.auto-run.startup-enabled=false",
+    "study21.batch.auto-run.schedule-enabled=false",
+    "study21.batch.auto-run.recovery-enabled=false"
 })
-@EnabledIfEnvironmentVariable(named = "STUDY21_DATASOURCE_PASSWORD", matches = ".+",
-        disabledReason = "DB のパスワード（STUDY21_DATASOURCE_PASSWORD）が未設定のためスキップ")
+@EnabledIfEnvironmentVariable(named = "STUDY21_TEST_DATASOURCE_URL", matches = ".+",
+        disabledReason = "専用のテスト DB（STUDY21_TEST_DATASOURCE_URL）が未設定のためスキップ")
 class ClassroomNoteGenerationClaimIT {
 
     /** 検証用の記録（作った行だけを見る）。 */
     private static final long ACCOUNT_ID = 1L;
+
+    /** **専用のテスト DB 以外では動かさない**（設定漏れのまま配備先の DB へ書かない）。 */
+    @org.junit.jupiter.api.BeforeAll
+    static void requireDedicatedTestDatabase(@org.springframework.beans.factory.annotation.Value(
+            "${spring.datasource.url:}") String datasourceUrl) {
+        org.assertj.core.api.Assertions.assertThat(datasourceUrl)
+                .as("検証は専用のテスト DB でのみ動かします（STUDY21_TEST_DATASOURCE_URL）")
+                .isNotBlank();
+        org.assertj.core.api.Assertions.assertThat(datasourceUrl)
+                .as("配備先の DB を指していたら検証を止めます")
+                .doesNotContain("192.168.0.100");
+    }
+
+    /** 接続先を**専用のテスト DB に固定**する（`STUDY21_DATASOURCE_*` へは落とさない）。 */
+    @org.springframework.test.context.DynamicPropertySource
+    static void database(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        com.study21.admin.testing.TestDatabase.override(registry);
+    }
 
     @Autowired
     private ClassroomNoteMapper noteMapper;

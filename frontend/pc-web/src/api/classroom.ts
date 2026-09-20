@@ -939,8 +939,13 @@ export interface ClassroomNoteRecovery {
   recoverable: boolean
   /** この呼び出しで回復したか。 */
   recovered: boolean
-  /** 画面に出す理由（日本語）。 */
-  reason: string
+  /**
+   * 画面に出す理由（日本語）。
+   *
+   * <p>**欄の名前は user-api の `message` で統一**する。admin-api は回復で `reason` を返すが、
+   * user-api が受けて `message` に写す（層ごとに欄の名前が違うと、画面が `undefined` を読む）。</p>
+   */
+  message: string
 }
 
 export function recoverClassroomNote(

@@ -3,15 +3,20 @@ package com.study21.user.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.study21.user.classroom.ClassroomNoteAdminClient;
+import com.study21.user.testing.ClassroomTestData;
+import com.study21.user.testing.TestDatabase;
+import com.study21.user.testing.TestSqlMapper;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -27,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
@@ -37,40 +43,38 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
  * 直接叩かず、この user-api の入口を通る。ここで**ログイン・授業の所有権・noteId の帰属**を
  * 確かめてから、はじめて下流（admin-api）を呼ぶ。</p>
  *
- * <ul>
- *   <li>未ログイン … 401（**下流を呼ばない**）</li>
- *   <li>他人の授業 … 404（存在を漏らさない）</li>
- *   <li>自分の授業だが**別の記録のノート** … 404（**下流を呼ばない**）</li>
- *   <li>ノートが無い・他人のノート … 404（**下流を呼ばない**）</li>
- *   <li>回復の入口に途中のノート（PHASE）… 400（この入口は最終まとめ専用）</li>
- *   <li>正しい組み合わせ … 200 で下流を 1 回だけ呼ぶ</li>
- * </ul>
+ * <p><b>データの隔離（2026-09-19 改修 第 9 段）</b>: 既存のアカウントを**一切使わない**。
+ * 検証用の保護者→生徒・授業・まとめを毎回作り、控えた ID だけを後片付けする。日常使っている
+ * アカウントのパスワードを書き換えることはしない。**専用のテスト DB**（
+ * `STUDY21_TEST_DATASOURCE_URL`）が設定されていなければ、この検証は動かさない</p>
  *
- * <p>下流は**替え玉**（{@link ClassroomNoteAdminClient} の spy）にして、実際の AI も
- * バッチも走らせない。DB はテスト用の独立した PostgreSQL（パスワードが無ければスキップ）。</p>
+ * <p>下流は**替え玉**（{@link ClassroomNoteAdminClient} の spy）。実際の AI もバッチも走らせない。
+ * 起動時の自動バッチも止める。</p>
  */
-@SpringBootTest
+@SpringBootTest(properties = {
+    // 起動時に本当の業務（AI・バッチ）を走らせない
+    "study21.batch.auto-run.startup-enabled=false",
+    "study21.batch.auto-run.schedule-enabled=false",
+    "study21.batch.auto-run.recovery-enabled=false"
+})
 @AutoConfigureMockMvc
-@EnabledIfEnvironmentVariable(named = "STUDY21_DATASOURCE_PASSWORD", matches = ".+",
-        disabledReason = "DB のパスワード（STUDY21_DATASOURCE_PASSWORD）が未設定のためスキップ")
+/*
+ * **トランザクションの中で組み立てる**（アカウントの「保護者には生徒が 1 人以上」は
+ * **遅延トリガ**なので、保護者と生徒を同じトランザクションで入れる必要がある）。検証は同じ
+ * スレッド（MockMvc）で完結し、下流は替え玉なので他スレッドの書き込みは無い。終わったら
+ * **ロールバック**され、後片付けの取りこぼしも残らない。
+ */
+@org.springframework.transaction.annotation.Transactional
+@EnabledIfEnvironmentVariable(named = "STUDY21_TEST_DATASOURCE_URL", matches = ".+",
+        disabledReason = "専用のテスト DB（STUDY21_TEST_DATASOURCE_URL）が未設定のためスキップ")
 class ClassroomNotePermissionIT {
 
-    private static final String PASSWORD = "Parent1234";
     private static final String COOKIE_NAME = "STUDY21_USER_SESSION";
 
     @Autowired
     private MockMvc mockMvc;
     @Autowired
     private ObjectMapper objectMapper;
-    @Autowired
-    private JdbcTemplate jdbc;
-    @Autowired
-    private PasswordEncoder passwordEncoder;
-
-    /** 下流（admin-api）の替え玉。**呼ばれたかどうか**をここで見る。 */
-    @MockitoSpyBean
-    private ClassroomNoteAdminClient noteAdminClient;
-
     /** 検証用の Redis（セッションの置き場。この検証の中だけで生きる）。 */
     private static final int REDIS_PORT = findFreePort();
     private static final java.util.Optional<redis.embedded.RedisServer> REDIS = startRedis();
@@ -105,56 +109,87 @@ class ClassroomNotePermissionIT {
         }
     }
 
+    /** **テスト専用の MyBatis Mapper**（検証データの作成・後片付け。SQL ログにも残る）。 */
+    @Autowired
+    private TestSqlMapper sql;
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+
+    /** 接続先を**専用のテスト DB に固定**する（`STUDY21_DATASOURCE_*` へは落とさない）。 */
     @DynamicPropertySource
-    static void properties(DynamicPropertyRegistry registry) {
-        registry.add("study21.classroom.storage-root", () -> System.getProperty("java.io.tmpdir")
-                + "/study21-it-note-permission");
+    static void database(DynamicPropertyRegistry registry) {
+        TestDatabase.override(registry);
+        // セッションの置き場も検証用（**共有の Redis を汚さない**）
         registry.add("spring.data.redis.host", () -> "127.0.0.1");
         registry.add("spring.data.redis.port", () -> REDIS_PORT);
     }
 
-    /** 検証用のアカウント（所有者・別の利用者）。 */
-    private long ownerAccountId;
-    private long otherAccountId;
-    /** 所有者の記録と、その記録の最終まとめのノート。 */
-    private long ownerRecordId;
-    private long ownerFinalNoteId;
-    /** 所有者の**別の**記録（noteId の取り違えを作る）。 */
-    private long ownerOtherRecordId;
-    /** 別の利用者の記録とノート。 */
-    private long otherRecordId;
-    private long otherFinalNoteId;
-    /** 所有者の記録にある**途中の**ノート（PHASE）。 */
-    private long ownerPhaseNoteId;
+    /** 下流（admin-api）の替え玉。**呼ばれたかどうか**をここで見る。 */
+    @MockitoSpyBean
+    private ClassroomNoteAdminClient noteAdminClient;
+
+    /** **専用のテスト DB 以外では動かさない**（設定漏れのまま配備先の DB へ書かない）。 */
+    @BeforeAll
+    static void requireDedicatedTestDatabase(@Value("${spring.datasource.url:}") String datasourceUrl) {
+        // 環境変数が無ければクラスごとスキップ（`@EnabledIfEnvironmentVariable` と同じ判断）
+        TestDatabase.skipUnlessConfigured();
+        assertThat(datasourceUrl)
+                .as("検証は専用のテスト DB でのみ動かします（STUDY21_TEST_DATASOURCE_URL）")
+                .isNotBlank()
+                .doesNotContain("192.168.0.100");
+    }
+
+    /* ---------------- 検証データ（毎回作って毎回消す） ---------------- */
+
+    private ClassroomTestData data;
+    private ClassroomTestData.Student owner;
+    private ClassroomTestData.Student other;
+    private ClassroomTestData.Lesson ownerLesson;
+    private ClassroomTestData.Lesson ownerOtherLesson;
+    private ClassroomTestData.Note ownerFinalNote;
+    private ClassroomTestData.Note ownerPhaseNote;
+    private ClassroomTestData.Note ownerOtherLessonNote;
+    private ClassroomTestData.Lesson otherLesson;
+    private ClassroomTestData.Note otherFinalNote;
 
     @BeforeEach
     void setUp() {
-        long stamp = System.nanoTime();
-        long[] students = studentAccounts();
-        ownerAccountId = students[0];
-        otherAccountId = students[1];
-        ownerRecordId = createRecord(ownerAccountId, "IT-OWNER-" + stamp);
-        ownerFinalNoteId = createNote(ownerRecordId, "FINAL", "PENDING", ownerAccountId);
-        ownerPhaseNoteId = createNote(ownerRecordId, "PHASE", "PENDING", ownerAccountId);
-        ownerOtherRecordId = createRecord(ownerAccountId, "IT-OWNER-OTHER-" + stamp);
-        otherRecordId = createRecord(otherAccountId, "IT-OTHER-" + stamp);
-        otherFinalNoteId = createNote(otherRecordId, "FINAL", "PENDING", otherAccountId);
+        data = new ClassroomTestData(sql, passwordEncoder);
+        owner = data.createStudent("owner");
+        other = data.createStudent("other");
+        ownerLesson = data.createLesson(owner.accountId());
+        ownerFinalNote = data.createNote(ownerLesson.recordId(), "FINAL", "PENDING");
+        ownerPhaseNote = data.createNote(ownerLesson.recordId(), "PHASE", "PENDING");
+        ownerOtherLesson = data.createLesson(owner.accountId());
+        ownerOtherLessonNote = data.createNote(ownerOtherLesson.recordId(), "FINAL", "PENDING");
+        otherLesson = data.createLesson(other.accountId());
+        otherFinalNote = data.createNote(otherLesson.recordId(), "FINAL", "PENDING");
 
         // 下流の替え玉: **受理した**という応答を返す（実際の AI は走らせない）
         doReturn(objectMapper.createObjectNode()
-                        .put("noteId", ownerFinalNoteId)
+                        .put("noteId", ownerFinalNote.noteId())
                         .put("accepted", true)
                         .put("status", "GENERATING")
                         .put("message", "最終まとめの作成を始めました。"))
                 .when(noteAdminClient).accept(anyLong(), anyString());
+        // 回復は admin-api の**本物の欄**（`reason`）で返す（user-api が message へ写す）
         doReturn(objectMapper.createObjectNode()
-                        .put("noteId", ownerFinalNoteId)
+                        .put("noteId", ownerFinalNote.noteId())
                         .put("status", "FAILED")
                         .put("liveness", "LOST")
                         .put("recoverable", true)
                         .put("recovered", true)
-                        .put("message", "実行が失われていたため、やり直せる状態に戻しました。"))
+                        .put("reason", "実行が失われていたため、やり直せる状態に戻しました。"))
                 .when(noteAdminClient).recover(anyLong());
+    }
+
+    @AfterEach
+    void cleanUp() {
+        /*
+         * 後片付けは**明示の DELETE ではなくロールバック**に任せる（この検証は 1 つの
+         * トランザクションの中で組み立てているため）。控えた ID は失敗時の手掛かりとして残す。
+         */
+        assertThat(data.createdIds()).isNotEmpty();
     }
 
     /* ---------------- 未ログイン ---------------- */
@@ -162,11 +197,11 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("① 未ログインの起動・回復は 401（**下流を呼ばない**）")
     void anonymousIsRejected() throws Exception {
-        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(ownerFinalNoteId)))
+        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(ownerFinalNote.noteId())))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(401));
         mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, ownerFinalNoteId))
+                        ownerLesson.recordId(), ownerFinalNote.noteId()))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(401));
 
         verify(noteAdminClient, never()).accept(anyLong(), anyString());
@@ -178,13 +213,14 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("② 他人の授業の起動・回復は 404（存在を漏らさない・**下流を呼ばない**）")
     void anotherUsersRecordIsRejected() throws Exception {
-        String cookie = login(otherAccountId);
+        String session = login(other);
 
-        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(ownerFinalNoteId)).cookie(cookieOf(cookie)))
+        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(ownerFinalNote.noteId()))
+                        .cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
         mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, ownerFinalNoteId).cookie(cookieOf(cookie)))
+                        ownerLesson.recordId(), ownerFinalNote.noteId()).cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
 
         verify(noteAdminClient, never()).accept(anyLong(), anyString());
@@ -196,13 +232,14 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("③ 自分の授業でも、**他の利用者のノート**を指定したら 404（下流を呼ばない）")
     void noteOfAnotherUserIsRejected() throws Exception {
-        String cookie = login(ownerAccountId);
+        String session = login(owner);
 
-        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(otherFinalNoteId)).cookie(cookieOf(cookie)))
+        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(otherFinalNote.noteId()))
+                        .cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
         mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, otherFinalNoteId).cookie(cookieOf(cookie)))
+                        ownerLesson.recordId(), otherFinalNote.noteId()).cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
 
         verify(noteAdminClient, never()).accept(anyLong(), anyString());
@@ -212,14 +249,15 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("④ 自分の授業でも、**自分の別の授業のノート**なら 404（下流を呼ばない）")
     void noteOfOwnAnotherRecordIsRejected() throws Exception {
-        long otherNoteOfOwner = createNote(ownerOtherRecordId, "FINAL", "PENDING", ownerAccountId);
-        String cookie = login(ownerAccountId);
+        String session = login(owner);
 
-        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(otherNoteOfOwner)).cookie(cookieOf(cookie)))
+        mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(ownerOtherLessonNote.noteId()))
+                        .cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
         mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, otherNoteOfOwner).cookie(cookieOf(cookie)))
+                        ownerLesson.recordId(), ownerOtherLessonNote.noteId())
+                        .cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(404));
 
         verify(noteAdminClient, never()).accept(anyLong(), anyString());
@@ -231,10 +269,10 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("⑤ 回復の入口に途中のノート（PHASE）を渡したら 400（最終まとめ専用・下流を呼ばない）")
     void phaseNoteCannotBeRecovered() throws Exception {
-        String cookie = login(ownerAccountId);
+        String session = login(owner);
 
         mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, ownerPhaseNoteId).cookie(cookieOf(cookie)))
+                        ownerLesson.recordId(), ownerPhaseNote.noteId()).cookie(cookieOf(session)))
                 .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(400));
         verify(noteAdminClient, never()).recover(anyLong());
     }
@@ -244,10 +282,11 @@ class ClassroomNotePermissionIT {
     @Test
     @DisplayName("⑥ 所有者が自分の最終まとめを起動・回復できる（下流を 1 回だけ呼ぶ）")
     void ownerCanRunAndRecover() throws Exception {
-        String cookie = login(ownerAccountId);
+        String session = login(owner);
 
-        MvcResult run = mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(ownerFinalNoteId)).cookie(cookieOf(cookie)))
+        MvcResult run = mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(ownerFinalNote.noteId()))
+                        .cookie(cookieOf(session)))
                 .andReturn();
         assertThat(run.getResponse().getStatus()).isEqualTo(200);
         JsonNode runData = objectMapper.readTree(run.getResponse().getContentAsString()).path("data");
@@ -255,111 +294,117 @@ class ClassroomNotePermissionIT {
         assertThat(runData.path("status").asText()).isEqualTo("GENERATING");
 
         MvcResult recover = mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
-                        ownerRecordId, ownerFinalNoteId).cookie(cookieOf(cookie)))
+                        ownerLesson.recordId(), ownerFinalNote.noteId()).cookie(cookieOf(session)))
                 .andReturn();
         assertThat(recover.getResponse().getStatus()).isEqualTo(200);
         JsonNode recoverData = objectMapper.readTree(recover.getResponse().getContentAsString()).path("data");
         assertThat(recoverData.path("recovered").asBoolean()).isTrue();
         assertThat(recoverData.path("liveness").asText()).isEqualTo("LOST");
 
-        // 下流は**それぞれ 1 回ずつ**（所有者のノートIDで）
-        // **所有者のノートIDで**呼ばれた（引数は matcher で揃える）
         org.mockito.ArgumentCaptor<Long> accepted = org.mockito.ArgumentCaptor.forClass(Long.class);
         org.mockito.ArgumentCaptor<Long> recovered = org.mockito.ArgumentCaptor.forClass(Long.class);
-        verify(noteAdminClient, org.mockito.Mockito.times(1)).accept(accepted.capture(), anyString());
-        verify(noteAdminClient, org.mockito.Mockito.times(1)).recover(recovered.capture());
-        assertThat(accepted.getValue()).isEqualTo(ownerFinalNoteId);
-        assertThat(recovered.getValue()).isEqualTo(ownerFinalNoteId);
+        verify(noteAdminClient, times(1)).accept(accepted.capture(), anyString());
+        verify(noteAdminClient, times(1)).recover(recovered.capture());
+        assertThat(accepted.getValue()).isEqualTo(ownerFinalNote.noteId());
+        assertThat(recovered.getValue()).isEqualTo(ownerFinalNote.noteId());
     }
 
     @Test
-    @DisplayName("⑦ 下流が拒否・不調なら、成功として返さない")
+    @DisplayName("⑥ admin-api の reason が、user-api の message として画面へ届く（欄の写し間違いを防ぐ）")
+    void recoveryReasonIsMappedToMessage() throws Exception {
+        String session = login(owner);
+
+        MvcResult result = mockMvc.perform(post("/api/user/classroom/{id}/notes/{noteId}/recover",
+                        ownerLesson.recordId(), ownerFinalNote.noteId()).cookie(cookieOf(session)))
+                .andReturn();
+
+        JsonNode data = objectMapper.readTree(result.getResponse().getContentAsString()).path("data");
+        // 画面が読む欄は **message**（admin-api の reason が写っている）
+        assertThat(data.hasNonNull("message")).isTrue();
+        assertThat(data.get("message").asText()).contains("やり直せる状態に戻しました");
+        assertThat(data.has("reason")).as("user-api は reason を返さない（欄を統一）").isFalse();
+    }
+
+    @Test
+    @DisplayName("⑦ 下流が拒否・不調なら、成功として返さない（記録も動かさない）")
     void downstreamFailureIsNotReportedAsSuccess() throws Exception {
-        String cookie = login(ownerAccountId);
-        // 下流が認証で拒否された（合言葉の不一致・設定漏れなど）
+        String session = login(owner);
         org.mockito.Mockito.doThrow(
                         new ClassroomNoteAdminClient.ClassroomNoteCallException(
                                 "まとめの操作が許可されていません（権限）。", false))
                 .when(noteAdminClient).accept(anyLong(), anyString());
 
-        MvcResult result = mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerRecordId)
-                        .param("noteId", String.valueOf(ownerFinalNoteId)).cookie(cookieOf(cookie)))
+        MvcResult result = mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                        .param("noteId", String.valueOf(ownerFinalNote.noteId()))
+                        .cookie(cookieOf(session)))
                 .andReturn();
 
-        // **成功（200 + accepted）にしない**。呼び出せなかったことを伝える
         JsonNode body = objectMapper.readTree(result.getResponse().getContentAsString());
-        boolean success = body.path("success").asBoolean(false);
-        assertThat(success).as("下流が失敗したのに成功を返してはいけない").isFalse();
+        assertThat(body.path("success").asBoolean(false))
+                .as("下流が失敗したのに成功を返してはいけない").isFalse();
         assertThat(body.path("data").path("accepted").asBoolean(false)).isFalse();
+        // **記録も動かさない**（まとめは作ったままの PENDING）
+        assertThat(statusOf(ownerFinalNote.noteId())).isEqualTo("PENDING");
+    }
+
+    /* ---------------- データの隔離（対照レコード） ---------------- */
+
+    @Test
+    @DisplayName("⑧ 検証の準備・後片付けで、**関係ないアカウントを触らない**（対照レコード）")
+    void unrelatedAccountIsUntouched() throws Exception {
+        // この検証が管理しない「対照」のアカウント（このテストだけが消す）
+        ClassroomTestData control = new ClassroomTestData(sql, passwordEncoder);
+        ClassroomTestData.Student witness = control.createStudent("control");
+        String hashBefore = data.passwordHashOf(witness.accountId());
+        try {
+            String session = login(owner);
+            mockMvc.perform(post("/api/user/classroom/{id}/notes/run", ownerLesson.recordId())
+                            .param("noteId", String.valueOf(ownerFinalNote.noteId()))
+                            .cookie(cookieOf(session)))
+                    .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(200));
+
+            // 対照のアカウントは**残っていて、パスワードも変わっていない**
+            assertThat(data.accountExists(witness.accountId())).isTrue();
+            assertThat(data.passwordHashOf(witness.accountId())).isEqualTo(hashBefore);
+        } finally {
+            // 対照レコードも**ロールバック**で消える（明示の DELETE はしない）
+            assertThat(control.createdIds()).isNotEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("⑨ 2 回続けて回しても、一意キーが衝突しない（毎回新しいデータを作る）")
+    void repeatedRunsDoNotConflict() throws Exception {
+        for (int round = 0; round < 2; round += 1) {
+            ClassroomTestData roundData = new ClassroomTestData(sql, passwordEncoder);
+            try {
+                ClassroomTestData.Student student = roundData.createStudent("repeat");
+                ClassroomTestData.Lesson lesson = roundData.createLesson(student.accountId());
+                ClassroomTestData.Note note = roundData.createNote(lesson.recordId(), "FINAL", "PENDING");
+                String session = login(student);
+                mockMvc.perform(post("/api/user/classroom/{id}/notes/run", lesson.recordId())
+                                .param("noteId", String.valueOf(note.noteId()))
+                                .cookie(cookieOf(session)))
+                        .andExpect(result -> assertThat(result.getResponse().getStatus()).isEqualTo(200));
+            } finally {
+                assertThat(roundData.createdIds()).isNotEmpty();
+            }
+        }
     }
 
     /* ---------------- 資材 ---------------- */
 
-    /**
-     * 検証用の生徒を作る（**採番はこちらで決める**）。
-     *
-     * <p>DDL の制約（`保護者 1 人につき生徒 1 人`・自己参照 FK）を満たすため、専用の保護者を
-     * 1 人作ってから生徒を結び付ける。既存の 1・2 番のアカウントとは衝突しないよう、
-     * 使われていない ID を採番してから入れる（採番済みの行を作らない）。</p>
-     */
-    /**
-     * 検証用の生徒を 2 人返す（seed の生徒）。
-     *
-     * <p>アカウントの DDL は「生徒は保護者必須」「保護者 1 人につき生徒 1 人」なので、テストで
-     * 作ると壊れやすい。下見用の DB（`tmp/tools/study21-testdb.sh`）が入れる生徒を使い、
-     * パスワードだけ検証用に上書きする（**本番の DB には触らない**）。</p>
-     */
-    private long[] studentAccounts() {
-        Long first = jdbc.queryForObject("""
-                SELECT "アカウントID" FROM public."ACC_アカウント"
-                 WHERE "アカウント種別" = 'STUDENT' ORDER BY "アカウントID" LIMIT 1
-                """, Long.class);
-        Long second = jdbc.queryForObject("""
-                SELECT "アカウントID" FROM public."ACC_アカウント"
-                 WHERE "アカウント種別" = 'STUDENT' AND "アカウントID" <> ?
-                 ORDER BY "アカウントID" LIMIT 1
-                """, Long.class, first);
-        assertThat(first).as("検証用の生徒が要ります（tmp/tools/study21-testdb.sh で用意）").isNotNull();
-        assertThat(second).as("検証用の生徒が 2 人要ります（tmp/tools/study21-testdb.sh で用意）").isNotNull();
-        // ログイン用のパスワードを検証用に揃える（**一時的な下見用 DB の上でのみ**）
-        for (Long id : new Long[] { first, second }) {
-            jdbc.update("""
-                    UPDATE public."ACC_アカウント" SET "パスワードハッシュ" = ?
-                     WHERE "アカウントID" = ?
-                    """, passwordEncoder.encode(PASSWORD), id);
-        }
-        return new long[] { first, second };
+    /** そのまとめのいまの生成状態（検証データのヘルパー経由＝MyBatis の SQL ログに残る）。 */
+    private String statusOf(long noteId) {
+        return data.noteStatus(noteId);
     }
 
-    private long createRecord(long accountId, String recordNo) {
-        Long id = jdbc.queryForObject("""
-                INSERT INTO public."CR_授業記録情報"
-                    ("授業記録番号", "登録者アカウントID", "学生ID", "状態", "バージョン", "登録元コード")
-                VALUES (?, ?, ?, 'STOPPED', 1, 'APP')
-                RETURNING "授業記録ID"
-                """, Long.class, recordNo, accountId, accountId);
-        return id == null ? 0L : id;
-    }
-
-    private long createNote(long recordId, String kind, String status, long accountId) {
-        Long id = jdbc.queryForObject("""
-                INSERT INTO public."CR_授業ノート情報"
-                    ("授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番", "生成状態",
-                     "再試行回数", "バージョン", "登録者アカウントID", "登録元コード")
-                VALUES (?, ?, CASE WHEN ? = 'PHASE' THEN 1 ELSE NULL END, 1, 3, ?, 0, 1, ?, 'APP')
-                RETURNING "授業ノートID"
-                """, Long.class, recordId, kind, kind, status, accountId);
-        return id == null ? 0L : id;
-    }
-
-    /** ログインしてセッションのクッキーを返す（**実際のログイン経路**を使う）。 */
-    private String login(long accountId) throws Exception {
-        String loginId = jdbc.queryForObject(
-                "SELECT \"ログインID\" FROM public.\"ACC_アカウント\" WHERE \"アカウントID\" = ?",
-                String.class, accountId);
+    /** ログインしてセッションの ID を返す（**実際のログイン経路**を使う）。 */
+    private String login(ClassroomTestData.Student student) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/user/login")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"loginId\":\"%s\",\"password\":\"%s\"}".formatted(loginId, PASSWORD)))
+                        .content("{\"loginId\":\"%s\",\"password\":\"%s\"}"
+                                .formatted(student.loginId(), student.password())))
                 .andReturn();
         assertThat(result.getResponse().getStatus()).as("ログインできること").isEqualTo(200);
         String setCookie = result.getResponse().getHeader("Set-Cookie");
