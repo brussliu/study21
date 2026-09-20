@@ -105,6 +105,21 @@ public interface ClassroomRecordMapper {
                             @Param("durationSeconds") java.math.BigDecimal durationSeconds,
                             @Param("reason") String reason);
 
+    /**
+     * 書き起こし（認識）の収尾の結果を残す。
+     *
+     * <p>`COMPLETE` / `INCOMPLETE` / `RUNNING` / `NO_AUDIO` / `UNKNOWN`。`complete=false` は
+     * **やり直しても直らない不完整な終わり**があるということ（**音声の欠落とは別**）。
+     * 画面を開き直しても、識別が完全だったかを確かめられるようにする。</p>
+     *
+     * @param sources 音源ごとの結果（JSON の配列。無ければ null）
+     */
+    int updateTranscribeState(@Param("recordId") long recordId,
+                              @Param("status") String status,
+                              @Param("complete") Boolean complete,
+                              @Param("sources") String sources,
+                              @Param("reason") String reason);
+
     /** 最初の分塊で音声ファイルの保存先を確定する。 */
     int updateAudio(@Param("recordId") long recordId,
                     @Param("path") String path,

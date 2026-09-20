@@ -270,7 +270,14 @@ public final class ClassroomModels {
              * <p>終了のときに利用者が確認した内容を、詳細画面で**出し続ける**ために返す
              * （一度きりの通知にしない）。空なら欠落していない。</p>
              */
-            List<Integer> lossSeqs) {
+            List<Integer> lossSeqs,
+            /**
+             * **書き起こし（認識）の収尾の結果**（音声の欠落とは別の軸）。
+             *
+             * <p>`complete=false` は「識別が不完全」または「確認できない」。画面は
+             * 「録音と書き起こしを保存しました」と言い切らない。</p>
+             */
+            TranscribeView transcribe) {
     }
 
     // ------------------------------------------------------------------ 分塊
@@ -575,6 +582,42 @@ public final class ClassroomModels {
         }
     }
 
+    /**
+     * **書き起こし（認識）の収尾の状態**（詳細画面が読む形）。
+     *
+     * <p><b>音声の欠落（{@link ChunkChecklist}）とは別の軸</b>。音声は全部そろっていても、
+     * 認識の尾部を取り切れずに「やり直しても直らない不完整な終わり」になることがある。
+     * 逆に、音声が欠けていても書き起こしは全部残ることがある。混ぜると
+     * 「録音は保存できたのに『音声が欠けています』と言う」／「書き起こしが欠けたのに
+     * 『保存しました』と言う」という嘘になる。</p>
+     *
+     * @param status   `COMPLETE`（完全）/ `INCOMPLETE`（やり直しても直らない不完整な終わりがある）/
+     *                 `RUNNING`（まだ収尾の途中）/ `NO_AUDIO`（音声が送られていない）/
+     *                 `UNKNOWN`（**確認できない**。完全とは見なさない）
+     * @param complete 識別が完全にそろっているか（**確認できないときは false**）
+     * @param reason   画面に出す短い理由（日本語。無ければ null）
+     * @param sources  音源ごとの結果（`mic` / `shared` の並び）
+     */
+    public record TranscribeView(
+            String status,
+            boolean complete,
+            boolean retryable,
+            String reason,
+            List<TranscribeSourceView> sources) {
+    }
+
+    /** 音源 1 つの収尾の結果（詳細画面に出す最小の欄）。 */
+    public record TranscribeSourceView(
+            String source,
+            String label,
+            String status,
+            boolean completed,
+            boolean retryable,
+            int savedCount,
+            int pendingCount,
+            String reason) {
+    }
+
     /** 終了の要求（不完全なまま終える明示と、送った分塊の一覧）。 */
     public record EndRequest(boolean force, ChunkManifest manifest) {
     }
@@ -632,7 +675,14 @@ public final class ClassroomModels {
              */
             List<Integer> lossSeqs,
             /** 失った範囲の理由（種類）。{@link ClassroomModels#CHECK_MISSING} など。 */
-            String lossReasonCode) {
+            String lossReasonCode,
+            /**
+             * **書き起こし（認識）の収尾の結果**（音声の欠落とは**別の軸**）。
+             *
+             * <p>終了の応答でも返す（画面が「録音と書き起こしを保存しました」と言い切ってよいかを
+             * その場で判断できるように）。</p>
+             */
+            TranscribeView transcribe) {
     }
 
     // ------------------------------------------------------------------ 削除

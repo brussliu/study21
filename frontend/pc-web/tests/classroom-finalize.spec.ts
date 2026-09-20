@@ -134,7 +134,16 @@ function mockApi(options: MockOptions = {}): { calls: Call[] } {
       })
     }
     if (target.includes('/stt/stream')) {
-      return ok({ interim: '', added: [], error: null })
+      /*
+       * 実際の後端は収尾の欄も返す（`finalizeCompleted` / `retryable` / `finalizeStatus`）。
+       * ここを省くと画面は「確認できない」と見て**成功と判定しない**（それが正しい振る舞い）ので、
+       * 正常系を確かめるモックは後端と同じ形にする。
+       */
+      return ok({
+        interim: '', added: [], error: null,
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        recovery: null, savedCount: 1, pendingCount: 0, notice: null
+      })
     }
     if (target.includes('/start')) {
       return ok({ recordId: 12, recordNo: 'CR1', status: 'RECORDING', statusLabel: '録音中', version: 2 })

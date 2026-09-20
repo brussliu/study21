@@ -26,6 +26,11 @@ import {
 } from '@/api/classroom'
 import { ApiError } from '@study21/web-shared'
 import {
+  normalizeSttFinalize,
+  type SourceFinalizeResult,
+  type SttFinalizePayload
+} from '@/features/classroom/stt-finalize'
+import {
   PCM_CHUNK_MIME, PcmChunkBuffer, TIMELINE_SAMPLE_RATE, timelineSamplesOf, timelineSeconds
 } from '@/features/classroom/pcm'
 
@@ -263,6 +268,13 @@ export interface SourceStreamState {
    * 決められるようにするため（成功の印を「投げなかったこと」に頼らない）。</p>
    */
   finishFailure: string | null
+  /**
+   * 収尾の結果そのもの（**まだ収尾していなければ null**）。
+   *
+   * <p>`finishFailure` は「やり直せば直る失敗」しか表せない。やり直しても直らない
+   * **不完整な終わり**（`error=null` / `finalizeCompleted=false`）はここを見る。</p>
+   */
+  finalize: SourceFinalizeResult | null
 }
 
 const DEFAULT_INTERVAL_MS = 250
@@ -392,6 +404,14 @@ export class SourceStream {
    * 失敗したまま「終わった」と言うと、尾部の文が最終まとめに入らない。</p>
    */
   private finishError: string | null = null
+  /**
+   * **この音源の収尾の結果**（HTTP と常時接続で同じ形に揃えたもの）。
+   *
+   * <p>`error` だけでは足りない: 後端は「やり直しても直らない不完整な終わり」を
+   * `error=null` で返す（画面が永久に再試行しないため）。ここに**結果そのもの**を持ち、
+   * 画面は「終わってよいか」と「識別が完全か」を別々に読む。</p>
+   */
+  private finalizeResult: SourceFinalizeResult | null = null
   /**
    * 走っている収尾の約束（画面のやり直しで**二重に `/finish` を送らない**）。
    *
@@ -645,7 +665,7 @@ export class SourceStream {
       added?: ClassroomSegment[]
       processedFrames?: number
       error?: string | null
-    }
+    } & SttFinalizePayload
     try {
       payload = JSON.parse(event.data) as typeof payload
     } catch {
@@ -672,13 +692,13 @@ export class SourceStream {
     if (payload.type === 'finished') {
       this.finished = true
       /*
-       * **収尾の失敗も見る**。常時接続は「終わり」の通知に理由を載せて返す（後端が尾部を
-       * 取り切れなかった・保存できなかった）。ここで覚えておかないと、画面は
-       * 「終わった」と言ってしまい、尾句が最終まとめに入らない。
+       * **収尾の結果を残す**（`finished` は「応答が届いた」だけ。識別が完全かは別）。
+       *
+       * <p>常時接続も HTTP と同じ欄（`finalizeCompleted` / `retryable` / `finalizeStatus` /
+       * `notice`）を返すので、**同じ関数**で読み取る。`error` だけを見ると、やり直しても直らない
+       * 終端（`error=null`）を成功と誤読し、欠けた書き起こしを「保存しました」と言ってしまう。</p>
        */
-      if (payload.error !== undefined && payload.error !== null && payload.error !== '') {
-        this.finishError = payload.error
-      }
+      this.applyFinalizePayload(payload)
     }
   }
 
@@ -918,11 +938,44 @@ export class SourceStream {
   /**
    * 収尾の結果（**成功なら null**。失敗したら理由）。
    *
-   * <p>画面（録音中・終了）はこれを見て「終わった」と言ってよいかを決める。
-   * 理由があるあいだは**成功として扱わない**（詳細へ進まない・最終まとめを起動しない）。</p>
+   * <p>後方互換の口（**やり直せば直る失敗**だけを返す）。「識別が完全か」まで見る呼び出しは
+   * {@link finalizeOutcome} を使う。</p>
    */
   finishFailure(): string | null {
     return this.finishError
+  }
+
+  /**
+   * **この音源の収尾の結果**（まだ収尾していなければ null）。
+   *
+   * <p>「終わってよいか（{@code canFinish}）」と「識別が完全か（{@code complete}）」を
+   * 別々に持つ。やり直しても直らない不完整な終わりは**終わってよい**が、完全ではない。</p>
+   */
+  finalizeOutcome(): SourceFinalizeResult | null {
+    return this.finalizeResult
+  }
+
+  /**
+   * 後端の収尾の欄を読んで残す（HTTP と常時接続で**同じ関数**を通す）。
+   *
+   * <p>`error` があったら後方互換の `finishError` にも入れる（録音中の案内は今までどおり
+   * 理由を出す）。やり直しても直らない終端は `error` が null なので、`finishError` には
+   * 入れない（「やり直せる失敗」と混ざらないようにする）。</p>
+   */
+  private applyFinalizePayload(payload: SttFinalizePayload): void {
+    const result = normalizeSttFinalize(payload, this.options.source)
+    this.finalizeResult = result
+    if (result.kind === 'RETRYABLE_FAILURE') {
+      const reason = result.notice ?? '書き起こしの終了処理で問題がありました。'
+      this.recordFinishFailure(reason)
+      this.options.onNotice(`書き起こしの終了処理で問題がありました（${reason}）。`
+        + '音声は録音に残っています。')
+      return
+    }
+    if (result.kind === 'INCOMPLETE_UNRECOVERABLE' && result.notice !== null) {
+      // **失敗として返さない**（利用者に永久に再試行させない）。知らせとしてだけ出す
+      this.options.onNotice(result.notice)
+    }
   }
 
   /** 収尾の失敗を覚える（最初の理由を残す＝いちばん根本の原因を見せる）。 */
@@ -953,13 +1006,14 @@ export class SourceStream {
       const response = await finishClassroomSttStream(id, this.options.source)
       if (response.data.added.length > 0) this.options.onSegments(response.data.added)
       this.options.onInterim('')
-      // **収尾も「成功」と言ってよいかを見る**（200 でも `data.error` なら成功にしない）
-      const reason = response.data.error
-      if (typeof reason === 'string' && reason !== '') {
-        this.options.onNotice(`書き起こしの終了処理で問題がありました（${reason}）。`
-          + '音声は録音に残っています。')
-        this.recordFinishFailure(reason)
-      }
+      /*
+       * **収尾の結果を残す**（HTTP も常時接続と同じ欄を返す）。
+       *
+       * <p>`data.error` だけを見ると、やり直しても直らない終端（`error=null`）を成功と誤読する。
+       * ここで共通の読み取り（{@link applyFinalizePayload}）を通し、
+       * 「終わってよいか」と「識別が完全か」を分けて持つ。</p>
+       */
+      this.applyFinalizePayload(response.data)
     } catch (cause) {
       this.options.onNotice(`書き起こしの終了処理に失敗しました（${String(cause)}）。`)
       this.recordFinishFailure(cause instanceof Error ? cause.message : String(cause))
@@ -974,7 +1028,8 @@ export class SourceStream {
       retrying: this.retrying,
       missingRanges: [...this.missing],
       sentFrames: this.sentFrames,
-      finishFailure: this.finishFailure()
+      finishFailure: this.finishFailure(),
+      finalize: this.finalizeResult
     }
   }
 

@@ -7,7 +7,6 @@ import DemoWordEditView from '@/views/japanese/demo/DemoWordEditView.vue'
 import DemoWordStudyView from '@/views/japanese/demo/DemoWordStudyView.vue'
 import { useJapaneseDemoStore } from '@/features/japanese-demo/store/japaneseDemo'
 import { DRAFT_KEY, readStoredDraft, writeStoredDraft } from '@/features/japanese-demo/store/draftStorage'
-import { DEMO_PASTE_SAMPLE } from '@/features/japanese-demo/mock/demoWords'
 
 /**
  * 日本語勉強【単語情報管理】の画面。
@@ -160,14 +159,20 @@ describe('単語情報管理：画面', () => {
     await flushPromises()
     expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(true)
     expect(wrapper.find('[data-demo-step="1"]').exists()).toBe(true)
-    expect(wrapper.text()).toContain('対応している貼り付けの形式')
+    // 単語だけを入れる（読みと意味は入れない）
+    expect(wrapper.text()).toContain('単語だけを入力します')
     expect(wrapper.text()).not.toContain('デモ')
 
+    // 入力例を入れると、表と解釈結果の両方に出る
     await wrapper.get('[data-demo-sample]').trigger('click')
     await flushPromises()
-    expect(store.pasteText).toBe(DEMO_PASTE_SAMPLE)
+    expect(store.registerHeadings.length).toBeGreaterThan(5)
+    expect(wrapper.findAll('[data-demo-word-input]').length).toBe(store.registerHeadings.length)
     expect(wrapper.findAll('[data-demo-parsed-row]').length).toBeGreaterThan(5)
-    expect(wrapper.find('[data-demo-multi-reading]').exists()).toBe(true)
+    expect(wrapper.find('[data-demo-paste-notice]').exists()).toBe(true)
+
+    // 入力の中で重複した行は「飛ばす」と分かる
+    expect(store.parsedRows.some((row) => row.state === 'DUPLICATE')).toBe(true)
 
     await wrapper.get('[data-demo-next-1]').trigger('click')
     expect(wrapper.find('[data-demo-step="2"]').exists()).toBe(true)
@@ -180,6 +185,53 @@ describe('単語情報管理：画面', () => {
     await vi.waitFor(() => expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(false))
     expect(wrapper.get('[data-demo-notice-bar]').text()).toContain('登録しました')
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('書籍はプルダウンで選び、最後の「新しい書籍を追加…」で入力欄が出る', async () => {
+    const { wrapper, store } = await mountList()
+
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-demo-sample]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-demo-next-1]').trigger('click')
+    await flushPromises()
+
+    // 既存の書籍: 1 Unit の語数は本から自動で計算される（入力欄は出ない）
+    const options = wrapper.get('[data-demo-book-select]').findAll('option').map((option) => option.text())
+    expect(options.at(-1)).toBe('新しい書籍を追加…')
+    expect(options.length).toBe(store.bookNameOptions.length + 1)
+    expect(wrapper.find('[data-demo-unit-size]').exists()).toBe(false)
+    expect(wrapper.get('[data-demo-unit-size-auto]').text()).toContain('自動')
+
+    // 「新しい書籍を追加…」を選ぶと、名前と語数の入力欄が出る
+    await wrapper.get('[data-demo-book-select]').setValue('__NEW_BOOK__')
+    await flushPromises()
+    expect(wrapper.find('[data-demo-book-name]').exists()).toBe(true)
+    expect(wrapper.find('[data-demo-unit-size]').exists()).toBe(true)
+    expect(store.registerBookMode).toBe('NEW')
+  })
+
+  it('重複した単語の扱いをラジオで選べる（既定はこの書籍の中）', async () => {
+    const { wrapper, store } = await mountList()
+
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    // 重複の設定は手順 2（書籍・Unit）にある
+    await wrapper.get('[data-demo-sample]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-demo-next-1]').trigger('click')
+    await flushPromises()
+    // 既定は「この書籍の中で重複した単語を飛ばす」
+    expect(store.registerDuplicateMode).toBe('BOOK')
+    expect((wrapper.get('[data-demo-duplicate-book]').element as HTMLInputElement).checked).toBe(true)
+    expect((wrapper.get('[data-demo-duplicate-all]').element as HTMLInputElement).checked).toBe(false)
+
+    // 切り替えると、説明も「すべての書籍」に変わる
+    await wrapper.get('[data-demo-duplicate-all]').setValue(true)
+    await flushPromises()
+    expect(store.registerDuplicateMode).toBe('ALL')
+    expect(wrapper.get('[data-demo-duplicate-note]').text()).toContain('ほかの書籍')
   })
 
   it('登録に失敗したらダイアログを閉じず、理由を出して入力を残す', async () => {

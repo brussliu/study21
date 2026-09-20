@@ -669,7 +669,9 @@ public class ClassroomServiceImpl implements ClassroomService {
                 // 結合の状態（「音声は保存されている」と「再生できる」を分けて出す）
                 assemblyViewOf(record),
                 // 不完全なまま終えた回に失った連番（詳細画面が出し続ける）
-                missingSeqsOf(record));
+                missingSeqsOf(record),
+                // 書き起こし（認識）の収尾の結果（**音声の欠落とは別の軸**）
+                transcribeViewOf(record));
     }
 
     @Override
@@ -844,7 +846,8 @@ public class ClassroomServiceImpl implements ClassroomService {
                 statusLabel(ClassroomModels.STATUS_STOPPED), finalNoteId,
                 finalNoteId == null ? null : ClassroomModels.noteRunPath(finalNoteId), notice,
                 latest.complete(), latest.missingSeqs(), !lossSeqs.isEmpty(),
-                latest.expectedLastSeq(), lossSeqs, lossSeqs.isEmpty() ? null : latest.reasonCode());
+                latest.expectedLastSeq(), lossSeqs, lossSeqs.isEmpty() ? null : latest.reasonCode(),
+                transcribeViewOf(recordMapper.findById(recordId)));
     }
 
     /**
@@ -1196,6 +1199,99 @@ public class ClassroomServiceImpl implements ClassroomService {
         }
         return ClassroomModels.AssemblyView.of(status.stateCode(), status.complete(), stored,
                 status.durationSeconds(), status.missingSeqs(), status.reason());
+    }
+
+    /**
+     * 書き起こし（認識）の収尾の状態を画面の形にする。
+     *
+     * <p><b>音声の欠落とは別の軸</b>。見る順:</p>
+     * <ol>
+     *   <li>いまのストリーミングの状態（このプロセスが覚えている**最新**）。収尾が済んでいれば
+     *       それを使う。</li>
+     *   <li>済んでいなければ**記録に残した結果**（`認識収尾状態`。別のプロセスで終えた回・
+     *       再起動した回）。</li>
+     *   <li>どちらも無ければ `UNKNOWN`（**完全とは見なさない**。確認できないだけ）。</li>
+     * </ol>
+     */
+    private ClassroomModels.TranscribeView transcribeViewOf(ClassroomRecordEntity record) {
+        if (record == null) {
+            return new ClassroomModels.TranscribeView("UNKNOWN", false, false,
+                    "書き起こしの状態を確認できませんでした。", List.of());
+        }
+        ClassroomSttStreamService.FinalizeStatus live = streamService == null
+                ? null : streamService.finalizeStatus(record.getRecordId());
+        if (live != null && live.completed()) {
+            return transcribeViewOf(live);
+        }
+        String stored = record.getTranscribeStatus();
+        if (stored == null) {
+            if (live != null && live.audioReceived() && live.retryable()) {
+                // 収尾がまだ途中（やり直せる）。ここは「進行中」として出す
+                return new ClassroomModels.TranscribeView("RUNNING", false, true,
+                        live.notice(), List.of());
+            }
+            // 記録が無い（改修前の記録・音声を送っていない回）: **確認できない**として出す
+            boolean audio = live != null && live.audioReceived();
+            return new ClassroomModels.TranscribeView(audio ? "UNKNOWN" : "NO_AUDIO", !audio,
+                    audio, audio ? "書き起こしの収尾の結果が残っていません（確認できません）。" : null,
+                    List.of());
+        }
+        boolean complete = Boolean.TRUE.equals(record.getTranscribeComplete());
+        // 「記録に残した状態」が完全と言っているときだけ完全として出す（確認できないときは false）
+        return new ClassroomModels.TranscribeView(stored, complete,
+                "RUNNING".equals(stored), record.getTranscribeReason(),
+                transcribeSourcesOf(record.getTranscribeSources()));
+    }
+
+    /** いまのストリーミングの状態から画面の形にする（音源ごとの結果つき）。 */
+    private static ClassroomModels.TranscribeView transcribeViewOf(
+            ClassroomSttStreamService.FinalizeStatus status) {
+        List<ClassroomModels.TranscribeSourceView> sources = status.sources().stream()
+                .map(item -> new ClassroomModels.TranscribeSourceView(item.source(), item.label(),
+                        item.status(), item.completed(), item.retryable(), item.savedCount(),
+                        item.pendingCount(), item.reason()))
+                .toList();
+        boolean incomplete = status.sources().stream().anyMatch(item -> !item.completed() && !item.retryable());
+        boolean complete = status.completed()
+                && status.sources().stream().allMatch(ClassroomSttStreamService.SourceFinalizeStatus::completed);
+        String overall = incomplete ? "INCOMPLETE"
+                : complete ? "COMPLETE"
+                : status.retryable() ? "RUNNING"
+                : !status.audioReceived() ? "NO_AUDIO"
+                : "UNKNOWN";
+        return new ClassroomModels.TranscribeView(overall, complete, status.retryable(),
+                status.notice(), sources);
+    }
+
+    /**
+     * 記録に残した音源ごとの結果を読み直す（JSON を素朴に読む）。
+     *
+     * <p>読めないときは空を返す（画面は「音源ごとの内訳は残っていない」として出す）。
+     * **完全とは見なさない**判断は `認識完備` の値で行うので、ここが空でも嘘にはならない。</p>
+     */
+    private static List<ClassroomModels.TranscribeSourceView> transcribeSourcesOf(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        List<ClassroomModels.TranscribeSourceView> out = new ArrayList<>();
+        try {
+            com.fasterxml.jackson.databind.JsonNode root =
+                    new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+            for (com.fasterxml.jackson.databind.JsonNode node : root) {
+                out.add(new ClassroomModels.TranscribeSourceView(
+                        node.path("source").asText(""),
+                        node.path("label").asText(""),
+                        node.path("status").asText(""),
+                        node.path("completed").asBoolean(false),
+                        node.path("retryable").asBoolean(false),
+                        node.path("savedCount").asInt(0),
+                        node.path("pendingCount").asInt(0),
+                        node.hasNonNull("reason") ? node.get("reason").asText(null) : null));
+            }
+        } catch (Exception cause) {
+            return List.of();
+        }
+        return out;
     }
 
     /**

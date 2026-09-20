@@ -39,11 +39,14 @@ import {
   filterWords,
   hasAnyDetail,
   paginate,
-  parsePaste,
+  detectUnitSize,
+  normalizeHeading,
+  parseWords,
   summarizeParsed,
   type AllocationSummary,
   type AllocatedWord,
   type DemoFilters,
+  type DuplicateMode,
   type ParsedRow,
   type UnitPlacement
 } from '../logic'
@@ -575,13 +578,16 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
   const registerStep = ref(1)
   const pasteText = ref('')
   const parsedRows = ref<ParsedRow[]>([])
-  /** 解釈のあと、人が直した行（見出し語・読み・意味）。 */
-  const editedRows = reactive<Record<number, { heading: string; reading: string; chineseMeaning: string }>>({})
+  /** 取り込む単語（1 行 1 語。読みと意味はここでは入れない）。 */
+  const registerHeadings = ref<string[]>([])
   const registerBookMode = ref<'EXISTING' | 'NEW'>('EXISTING')
   /** 既定は先頭の書籍（未選択のまま行き止まりにしない）。 */
   const registerBookName = ref(DEMO_BOOKS[0]?.name ?? '')
-  const registerUnitSize = ref(20)
+  /** 新しい書籍のときだけ使う（既存の書籍は自動で決まる）。 */
+  const registerUnitSizeInput = ref<number | null>(null)
   const registerPlacement = ref<UnitPlacement>('CONTINUE')
+  /** 重複した単語の扱い（既定は「選んだ書籍の中の重複を飛ばす」）。 */
+  const registerDuplicateMode = ref<DuplicateMode>('BOOK')
   const registerSaveState = ref<'IDLE' | 'SAVING' | 'SAVED' | 'FAILED'>('IDLE')
   const registerError = ref('')
 
@@ -591,20 +597,34 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
       : null
   )
 
-  /** 取り込む語（人が直した内容を反映する）。 */
+  /**
+   * 1 Unit あたりの語数。
+   *
+   * 既存の書籍は**その本から自動で決める**（教材ごとに違うため）。
+   * 新しい書籍は決められないので、入力してもらう。
+   */
+  const detectedUnitSize = computed(() => detectUnitSize(registerBook.value))
+  const registerUnitSize = computed(() =>
+    registerBookMode.value === 'NEW'
+      ? Math.max(1, Math.floor(registerUnitSizeInput.value ?? 20))
+      : detectedUnitSize.value
+  )
+
+  /**
+   * 取り込む単語（表記だけ）。
+   *
+   * **飛ばすと決めた行は入れない**（重複した語は Unit の位置を使わない）。
+   * 解釈結果（`parsedRows`）があるときはそれに従い、無ければ表の内容をそのまま使う。
+   */
   const registerWords = computed(() => {
-    return parsedRows.value
-      .filter((row) => row.state !== 'BLANK_WORD' && row.state !== 'FORMAT_ERROR' && row.state !== 'DUPLICATE')
-      .map((row) => {
-        const edited = editedRows[row.line]
-        return {
-          heading: edited?.heading ?? row.heading,
-          reading: edited?.reading ?? row.reading,
-          chineseMeaning: edited?.chineseMeaning ?? row.chineseMeaning,
-          state: row.state,
-          line: row.line
-        }
-      })
+    if (parsedRows.value.length > 0) {
+      return parsedRows.value
+        .filter((row) => row.state === 'OK')
+        .map((row) => ({ heading: row.heading, reading: '', chineseMeaning: '', line: row.line }))
+    }
+    return registerHeadings.value
+      .map((heading, index) => ({ heading: heading.trim(), reading: '', chineseMeaning: '', line: index + 1 }))
+      .filter((word) => word.heading !== '')
   })
 
   const registerSummary = computed(() => summarizeParsed(parsedRows.value))
@@ -627,7 +647,9 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
 
   /** 確認画面のまとめ（新規・再利用・重複・エラー）。 */
   const registerCounts = computed(() => {
-    const existing = new Set(words.value.map((word) => `${word.heading}\u0000${word.reading}`))
+    const existing = new Set(
+      words.value.map((word) => `${normalizeHeading(word.heading)}\u0000${word.reading}`)
+    )
     let reuse = 0
     let fresh = 0
     for (const word of registerWords.value) {
@@ -640,19 +662,47 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     return {
       fresh,
       reuse,
-      skipped: registerSummary.value.duplicates,
+      /* 入力の中で重複した行＋（すべての書籍で重複を飛ばす設定のとき）既存と重複した行 */
+      skipped: registerSummary.value.duplicates + registerSummary.value.existingReuse,
+      duplicatesInInput: registerSummary.value.duplicates,
+      duplicatesInOtherBooks: registerSummary.value.existingReuse,
       errors: registerSummary.value.errors,
       blank: registerSummary.value.blank
     }
   })
 
-  /** 貼り付けを解釈する（「取り込む」を押したとき）。 */
-  function parseRegisterText(): void {
-    const existing = words.value.map((word) => ({ heading: word.heading, reading: word.reading }))
-    parsedRows.value = parsePaste(pasteText.value, existing)
-    for (const key of Object.keys(editedRows)) {
-      delete editedRows[Number(key)]
+  /** いま選んでいる書籍に入っている語（重複の判定に使う）。 */
+  function headingsInSelectedBook(): string[] {
+    const book = registerBook.value
+    if (book === null) {
+      return []
     }
+    return words.value
+      .filter((word) => word.collections.some((collection) => collection.book === book.name))
+      .map((word) => word.heading)
+  }
+
+  /** すべての書籍に入っている語（重複の判定に使う）。 */
+  function headingsInAllBooks(): string[] {
+    return words.value.map((word) => word.heading)
+  }
+
+  /**
+   * 取り込む単語を解釈して、確認できる形にする（「取り込む」を押したとき）。
+   *
+   * 重複の判定は画面のラジオで選んだ方を使う:
+   *  ・BOOK … 選んだ書籍の中の重複だけを飛ばす
+   *  ・ALL  … すべての書籍の語と重複するものを飛ばす
+   */
+  function parseRegisterText(): void {
+    const existing = registerDuplicateMode.value === 'ALL'
+      ? headingsInAllBooks()
+      : headingsInSelectedBook()
+    parsedRows.value = parseWords(pasteText.value, existing, registerDuplicateMode.value)
+    // グリッドの単語も、解釈した結果に合わせる（人が直した内容は残す）
+    registerHeadings.value = parsedRows.value
+      .filter((row) => row.state !== 'BLANK_WORD')
+      .map((row) => row.heading)
     registerError.value = ''
   }
 
@@ -662,18 +712,47 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     parseRegisterText()
   }
 
-  /** 人が直した内容を控える。 */
-  function editRow(line: number, patch: Partial<{ heading: string; reading: string; chineseMeaning: string }>): void {
-    const row = parsedRows.value.find((entry) => entry.line === line)
-    if (row === undefined) {
+  /** グリッドの操作（Excel 風。行の追加・削除・貼り付け）。 */
+
+  /** 1 行の単語を書き換える。 */
+  function setRegisterHeading(index: number, value: string): void {
+    const next = [...registerHeadings.value]
+    if (index < 0 || index >= next.length) {
       return
     }
-    const current = editedRows[line] ?? {
-      heading: row.heading,
-      reading: row.reading,
-      chineseMeaning: row.chineseMeaning
+    next[index] = value
+    registerHeadings.value = next
+  }
+
+  /** 末尾に空の行を足す。 */
+  function addRegisterRow(): void {
+    registerHeadings.value = [...registerHeadings.value, '']
+  }
+
+  /** 行を消す。 */
+  function removeRegisterRow(index: number): void {
+    registerHeadings.value = registerHeadings.value.filter((_, rowIndex) => rowIndex !== index)
+  }
+
+  /**
+   * Excel からの貼り付け（タブ区切りでも改行区切りでも受ける）。
+   * 1 列目だけを単語として取り込む（余計な列は無視する）。
+   */
+  function pasteRegisterText(text: string): number {
+    const rows = text
+      .split(/\r?\n/)
+      .map((line) => line.split('\t')[0]?.trim() ?? '')
+      .filter((heading) => heading !== '')
+    if (rows.length === 0) {
+      return 0
     }
-    editedRows[line] = { ...current, ...patch }
+    // 空の行だけのときは置き換える（1 行だけの表をそのまま使えるように）
+    const onlyEmpty = registerHeadings.value.length === 0
+      || registerHeadings.value.every((heading) => heading.trim() === '')
+    registerHeadings.value = onlyEmpty ? rows : [...registerHeadings.value, ...rows]
+    pasteText.value = registerHeadings.value.join('\n')
+    parseRegisterText()
+    return rows.length
   }
 
   function gotoRegisterStep(step: number): void {
@@ -685,13 +764,12 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerStep.value = 1
     pasteText.value = ''
     parsedRows.value = []
-    for (const key of Object.keys(editedRows)) {
-      delete editedRows[Number(key)]
-    }
+    registerHeadings.value = []
     registerBookMode.value = 'EXISTING'
     registerBookName.value = books.value[0]?.name ?? ''
-    registerUnitSize.value = 20
+    registerUnitSizeInput.value = null
     registerPlacement.value = 'CONTINUE'
+    registerDuplicateMode.value = 'BOOK'
     registerSaveState.value = 'IDLE'
     registerError.value = ''
   }
@@ -929,10 +1007,13 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerStep,
     pasteText,
     parsedRows,
-    editedRows,
+    registerHeadings,
     registerBookMode,
     registerBookName,
     registerUnitSize,
+    registerUnitSizeInput,
+    detectedUnitSize,
+    registerDuplicateMode,
     registerPlacement,
     registerSaveState,
     registerError,
@@ -941,8 +1022,11 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerCounts,
     allocation,
     parseRegisterText,
+    setRegisterHeading,
+    addRegisterRow,
+    removeRegisterRow,
+    pasteRegisterText,
     fillSample,
-    editRow,
     gotoRegisterStep,
     resetRegister,
     overrideAllocation,

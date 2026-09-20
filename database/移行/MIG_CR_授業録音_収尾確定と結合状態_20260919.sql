@@ -11,6 +11,11 @@
 --      状態・理由・欠けた連番と、**どの分塊から作ったか**（内容の要約 = ダイジェスト）を
 --      DB に残し、再起動後も「できている／やり直せる」を判断できるようにする。
 --
+--   3. **書き起こし（認識）の収尾の結果**を残していなかった。収尾は「成功」と「失敗」の 2 つでは
+--      なく、**やり直しても直らない不完整な終わり**（`error` は null・`finalizeCompleted=false`）
+--      があるため、その場の応答だけでは「識別が完全だったか」を後から確かめられない
+--      （画面を開き直すと分からなくなる）。記録に**識別の完備**と**音源ごとの結果**を残す。
+--
 -- 対象DB: study21 (PostgreSQL)
 -- 実行順序: 何度流しても同じ（ADD COLUMN IF NOT EXISTS / COMMENT は同じ値で上書き）
 -- ============================================================================
@@ -37,6 +42,26 @@ ALTER TABLE public."CR_授業記録情報"
     ADD COLUMN IF NOT EXISTS "結合開始日時" TIMESTAMP NULL,
     ADD COLUMN IF NOT EXISTS "結合終了日時" TIMESTAMP NULL;
 
+ALTER TABLE public."CR_授業記録情報"
+    -- 書き起こし（認識）の収尾の結果（COMPLETE / INCOMPLETE / RUNNING / NO_AUDIO / UNKNOWN）
+    ADD COLUMN IF NOT EXISTS "認識収尾状態" VARCHAR(20) NULL,
+    -- 認識が**完全にそろった**か（false = やり直しても直らない不完整な終わりがある）
+    ADD COLUMN IF NOT EXISTS "認識完備" BOOLEAN NULL,
+    -- 音源ごとの収尾の結果（JSON の配列。音源・段階・やり直せるか・済んだか・件数・理由）
+    ADD COLUMN IF NOT EXISTS "認識音源状態" TEXT NULL,
+    -- 人が読む理由（日本語。失敗ではない知らせもここに入る）
+    ADD COLUMN IF NOT EXISTS "認識収尾理由" VARCHAR(500) NULL,
+    ADD COLUMN IF NOT EXISTS "認識収尾更新日時" TIMESTAMP NULL;
+
+-- ---- 最終まとめ（ノート）の生成開始の記録 ----
+-- だれがいつ「生成を始めた」と言ったか（起動の受理）。プロセスが落ちて GENERATING のまま
+-- 残った行を、再起動後に**やり直せる**と判断するのに使う（永久に「作成中」で止めない）。
+ALTER TABLE public."CR_授業ノート情報"
+    ADD COLUMN IF NOT EXISTS "生成開始日時" TIMESTAMP NULL;
+
+COMMENT ON COLUMN public."CR_授業ノート情報"."生成開始日時" IS
+    '生成の起動を受理した時刻。一定時間より古い GENERATING は「落ちた」とみなしてやり直す';
+
 -- 状態の値は決まった 6 つだけ（綴り間違いを DB で止める）
 ALTER TABLE public."CR_授業記録情報"
     DROP CONSTRAINT IF EXISTS "CK_CR_授業記録_結合状態";
@@ -52,6 +77,10 @@ COMMENT ON COLUMN public."CR_授業記録情報"."録音完備" IS
     '収尾のときに音声（分塊）が全部そろっていると確認できたか。false は欠けたまま終えた＝その区間の音は残っていない';
 COMMENT ON COLUMN public."CR_授業記録情報"."録音欠落連番" IS
     '不完全なまま終えた回に失った連番（カンマ区切り）。詳細画面が「どこが失われたか」を出し続けるために残す';
+COMMENT ON COLUMN public."CR_授業記録情報"."認識完備" IS
+    '書き起こし（認識）の収尾が完全に済んだか。false は「やり直しても直らない不完整な終わり」がある（音声の欠落とは別）';
+COMMENT ON COLUMN public."CR_授業記録情報"."認識音源状態" IS
+    '音源（mic / shared）ごとの収尾の結果を JSON の配列で持つ。音源ごとに「済んだか・やり直せるか」が違うため';
 COMMENT ON COLUMN public."CR_授業記録情報"."結合状態" IS
     'NOT_STARTED=まだ / QUEUED=受け付けた / PROCESSING=作成中 / READY=できた / FAILED=失敗（やり直せる）/ INCOMPLETE=欠落があり作らない';
 COMMENT ON COLUMN public."CR_授業記録情報"."結合元ダイジェスト" IS

@@ -199,28 +199,25 @@ describe('単語情報管理デモ：ストア', () => {
     vi.useRealTimers()
   })
 
-  it('新規登録は入力順に Unit を割り当て、既存語には収録だけ足す', async () => {
+  it('新規登録は単語だけを取り込み、入力順に Unit を割り当てる', async () => {
     vi.useFakeTimers()
     const store = useStore()
-    const existing = store.words[0]!
 
-    // 既存語 1 語＋新しい語 2 語。既存語は「収録を追加」になる
-    store.pasteText = [
-      `${existing.heading}\t${existing.reading}\t${existing.chineseMeaning}`,
-      'デモ新語一\tでもしんごいち\t演示新词一',
-      'デモ新語二\tでもしんごに\t演示新词二'
-    ].join('\n')
+    store.pasteText = ['デモ新語一', 'デモ新語二', 'デモ新語三'].join('\n')
     store.parseRegisterText()
 
-    expect(store.registerSummary.existingReuse).toBe(1)
-    expect(store.registerCounts.reuse).toBe(1)
-    expect(store.registerCounts.fresh).toBe(2)
+    // 読みと中国語の意味は入れない（あとで AI から取得する）
+    expect(store.registerWords.map((word) => word.heading)).toEqual(['デモ新語一', 'デモ新語二', 'デモ新語三'])
+    expect(store.registerWords.every((word) => word.reading === '' && word.chineseMeaning === '')).toBe(true)
+    expect(store.registerCounts.fresh).toBe(3)
 
+    // 新しい書籍は 1 Unit の語数を手で決める
     store.registerBookMode = 'NEW'
-    store.registerBookName = 'デモ日本語 初中級'
-    store.registerUnitSize = 2
+    store.registerBookName = '追加用の書籍'
+    store.registerUnitSizeInput = 2
     store.gotoRegisterStep(3)
 
+    expect(store.registerUnitSize).toBe(2)
     expect(store.allocation.startUnit).toBe('Unit001')
     expect(store.allocation.summaries.map((summary) => [summary.unit, summary.count])).toEqual([
       ['Unit001', 2],
@@ -228,35 +225,94 @@ describe('単語情報管理デモ：ストア', () => {
     ])
 
     const wordsBefore = store.words.length
-    const collectionsBefore = existing.collections.length
     const saving = store.saveRegistration()
     await vi.advanceTimersByTimeAsync(1000)
     expect(await saving).toBe(true)
-
-    // 既存語は増えず、収録だけ増える
-    expect(store.words.length).toBe(wordsBefore + 2)
-    expect(store.findWord(existing.id)?.collections.length).toBe(collectionsBefore + 1)
+    expect(store.words.length).toBe(wordsBefore + 3)
+    // 読みは空のまま登録される（AI 取得待ち）
+    const saved = store.words.find((word) => word.heading === 'デモ新語一')!
+    expect(saved.reading).toBe('')
+    expect(saved.collections[0]?.unit).toBe('Unit001')
+    expect(saved.collections[0]?.book).toBe('追加用の書籍')
     expect(fetchSpy).not.toHaveBeenCalled()
     vi.useRealTimers()
   })
 
-  it('同じ見出し語でも読みが違えば別の単語、同じ見出し語＋読みなら収録の追加', () => {
+  it('既存の書籍は 1 Unit の語数を自動で計算する', () => {
     const store = useStore()
-    const existing = store.words.find((word) => word.heading === '図書館')!
+    const basic = store.books.find((book) => book.name === 'みんなの日本語 初級')!
 
-    // 見出し語は同じで読みが違う → 別の単語として取り込む
-    store.pasteText = '図書館\tとしょかん２\t图书馆（別読み）'
-    store.parseRegisterText()
-    expect(store.parsedRows[0]?.state).toBe('OK')
-    expect(store.registerCounts.reuse).toBe(0)
-    expect(store.registerCounts.fresh).toBe(1)
+    store.registerBookMode = 'EXISTING'
+    store.registerBookName = basic.name
+    expect(store.detectedUnitSize).toBe(20)
+    expect(store.registerUnitSize).toBe(20)
 
-    // 同じ見出し語＋同じ読み → 語は増やさず「収録を追加」にする
-    store.pasteText = `図書館\t${existing.reading}\t图书馆`
+    // 12 語ずつの本を作れば、その本の Unit の大きさとして 12 を返す
+    store.books.push({
+      id: 'book-12', name: '12 語の本', unitSize: 12,
+      units: [{ name: 'Unit001', count: 12, capacity: 12 }, { name: 'Unit002', count: 12, capacity: 12 }],
+      note: ''
+    })
+    store.registerBookName = '12 語の本'
+    expect(store.registerUnitSize).toBe(12)
+  })
+
+  it('重複の飛ばし方を選べる（この書籍の中／すべての書籍）', () => {
+    const store = useStore()
+    const inBasic = store.words.find((word) =>
+      word.collections.some((collection) => collection.book === 'みんなの日本語 初級'))!
+    const inOther = store.words.find((word) =>
+      !word.collections.some((collection) => collection.book === 'みんなの日本語 初級'))!
+
+    store.registerBookMode = 'EXISTING'
+    store.registerBookName = 'みんなの日本語 初級'
+    store.pasteText = [inBasic.heading, inOther.heading, 'まったく新しい語'].join('\n')
+
+    // ① この書籍の中の重複だけ飛ばす（既定）
+    store.registerDuplicateMode = 'BOOK'
     store.parseRegisterText()
-    expect(store.parsedRows[0]?.state).toBe('DUPLICATE_EXISTING')
-    expect(store.registerCounts.reuse).toBe(1)
-    expect(store.registerCounts.fresh).toBe(0)
+    expect(store.parsedRows.map((row) => row.state)).toEqual(['OK', 'OK', 'OK'])
+    expect(store.registerCounts.skipped).toBe(0)
+
+    // ② すべての書籍と重複するものを飛ばす
+    store.registerDuplicateMode = 'ALL'
+    store.parseRegisterText()
+    expect(store.parsedRows.map((row) => row.state)).toEqual(['DUPLICATE_EXISTING', 'DUPLICATE_EXISTING', 'OK'])
+    expect(store.registerCounts.skipped).toBe(2)
+    expect(store.registerWords.map((word) => word.heading)).toEqual(['まったく新しい語'])
+  })
+
+  it('入力の中で重複した単語は飛ばし、Unit の位置も使わない', () => {
+    const store = useStore()
+    store.pasteText = ['新しい語A', '新しい語B', '新しい語A'].join('\n')
+    store.parseRegisterText()
+
+    expect(store.parsedRows.map((row) => row.state)).toEqual(['OK', 'OK', 'DUPLICATE'])
+    expect(store.registerWords.length).toBe(2)
+    // 飛ばした行は Unit を消費しない
+    store.registerBookMode = 'NEW'
+    store.registerBookName = '重複の確認'
+    store.registerUnitSizeInput = 2
+    expect(store.allocation.summaries.map((summary) => summary.count)).toEqual([2])
+  })
+
+  it('Excel 風の表で行を足す・消す・貼り付けられる', () => {
+    const store = useStore()
+    store.pasteRegisterText('りんご\nみかん')
+
+    expect(store.registerHeadings).toEqual(['りんご', 'みかん'])
+    store.setRegisterHeading(1, 'バナナ')
+    expect(store.registerHeadings).toEqual(['りんご', 'バナナ'])
+    store.addRegisterRow()
+    expect(store.registerHeadings.length).toBe(3)
+    store.removeRegisterRow(0)
+    expect(store.registerHeadings).toEqual(['バナナ', ''])
+
+    // 貼り付けは 1 列目だけを使う（Excel で余計な列が混ざっていても無視する）
+    store.pasteRegisterText('ぶどう\t葡萄\nもも\t桃子')
+    expect(store.registerHeadings).toContain('ぶどう')
+    expect(store.registerHeadings).toContain('もも')
+    expect(store.registerHeadings.join(' ')).not.toContain('葡萄')
   })
 
   it('デモをリセットすると、初期の仮データに戻る', async () => {
@@ -268,16 +324,17 @@ describe('単語情報管理デモ：ストア', () => {
       .map((word) => word.id)
       .sort()
 
-    store.pasteText = 'デモ語\tでもご\t演示词'
+    store.pasteText = 'リセット確認用の語'
     store.parseRegisterText()
     store.registerBookMode = 'NEW'
     store.registerBookName = 'リセット用'
+    store.registerUnitSizeInput = 20
     store.gotoRegisterStep(3)
     const saving = store.saveRegistration()
     await vi.advanceTimersByTimeAsync(1000)
     expect(await saving).toBe(true)
     expect(store.words.length).toBeGreaterThan(initialIds.length)
-    expect(store.words.some((word) => word.heading === 'デモ語')).toBe(true)
+    expect(store.words.some((word) => word.heading === 'リセット確認用の語')).toBe(true)
 
     store.setFilter('keyword', 'デモ')
     store.rememberScroll(500)
@@ -286,7 +343,7 @@ describe('単語情報管理デモ：ストア', () => {
     store.resetAll()
 
     // 初期サンプルに戻る（追加した語は消え、仮データの語がそろう）
-    expect(store.words.some((word) => word.heading === 'デモ語')).toBe(false)
+    expect(store.words.some((word) => word.heading === 'リセット確認用の語')).toBe(false)
     expect(store.words.map((word) => word.id).sort()).toEqual(initialIds)
 
     // 「生成中」は演示の途中経過なので、リセット後は 1 語も残さない

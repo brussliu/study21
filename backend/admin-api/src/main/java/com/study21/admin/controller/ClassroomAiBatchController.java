@@ -31,14 +31,20 @@ public class ClassroomAiBatchController {
         this.pipelineService = pipelineService;
     }
 
-    /** ノート生成（PHASE→batC61 / FINAL→batC62）。**同期**で最後まで進める。 */
+    /**
+     * ノート生成の**起動を受理する**（PHASE→batC61 / FINAL→batC62。AI の完了は待たない）。
+     *
+     * <p>受理だけして背景で走らせ、応答には**受理したか・いまの状態**を入れる。
+     * 同じ要求を何度送っても、**2 つ目のタスクは作らない**（状態機械の条件つき更新で直列化する）。
+     * 画面は結果を `GET /api/user/classroom/{id}` のポーリングで読む。</p>
+     */
     @PostMapping("/notes/{noteId}/run")
-    public ApiResponse<Map<String, Object>> run(
+    public ApiResponse<ClassroomAiPipelineService.Acceptance> run(
             @PathVariable long noteId,
             @RequestBody(required = false) Map<String, Object> request) {
         String operator = request == null || request.get("operator") == null
                 ? null : String.valueOf(request.get("operator"));
-        Map<String, Object> result = pipelineService.run(noteId, operator);
-        return ApiResponse.ok(result, "授業ノートの生成を実行しました。");
+        ClassroomAiPipelineService.Acceptance acceptance = pipelineService.accept(noteId, operator);
+        return ApiResponse.ok(acceptance, acceptance.message());
     }
 }

@@ -309,6 +309,8 @@ export interface ClassroomRecordDetail {
    * <p>詳細画面が「どこが失われたか」を出し続けるために使う（空なら欠落していない）。</p>
    */
   lossSeqs?: number[]
+  /** 書き起こし（認識）の収尾の結果（音声の欠落とは別の軸）。 */
+  transcribe?: ClassroomTranscribeView | null
 }
 
 /** 一覧の 1 行。 */
@@ -499,6 +501,39 @@ export interface ClassroomEndResult {
   lossSeqs?: number[]
   /** 失った範囲の理由の種類。 */
   lossReasonCode?: string | null
+  /**
+   * **書き起こし（認識）の収尾の結果**（音声の欠落とは**別の軸**）。
+   *
+   * <p>`complete=false` は「識別が不完全」または「確認できない」。画面は
+   * 「録音と書き起こしを保存しました」と言い切らない。</p>
+   */
+  transcribe?: ClassroomTranscribeView | null
+}
+
+/** 書き起こし（認識）の収尾の状態（詳細・終了の応答が返す）。 */
+export interface ClassroomTranscribeView {
+  /** `COMPLETE` / `INCOMPLETE` / `RUNNING` / `NO_AUDIO` / `UNKNOWN`。 */
+  status: string
+  /** 識別が完全にそろっているか（**確認できないときは false**）。 */
+  complete: boolean
+  /** まだやり直せるか（`RUNNING` のとき true）。 */
+  retryable: boolean
+  /** 画面に出す短い理由（日本語。無ければ null）。 */
+  reason: string | null
+  /** 音源ごとの結果。 */
+  sources: ClassroomTranscribeSourceView[]
+}
+
+/** 音源 1 つの収尾の結果。 */
+export interface ClassroomTranscribeSourceView {
+  source: string
+  label: string
+  status: string
+  completed: boolean
+  retryable: boolean
+  savedCount: number
+  pendingCount: number
+  reason: string | null
 }
 
 export interface ClassroomDeleteResult {
@@ -555,8 +590,33 @@ export interface ClassroomSttStreamPush {
   interim: string
   /** この回で確定して保存されたセグメント。 */
   added: ClassroomSegment[]
-  /** 失敗した理由（日本語。null なら正常）。 */
+  /**
+   * やり直せば直る失敗の理由（日本語。null なら「やり直せる失敗ではない」）。
+   *
+   * <p>**`error` が null でも成功とは限らない**: やり直しても直らない終端は `error` ではなく
+   * `notice` に載る（`finalizeCompleted=false` / `retryable=false`）。成功と誤読しないためには
+   * {@link ClassroomSttStreamPush.finalizeCompleted} と
+   * {@link ClassroomSttStreamPush.retryable} を必ず見る。</p>
+   */
   error: string | null
+  /** この音源の収尾の段階（`AUDIO_ACCEPTING` / `FINALIZING` / `SAVED` / `NO_AUDIO` / `NO_UTTERANCE` / `FAILED`）。 */
+  finalizeStatus?: string
+  /** 収尾が**完了したか**（必要な結果を全部保存できたか）。 */
+  finalizeCompleted?: boolean
+  /**
+   * **まだやり直せるか**（`false` は終端）。
+   *
+   * <p>旧い後端はこの欄を返さない。そのときは「確認できない」として扱い、**成功とは見なさない**。</p>
+   */
+  retryable?: boolean
+  /** 失敗したときの復帰の仕方（`AWAIT_RESULTS` / `RESAVE_PENDING` / `RETRANSCRIBE`。null なら無し）。 */
+  recovery?: string | null
+  /** この音源で保存できた文の数。 */
+  savedCount?: number
+  /** 保存待ちで残している文の数。 */
+  pendingCount?: number
+  /** **失敗ではない知らせ**（音声なし・発話なしの終端、やり直しても直らない終端など）。 */
+  notice?: string | null
 }
 
 /** 前置詞（シナリオプリセット）の一覧（GLOBAL + 自分のスコープ）。 */
@@ -827,8 +887,29 @@ export function classroomAudioUrl(recordId: number, version = 0): string {
  * **AI には数十秒かかる**ので、タイムアウトを延ばして呼ぶ。画面はこの結果を待たずに
  * `GET /classroom/{id}` のポーリングを続ける（タイムアウトしてもポーリングが真の状態を返す）。
  */
+export interface ClassroomNoteAcceptance {
+  /** 対象のノート（最終まとめ）の ID。 */
+  noteId: number
+  /** この要求で**背景の実行を始めた**か（false は既に走っている・既に作成済み）。 */
+  accepted: boolean
+  /** 受理のあとの状態（`GENERATING` / `READY` / `FAILED`）。 */
+  status: string
+  /** 画面に出す短い説明（日本語）。 */
+  message: string
+}
+
+/**
+ * AI 授業ノートの生成の**起動を受理してもらう**（admin-api の薄い入口）。
+ *
+ * <p>このエンドポイントは「AI を実行し終えた」ではなく「**タスクを受け付けた**」を返す
+ * （AI は数十秒〜数分かかるので、画面は完了を待たない。結果は `GET /classroom/{id}` の
+ * ポーリングで読む）。同じ要求を何度送っても**2 つ目のタスクは作らない**。</p>
+ *
+ * <p>受理の応答が返らないこともある（タイムアウト・通信断）。そのときは**状態を問い合わせて**
+ * 確かめる（受理されたのに応答を失った回に、もう一度タスクを作らない）。</p>
+ */
 export function runClassroomNote(
-  runPath: string, operator = 'classroom-ai-view', timeoutMs = 600_000
-): Promise<ApiResponse<unknown>> {
-  return adminHttp.post<unknown>(runPath, { body: { operator }, timeoutMs })
+  runPath: string, operator = 'classroom-ai-view', timeoutMs = 30_000
+): Promise<ApiResponse<ClassroomNoteAcceptance>> {
+  return adminHttp.post<ClassroomNoteAcceptance>(runPath, { body: { operator }, timeoutMs })
 }

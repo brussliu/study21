@@ -300,6 +300,8 @@ public class ClassroomSttSocketHandler extends AbstractWebSocketHandler {
         body.put("recovery", push.recovery());
         body.put("savedCount", push.savedCount());
         body.put("pendingCount", push.pendingCount());
+        // **やり直せるか**（error だけでは「不完整な終端」と「成功」を区別できない）
+        body.put("retryable", push.retryable());
         body.put("notice", push.notice());
     }
 

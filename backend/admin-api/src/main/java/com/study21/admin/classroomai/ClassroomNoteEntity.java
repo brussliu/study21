@@ -28,6 +28,8 @@ public class ClassroomNoteEntity {
     private Integer version;
     private Long createdBy;
     private Timestamp createdAt;
+    /** 生成の起動を受理した時刻（落ちたままの `GENERATING` を見分ける）。 */
+    private Timestamp generationStartedAt;
     private Timestamp updatedAt;
 
     public Long getNoteId() { return noteId; }
@@ -60,6 +62,10 @@ public class ClassroomNoteEntity {
     public void setCreatedBy(Long createdBy) { this.createdBy = createdBy; }
     public Timestamp getCreatedAt() { return createdAt; }
     public void setCreatedAt(Timestamp createdAt) { this.createdAt = createdAt; }
+    public Timestamp getGenerationStartedAt() { return generationStartedAt; }
+    public void setGenerationStartedAt(Timestamp generationStartedAt) {
+        this.generationStartedAt = generationStartedAt;
+    }
     public Timestamp getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Timestamp updatedAt) { this.updatedAt = updatedAt; }
 }

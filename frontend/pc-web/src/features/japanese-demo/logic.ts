@@ -40,6 +40,19 @@ export type ParsedRowState =
   /** すでに母表にある語と重複している */
   | 'DUPLICATE_EXISTING'
 
+/**
+ * 重複した単語をどう扱うか。
+ *
+ *  ・`'BOOK'` … **選んだ書籍の中**で重複したら飛ばす（既定。同じ本に同じ語を二重に入れない）
+ *  ・`'ALL'`  … **すべての書籍**の語と重複したら飛ばす（同じ語を別の本にも入れない）
+ */
+export type DuplicateMode = 'BOOK' | 'ALL'
+
+/** 重複を見分けるための形（前後の空白を落とし、全角と半角の揺れをならす）。 */
+export function normalizeHeading(value: string): string {
+  return value.normalize('NFKC').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
 /** 貼り付けを 1 行ずつ解釈した結果。 */
 export interface ParsedRow {
   /** 入力の行番号（1 から） */
@@ -102,79 +115,59 @@ export function splitReadings(value: string): string[] {
 }
 
 /**
- * 貼り付けテキストを解釈する。
+ * 単語（見出し語）だけを取り込む。
  *
- * `existing` には母表の（見出し語, 読み）を渡す。同じ見出し語でも読みが違えば別の語なので、
- * 重複の判定は **見出し語＋読み** の組み合わせで行う。
+ * Excel から**1 列**（1 行に 1 語）をそのまま貼り付けられる形にする。
+ * 読みと中国語の意味はここでは入れない（あとで AI から取得する）。
+ * 貼り付けに余計な列が混ざっていても **1 列目だけ**を使う。
+ *
+ * 重複の扱いは 2 通り（画面のラジオで選ぶ）:
+ *  ・`'BOOK'` … 選んだ書籍の中の重複だけを飛ばす
+ *  ・`'ALL'`  … すべての書籍の語と重複するものを飛ばす
  */
-export function parsePaste(
+export function parseWords(
   text: string,
-  existing: { heading: string; reading: string }[] = []
+  existing: string[] = [],
+  duplicateMode: DuplicateMode = 'BOOK'
 ): ParsedRow[] {
   const rows = text
-    .split('\n')
+    .split(/\r?\n/)
     .map((raw, index) => ({ raw, line: index + 1 }))
     // 空行は黙って飛ばす（行番号は入力のまま残す）
     .filter((entry) => entry.raw.trim() !== '')
 
   const seen = new Map<string, number>()
-  const existingKeys = new Set(existing.map((word) => `${word.heading}\u0000${word.reading}`))
+  const existingKeys = new Set(existing.map((heading) => normalizeHeading(heading)))
 
   return rows.map((entry) => {
-    const parts = splitLine(entry.raw).map((part) => part.trim())
-    const heading = parts[0] ?? ''
-    const readingValue = parts[1] ?? ''
-    const chineseMeaning = parts.slice(2).join(' ').trim()
-    const readings = splitReadings(readingValue)
+    // 1 列目だけを使う（Excel の余計な列が混ざっていても無視する）
+    const cells = entry.raw.split('\t')
+    const heading = (cells[0] ?? '').trim()
     const base = {
       line: entry.line,
       raw: entry.raw,
       heading,
-      reading: readings[0] ?? '',
-      chineseMeaning,
-      readingCandidates: readings
+      reading: '',
+      chineseMeaning: '',
+      readingCandidates: [] as string[]
     }
 
     if (heading === '') {
-      return { ...base, state: 'BLANK_WORD' as const, note: '見出し語がありません。' }
-    }
-    // 区切りを決められない行は、勝手に解釈せずに人が直せる形で返す
-    if (isMixedDelimiter(entry.raw)) {
-      return {
-        ...base,
-        state: 'FORMAT_ERROR' as const,
-        note: 'タブとカンマが混ざっています。どちらかの区切りに統一してください。'
-      }
-    }
-    if (parts.length === 1 && /\s/.test(heading)) {
-      return {
-        ...base,
-        state: 'FORMAT_ERROR' as const,
-        note: '区切りが分かりません。見出し語・読み・意味をタブかカンマで区切ってください。'
-      }
-    }
-    if (readings.length > 1) {
-      return {
-        ...base,
-        state: 'MULTI_READING' as const,
-        note: `読みが ${readings.length} つあります。どちらで登録するか選んでください（同じ表記でも読みが違えば別の単語です）。`
-      }
-    }
-    if (readingValue === '') {
-      return { ...base, state: 'BLANK_READING' as const, note: '読みが空です。入力するか、空のまま登録してください。' }
+      return { ...base, state: 'BLANK_WORD' as const, note: '単語が入っていません。' }
     }
 
-    const key = `${heading}\u0000${readings[0]}`
+    const key = normalizeHeading(heading)
     const firstLine = seen.get(key)
     if (firstLine !== undefined) {
       return { ...base, state: 'DUPLICATE' as const, note: `${firstLine} 行目と同じ単語です。` }
     }
     seen.set(key, entry.line)
-    if (existingKeys.has(key)) {
+
+    if (duplicateMode === 'ALL' && existingKeys.has(key)) {
       return {
         ...base,
         state: 'DUPLICATE_EXISTING' as const,
-        note: 'すでに母表にある単語です。登録すると「収録を追加」になります。'
+        note: 'ほかの書籍に同じ単語があります。'
       }
     }
     return { ...base, state: 'OK' as const, note: '' }
@@ -246,6 +239,36 @@ export interface AllocationSummary {
   toSeq: number
   /** 容量を超えてよいか（既存の未満 Unit を補うときは容量まで） */
   capacity: number
+}
+
+/**
+ * 既存の書籍から **1 Unit あたりの語数**を自動で決める。
+ *
+ * 教材ごとに 1 Unit の語数は違うので、決め打ちにしない。**いちばん多く入っている Unit**
+ * の語数をその本の Unit の大きさとみなす（いちばん新しい Unit は入力の途中で少ないため、
+ * 「最後の Unit」を基準にはしない）。
+ *
+ * 例: 20 / 20 / 20 / 18 の本 → 20。12 / 12 / 12 の本 → 12。
+ * 語が 1 つも入っていない本は、決められないので既定値（20）を返す。
+ */
+export function detectUnitSize(book: DemoBook | null, fallback = 20): number {
+  if (book === null || book.units.length === 0) return fallback
+  const counts = book.units.map((unit) => unit.count).filter((count) => count > 0)
+  if (counts.length === 0) return fallback
+  const tally = new Map<number, number>()
+  for (const count of counts) {
+    tally.set(count, (tally.get(count) ?? 0) + 1)
+  }
+  let best = counts[0]!
+  let bestHits = 0
+  // 同数のときは大きい方を採る（入力途中の少ない Unit に引っ張られない）
+  for (const [count, hits] of [...tally.entries()].sort((left, right) => left[0] - right[0])) {
+    if (hits > bestHits || (hits === bestHits && count > best)) {
+      best = count
+      bestHits = hits
+    }
+  }
+  return Math.max(1, best)
 }
 
 /** Unit 名を作る（`Unit001` の形）。 */

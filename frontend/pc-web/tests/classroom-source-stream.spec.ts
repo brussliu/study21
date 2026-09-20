@@ -1129,3 +1129,158 @@ describe('授業録音：一時停止と欠落のあとの時間軸', () => {
     }
   })
 })
+
+/**
+ * 収尾の結果は「成功・失敗」の 2 つではない（利用者の指摘 ①）。
+ *
+ * <p>後端は**やり直しても直らない不完整な終わり**を `error=null` / `finalizeCompleted=false` /
+ * `retryable=false` / `notice=理由` で返す（画面が永久に再試行しないため）。`error` だけを
+ * 見ると**成功と誤読**し、欠けた書き起こしを「保存しました」と言ってしまう。HTTP と常時接続で
+ * **同じ読み取り**になることをここで固定する。</p>
+ */
+describe('授業録音：収尾の結果の読み取り（不完整な終わりを見分ける）', () => {
+  /** 後端が返す収尾の欄を差し替えられる fetch の代役。 */
+  function mockFinish(data: Record<string, unknown>): { finishCalls: () => number } {
+    let finishCalls = 0
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      const body = String(url).includes('/finish')
+        ? data
+        : { interim: '', added: [], error: null }
+      if (String(url).includes('/finish')) finishCalls += 1
+      return new Response(JSON.stringify({
+        success: true, code: 'OK', message: 'OK', timestamp: '', data: body
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    return { finishCalls: () => finishCalls }
+  }
+
+  it('C: HTTP で error=null / finalizeCompleted=false / retryable=false なら「不完整な終わり」（成功ではない）', async () => {
+    vi.useFakeTimers()
+    try {
+      mockFinish({
+        interim: '', added: [], error: null,
+        finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: false,
+        recovery: null, savedCount: 3, pendingCount: 0,
+        notice: '認識の尾部を取り切れませんでした（やり直しても直りません）。'
+      })
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      const finishing = stream.finish()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await finishing
+
+      const result = stream.finalizeOutcome()
+      expect(result?.kind).toBe('INCOMPLETE_UNRECOVERABLE')
+      expect(result?.complete).toBe(false)
+      // **終わってよい**（利用者を永久に待たせない）
+      expect(result?.canFinish).toBe(true)
+      expect(result?.retryable).toBe(false)
+      expect(result?.notice).toContain('やり直しても直りません')
+      // **やり直せる失敗としては扱わない**（画面は再試行を出し続けない）
+      expect(stream.finishFailure()).toBeNull()
+      expect(stream.state().finalize?.kind).toBe('INCOMPLETE_UNRECOVERABLE')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('D: 常時接続の finished でも同じ読み取りになる（HTTP と同じ結果）', async () => {
+    vi.useFakeTimers()
+    try {
+      // 常時接続は使う。HTTP の送信は成功させておく
+      mockStream()
+      const { stream } = newStream({
+        useSocket: true,
+        socketFactory: (url: string) => new FakeSocket(url) as unknown as WebSocket
+      })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      const socket = FakeSocket.instances.at(-1)!
+      socket.open()
+      // 送り切ってから締める（送り残しの失敗と混ざらないようにする）
+      await vi.advanceTimersByTimeAsync(500)
+
+      const finishing = stream.finish()
+      await vi.advanceTimersByTimeAsync(100)
+      // 後端が「やり直しても直らない終端」を返す（error は null）
+      socket.deliver({
+        type: 'finished', added: [], error: null,
+        finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: false,
+        recovery: null, savedCount: 2, pendingCount: 0,
+        notice: '発話の尾部を取り切れませんでした（やり直しても直りません）。'
+      })
+      await vi.advanceTimersByTimeAsync(300)
+      await finishing
+
+      const result = stream.finalizeOutcome()
+      expect(result?.kind).toBe('INCOMPLETE_UNRECOVERABLE')
+      expect(result?.complete).toBe(false)
+      expect(result?.canFinish).toBe(true)
+      /*
+       * 常時接続の回は「送り切れなかった」を理由として別に持つ（音声の送信の話）。
+       * **収尾の結果は成功とは読まない**（この 2 つは別の軸）。
+       */
+      expect(result?.kind).not.toBe('COMPLETE')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('E: 常時接続で「やり直せる失敗」は今までどおり理由として取り出せる', async () => {
+    vi.useFakeTimers()
+    try {
+      mockStream()
+      const { stream } = newStream({
+        useSocket: true,
+        socketFactory: (url: string) => new FakeSocket(url) as unknown as WebSocket
+      })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      const socket = FakeSocket.instances.at(-1)!
+      socket.open()
+      // 送り切ってから締める（送り残しの失敗と混ざらないようにする）
+      await vi.advanceTimersByTimeAsync(500)
+
+      const finishing = stream.finish()
+      await vi.advanceTimersByTimeAsync(100)
+      socket.deliver({
+        type: 'finished', added: [], error: '保存できなかった文があります。',
+        finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: true,
+        recovery: 'RESAVE_PENDING', savedCount: 1, pendingCount: 2, notice: null
+      })
+      await vi.advanceTimersByTimeAsync(300)
+      await finishing
+
+      expect(stream.finalizeOutcome()?.kind).toBe('RETRYABLE_FAILURE')
+      expect(stream.finalizeOutcome()?.canFinish).toBe(false)
+      expect(stream.finishFailure()).toBe('保存できなかった文があります。')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('F: 収尾の欄が無い（旧い後端）ときは成功と見なさない', async () => {
+    vi.useFakeTimers()
+    try {
+      // 昔の応答（error だけ）。ここを成功と読むと、欠けた書き起こしを「保存しました」と言う
+      mockFinish({ interim: '', added: [], error: null })
+      const { stream } = newStream({ useSocket: false })
+      stream.append(samples(1), 48_000)
+      stream.start()
+      await vi.advanceTimersByTimeAsync(300)
+
+      const finishing = stream.finish()
+      await vi.advanceTimersByTimeAsync(1_000)
+      await finishing
+
+      expect(stream.finalizeOutcome()?.kind).toBe('UNKNOWN')
+      expect(stream.finalizeOutcome()?.complete).toBe(false)
+      expect(stream.finalizeOutcome()?.canFinish).toBe(false)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})

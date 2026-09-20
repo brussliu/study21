@@ -7,6 +7,7 @@ import {
   classroomAudioUrl,
   deleteClassroomRecord,
   fetchClassroomRecord,
+  runClassroomNote,
   retryClassroomAssembly,
   orderClassroomSegments,
   segmentSpeakerOf,
@@ -253,6 +254,84 @@ const canRetryAssembly = computed(() => {
   return state.state === 'FAILED' || state.state === 'NOT_STARTED' || state.state === 'INCOMPLETE'
 })
 
+/**
+ * **書き起こし（認識）の収尾の結果**（音声の欠落とは**別の軸**）。
+ *
+ * <p>`complete=false` は「識別が不完全」または「確認できない」。画面は
+ * 「録音と書き起こしを保存しました」と言い切らない（利用者の指摘 ①-5）。</p>
+ */
+const transcribe = computed(() => detail.value?.transcribe ?? null)
+
+/** 書き起こしが不完全なまま終わった回の案内（日本語。空なら欠落していない）。 */
+const transcribeNotice = computed(() => {
+  const status = transcribe.value
+  if (status === null || status.complete) return ''
+  if (status.status === 'NO_AUDIO') return ''
+  return 'この授業は書き起こしの一部を完了できませんでした（録音した音声は保存されています）。'
+    + (status.reason === null ? '' : ` ${status.reason}`)
+})
+
+/** 音源ごとの内訳（詳細情報の中でだけ出す）。 */
+const transcribeSourceNote = computed(() => {
+  const status = transcribe.value
+  if (status === null || status.sources.length === 0) return ''
+  return status.sources
+    .map((source) => {
+      const state = source.completed ? '済み'
+        : source.retryable ? 'やり直せます' : 'やり直しても直りません'
+      return `【${source.label}】${source.label === '' ? source.source : ''}${state}`
+        + (source.reason === null ? '' : `：${source.reason}`)
+    })
+    .join(' ')
+})
+
+/**
+ * **最終まとめの状態**（詳細画面が「生成中／失敗」を正しく出すための材料）。
+ *
+ * <p>`PENDING` / `GENERATING` を「生成中」、`FAILED` を「作れなかった（再試行できる）」、
+ * `READY` を「できました」として扱う。ノートの行そのものが**タスクの記録**なので、
+ * 画面のリロードでも状態は変わらない。</p>
+ */
+const finalNote = computed(() => detail.value?.notes.find((note) => note.kind === 'FINAL') ?? null)
+
+/** 最終まとめを作り直せるか（**失敗したときだけ**。走っている・できているときは出さない）。 */
+const canRetryFinalNote = computed(() => finalNote.value?.status === 'FAILED')
+
+/** 最終まとめの起動を頼んでいる最中か（連打で二重に走らせない）。 */
+const retryingFinalNote = ref(false)
+
+/** 最終まとめの起動の結果（日本語。空なら出さない）。 */
+const finalNoteNotice = ref('')
+
+/**
+ * **最終まとめの生成をもう一度頼む**（受理だけを待つ。AI の完了は待たない）。
+ *
+ * <p>同じ要求を何度送っても、admin-api 側の条件つき更新が**2 つ目のタスクを作らない**。
+ * 受理できたら状態を取り直し、`GENERATING` として「作成しています」を出す。</p>
+ */
+async function retryFinalNote(): Promise<void> {
+  const id = detail.value?.recordId ?? recordId.value
+  const noteId = finalNote.value?.noteId ?? null
+  if (id === null || noteId === null || retryingFinalNote.value) return
+  retryingFinalNote.value = true
+  finalNoteNotice.value = ''
+  try {
+    const response = await runClassroomNote(`/api/admin/batch/classroom/notes/${noteId}/run`,
+      'classroom-detail-view')
+    finalNoteNotice.value = response.data.message
+      ?? '最終まとめの作成を始めました。'
+    await refresh()
+    // 走っているあいだは状態を取り続ける（「生成中」のまま放置しない）
+    startPolling()
+  } catch (caught) {
+    // **失敗を隠さない**（録音の保存は成功していることも一緒に伝える）
+    finalNoteNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした（'
+      + messageOf(caught, '通信に失敗しました') + '）。'
+  } finally {
+    retryingFinalNote.value = false
+  }
+}
+
 /** 作り直しの実行中か（連打で二重に走らせない）。 */
 const retryingAssembly = ref(false)
 
@@ -412,6 +491,50 @@ onBeforeUnmount(() => {
               まだ書き起こしがありません。
             </p>
           </div>
+        </section>
+
+        <!--
+          **書き起こしが不完全なまま終わった回**の案内（利用者の指摘 ①-5）。
+          音声の欠落（無音の区間）とは**別**の欄にして、混ぜない。
+        -->
+        <p v-if="transcribeNotice !== ''" class="alert alert--warning" data-cr-transcribe-notice>
+          <AppIcon name="alert" size="sm" />
+          <span>{{ transcribeNotice }}</span>
+        </p>
+        <!-- 音源ごとの内訳（短い案内の中身。詳しく知りたい人だけ開く） -->
+        <details v-if="transcribeSourceNote !== ''" class="cr-details" data-cr-transcribe-sources>
+          <summary>書き起こしの内訳（音源ごと）</summary>
+          <p class="cr-details__missing">{{ transcribeSourceNote }}</p>
+        </details>
+
+        <!--
+          **最終まとめの状態**（生成中・失敗・できました）。
+          失敗したときだけ【最終まとめを再試行】を出す（走っている・できているときは出さない）。
+        -->
+        <section v-if="finalNote !== null" class="card" data-cr-final-note>
+          <div class="cr-list-head">
+            <h3 class="cr-column__title"><AppIcon name="wand" size="sm" /> 最終まとめ</h3>
+            <span class="badge" :class="statusBadgeClass(finalNote.status)">
+              {{ finalNote.statusLabel }}
+            </span>
+          </div>
+          <p class="cr-hint" data-cr-final-note-state>
+            <template v-if="finalNote.status === 'READY'">最終まとめができました。</template>
+            <template v-else-if="finalNote.status === 'FAILED'">
+              録音は保存しました。最終まとめの生成に失敗しました（
+              {{ finalNote.errorMessage ?? finalNote.errorCode ?? '理由は記録されています' }}）。
+            </template>
+            <template v-else>最終まとめを作成しています（この画面を開いたままでも閉じても進みます）。</template>
+          </p>
+          <span v-if="finalNoteNotice !== ''" class="cr-hint" data-cr-final-note-notice>
+            {{ finalNoteNotice }}
+          </span>
+          <button
+            v-if="canRetryFinalNote" type="button" class="btn btn--secondary btn--sm"
+            :disabled="retryingFinalNote" data-cr-final-note-retry @click="retryFinalNote"
+          >
+            {{ retryingFinalNote ? '頼んでいます...' : '最終まとめを再試行' }}
+          </button>
         </section>
 
         <!-- 宿題 -->

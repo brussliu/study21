@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS public."CR_授業ノート情報" (
     "エラーコード"      VARCHAR(100) NULL,
     "エラーメッセージ"  TEXT         NULL,
     "再試行回数"        INTEGER      NOT NULL DEFAULT 0,
+    -- 生成の**起動を受理した**時刻（前回の開始から一定時間たった GENERATING は「落ちた」とみなす）
+    "生成開始日時"      TIMESTAMP    NULL,
 
     -- ---- 2.1 の共通規約 ----
     "バージョン"         INTEGER      NOT NULL DEFAULT 1,

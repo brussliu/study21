@@ -58,6 +58,30 @@ CREATE TABLE IF NOT EXISTS public."CR_授業記録情報" (
     -- 保存期間から算出（batR02 の掃除対象。設定 CLASSROOM_AI_RETENTION_DAYS）
     "保持期限"           DATE         NULL,
 
+    -- ---- 書き起こし（認識）の収尾の結果（2026-09-19 改修 第 4 段。MIG_CR_授業録音_収尾確定と結合状態 と同じ） ----
+    -- COMPLETE / INCOMPLETE / RUNNING / NO_AUDIO / UNKNOWN
+    "認識収尾状態"       VARCHAR(20)  NULL,
+    -- 認識が**完全にそろった**か（false = やり直しても直らない不完整な終わりがある）
+    "認識完備"           BOOLEAN      NULL,
+    -- 音源ごとの結果（JSON の配列）
+    "認識音源状態"       TEXT         NULL,
+    "認識収尾理由"       VARCHAR(500) NULL,
+    "認識収尾更新日時"   TIMESTAMP    NULL,
+
+    -- ---- 再生用の 1 本（分塊の結合）の状態（同 改修） ----
+    -- NOT_STARTED / QUEUED / PROCESSING / READY / FAILED / INCOMPLETE
+    "結合状態"           VARCHAR(20)  NULL,
+    -- 結合のもとにした分塊の内容の要約（SHA-256）
+    "結合元ダイジェスト" VARCHAR(64)  NULL,
+    "結合長秒"           NUMERIC(10,3) NULL,
+    "結合理由"           VARCHAR(500) NULL,
+    "結合開始日時"       TIMESTAMP    NULL,
+    "結合終了日時"       TIMESTAMP    NULL,
+
+    -- ---- 最終まとめの生成（起動）の記録（同 改修 第 5 段） ----
+    -- だれがいつ「生成を始めた」と言ったか（プロセスが落ちたままの GENERATING を見分ける）
+    "生成開始日時"       TIMESTAMP    NULL,
+
     -- ---- 2.1 の共通規約（GEO_AI生図リクエスト情報 と同じ） ----
     "バージョン"         INTEGER      NOT NULL DEFAULT 1,
     "更新者アカウントID" BIGINT       NULL,
@@ -86,7 +110,11 @@ CREATE TABLE IF NOT EXISTS public."CR_授業記録情報" (
     CONSTRAINT "CK_CR_授業記録_録音時間" CHECK ("録音時間秒" IS NULL OR "録音時間秒" >= 0),
     CONSTRAINT "CK_CR_授業記録_サイズ" CHECK ("録音ファイルサイズ" IS NULL OR "録音ファイルサイズ" >= 0),
     CONSTRAINT "CK_CR_授業記録_終了時刻" CHECK ("終了時刻" IS NULL OR "開始時刻" IS NULL OR "終了時刻" >= "開始時刻"),
-    CONSTRAINT "CK_CR_授業記録_バージョン" CHECK ("バージョン" >= 1)
+    CONSTRAINT "CK_CR_授業記録_バージョン" CHECK ("バージョン" >= 1),
+    CONSTRAINT "CK_CR_授業記録_結合状態" CHECK ("結合状態" IS NULL OR "結合状態" IN
+        ('NOT_STARTED','QUEUED','PROCESSING','READY','FAILED','INCOMPLETE')),
+    CONSTRAINT "CK_CR_授業記録_認識収尾状態" CHECK ("認識収尾状態" IS NULL OR "認識収尾状態" IN
+        ('COMPLETE','INCOMPLETE','RUNNING','NO_AUDIO','UNKNOWN'))
 );
 
 -- 授業記録番号は一意（利用者に見せる番号）

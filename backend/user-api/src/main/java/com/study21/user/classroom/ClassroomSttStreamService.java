@@ -243,13 +243,23 @@ public class ClassroomSttStreamService {
             int savedCount,
             /** 保存待ちで残している文の数。 */
             int pendingCount,
+            /**
+             * **まだやり直せるか**（`false` は終端。画面は再試行を出し続けない）。
+             *
+             * <p>収尾の結果は「成功」と「失敗」の 2 つではない。**やり直せば直る失敗**と
+             * **やり直しても直らない不完整な終わり**があり、後者は `error=null` で
+             * `finalizeCompleted=false` になる（画面が `error` だけを見ると**成功と誤読**する）。
+             * そのため「やり直せるか」を**明示の欄**として返す（日本語の文面では判断させない）。</p>
+             */
+            boolean retryable,
             /** 失敗ではない知らせ（日本語。null なら無し）。 */
             String notice) {
 
         /** 収尾の状態を載せない呼び出し（テスト・旧クライアント互換）。 */
         public StreamPush(String interim, List<ClassroomModels.SegmentView> added, String error,
                           int processedFrames) {
-            this(interim, added, error, processedFrames, FINALIZE_AUDIO_ACCEPTING, false, null, 0, 0, null);
+            this(interim, added, error, processedFrames, FINALIZE_AUDIO_ACCEPTING, false, null, 0, 0,
+                    true, null);
         }
     }
 
@@ -508,6 +518,79 @@ public class ClassroomSttStreamService {
     }
 
     /**
+     * 収尾の結果を**記録に残す**（画面を開き直しても「識別が完全だったか」を確かめられるように）。
+     *
+     * <p>`error` が null でも成功とは限らない（やり直しても直らない終端）。その場の応答だけに
+     * 頼ると、詳細画面を開き直したときに**不完全だったことが消える**。音源ごとの結果も残す
+     * （音源ごとに「済んだか・やり直せるか」が違う）。</p>
+     *
+     * <p>記録が消えている・書けないときは黙って諦める（**収尾そのものは止めない**）。
+     * 書けなかったことはログに残す。</p>
+     */
+    public void persistFinalizeState(long recordId) {
+        FinalizeStatus status = finalizeStatus(recordId);
+        try {
+            String sources = sourcesJson(status.sources());
+            /*
+             * **音源ごとに見る**: 全体が「済んだ」でも、やり直しても直らない不完整が混ざって
+             * いれば「完全」とは書かない（画面が「保存しました」と言い切らないため）。
+             */
+            String overall = status.sources().stream().anyMatch(item -> !item.retryable()
+                    && !item.completed()) ? "INCOMPLETE"
+                    : status.completed() ? "COMPLETE"
+                    : status.retryable() ? "RUNNING"
+                    : !status.audioReceived() ? "NO_AUDIO"
+                    : "UNKNOWN";
+            boolean complete = "COMPLETE".equals(overall)
+                    && status.sources().stream().allMatch(SourceFinalizeStatus::completed);
+            String reason = status.notice();
+            if (!complete && reason == null) {
+                reason = status.sources().stream()
+                        .filter(item -> !item.completed())
+                        .map(item -> "【" + item.label() + "】" + (item.reason() == null
+                                ? item.statusLabel() : item.reason()))
+                        .reduce((left, right) -> left + " " + right)
+                        .orElse(null);
+            }
+            recordMapper.updateTranscribeState(recordId, overall, complete, sources,
+                    reason == null ? null : reason.substring(0, Math.min(500, reason.length())));
+        } catch (RuntimeException cause) {
+            log.warn("書き起こしの収尾の結果を記録に残せませんでした。recordId={}", recordId, cause);
+        }
+    }
+
+    /** 音源ごとの結果を JSON の配列にする（人が読める最小の欄だけ）。 */
+    private static String sourcesJson(List<SourceFinalizeStatus> sources) {
+        StringBuilder builder = new StringBuilder("[");
+        for (int index = 0; index < sources.size(); index += 1) {
+            SourceFinalizeStatus source = sources.get(index);
+            if (index > 0) {
+                builder.append(',');
+            }
+            builder.append('{')
+                    .append("\"source\":\"").append(escape(source.source())).append('\"')
+                    .append(",\"label\":\"").append(escape(source.label())).append('\"')
+                    .append(",\"status\":\"").append(escape(source.status())).append('\"')
+                    .append(",\"completed\":").append(source.completed())
+                    .append(",\"retryable\":").append(source.retryable())
+                    .append(",\"savedCount\":").append(source.savedCount())
+                    .append(",\"pendingCount\":").append(source.pendingCount())
+                    .append(",\"reason\":").append(source.reason() == null
+                            ? "null" : "\"" + escape(source.reason()) + "\"")
+                    .append('}');
+        }
+        return builder.append(']').toString();
+    }
+
+    private static String escape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+    }
+
+    /**
      * 終わりを伝えて収尾を進める（**何度呼んでも同じ結果に落ち着く**）。
      *
      * <p><b>段階</b>: (1) 新しい音声の受け付けを止める → (2) STT の最終結果を集める →
@@ -672,6 +755,11 @@ public class ClassroomSttStreamService {
                     recordId, normalized, recovery, state.attempts, state.pending.size(),
                     isRetryable(state), state.reason);
         }
+        /*
+         * **収尾のけりがついたら記録に残す**（画面を開き直しても「識別が完全だったか」が分かる）。
+         * 応答は失われ得るので、その場の応答だけに頼らない。
+         */
+        persistFinalizeState(recordId);
         return settledPush(state, added);
     }
 
@@ -1173,7 +1261,9 @@ public class ClassroomSttStreamService {
             notice = state.reason;
         }
         return new StreamPush("", added, error, state.ackedFrames, state.stage, completed,
-                state.recovery, state.savedCount, state.pending.size(), notice);
+                state.recovery, state.savedCount, state.pending.size(),
+                // やり直せるかは**サーバーの判断**（画面に推測させない）
+                !completed && retryable, notice);
     }
 
     /** いまの状態つきの結果（`push` の戻り）。 */
@@ -1185,7 +1275,9 @@ public class ClassroomSttStreamService {
         return new StreamPush(interim, added, error, session == null ? 0 : session.ackedFrames(),
                 stage, state != null && isCompleted(state.stage),
                 state == null ? null : state.recovery, state == null ? 0 : state.savedCount,
-                state == null ? 0 : state.pending.size(), state == null ? null : state.notice);
+                state == null ? 0 : state.pending.size(),
+                state != null && !isCompleted(state.stage) && isRetryable(state),
+                state == null ? null : state.notice);
     }
 
     /** 段階の表示名（日本語）。 */

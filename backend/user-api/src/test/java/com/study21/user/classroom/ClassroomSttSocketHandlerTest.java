@@ -254,7 +254,7 @@ class ClassroomSttSocketHandlerTest {
                 .thenReturn(new ClassroomSttStreamService.StreamPush("", List.of(),
                         "認識の尾部を取り切れませんでした。", 5,
                         ClassroomSttStreamService.FINALIZE_FAILED, false,
-                        ClassroomSttStreamService.RECOVERY_AWAIT_RESULTS, 1, 2, null));
+                        ClassroomSttStreamService.RECOVERY_AWAIT_RESULTS, 1, 2, true, null));
         ClassroomSttSocketHandler handler = new ClassroomSttSocketHandler(service, allowed());
         Sent sent = new Sent();
         WebSocketSession session = session("s3b", "/api/user/classroom/12/stt/socket?source=mic", principal(), sent);
@@ -272,6 +272,37 @@ class ClassroomSttSocketHandlerTest {
         assertThat(finished).contains("\"finalizeCompleted\":false");
         assertThat(finished).contains("\"recovery\":\"AWAIT_RESULTS\"");
         assertThat(finished).contains("\"pendingCount\":2");
+        // **やり直せるか**を明示して返す（error だけでは成功と区別できない）
+        assertThat(finished).contains("\"retryable\":true");
+    }
+
+    /**
+     * **やり直しても直らない不完整な終端**を、`error` に載せずに返す。
+     *
+     * <p>この回は `error=null` なのに成功ではない。画面が `error` だけを見ると「成功」と誤読し、
+     * 書き起こしが欠けたまま「保存しました」と言ってしまう。だから `retryable=false` を返す。</p>
+     */
+    @Test
+    @DisplayName("finished は「やり直しても直らない不完整な終端」を retryable=false で返す")
+    void finishedReportsNonRetryableIncomplete() throws Exception {
+        ClassroomSttStreamService service = mock(ClassroomSttStreamService.class);
+        when(service.finish(anyLong(), anyLong(), anyString()))
+                .thenReturn(new ClassroomSttStreamService.StreamPush("", List.of(), null, 5,
+                        ClassroomSttStreamService.FINALIZE_FAILED, false, null, 1, 0, false,
+                        "認識の尾部を取り切れませんでした（やり直しても直りません）。"));
+        ClassroomSttSocketHandler handler = new ClassroomSttSocketHandler(service, allowed());
+        Sent sent = new Sent();
+        WebSocketSession session = session("s3c", "/api/user/classroom/12/stt/socket?source=mic", principal(), sent);
+
+        handler.afterConnectionEstablished(session);
+        handler.handleMessage(session, new TextMessage("{\"type\":\"finish\"}"));
+
+        String finished = sent.messages.stream().filter(body -> body.contains("\"finished\""))
+                .findFirst().orElseThrow();
+        assertThat(finished).contains("\"error\":null");
+        assertThat(finished).contains("\"finalizeCompleted\":false");
+        assertThat(finished).contains("\"retryable\":false");
+        assertThat(finished).contains("やり直しても直りません");
     }
 
     @Test

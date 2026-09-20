@@ -52,6 +52,18 @@ public class ClassroomRecordEntity {
     /** 不完全なまま終えた回に失った連番（カンマ区切り）。 */
     private String lostSeqs;
 
+    // ---- 書き起こし（認識）の収尾の結果（音声の欠落とは別の軸） ----
+    /** 収尾の状態（COMPLETE / INCOMPLETE / RUNNING / NO_AUDIO / UNKNOWN）。 */
+    private String transcribeStatus;
+    /** 識別が**完全にそろった**か（false = やり直しても直らない不完整な終わりがある）。 */
+    private Boolean transcribeComplete;
+    /** 音源ごとの結果（JSON の配列）。 */
+    private String transcribeSources;
+    /** 人が読む理由（日本語）。 */
+    private String transcribeReason;
+    /** いつ書いたか。 */
+    private Timestamp transcribeUpdatedAt;
+
     // ---- 再生用 1 本（分塊の結合）の状態（再起動後も読めるように DB に残す） ----
     /** 結合の状態（NOT_STARTED / QUEUED / PROCESSING / READY / FAILED / INCOMPLETE）。 */
     private String assemblyState;
@@ -131,6 +143,20 @@ public class ClassroomRecordEntity {
     public void setRecordedComplete(Boolean recordedComplete) { this.recordedComplete = recordedComplete; }
     public String getLostSeqs() { return lostSeqs; }
     public void setLostSeqs(String lostSeqs) { this.lostSeqs = lostSeqs; }
+    public String getTranscribeStatus() { return transcribeStatus; }
+    public void setTranscribeStatus(String transcribeStatus) { this.transcribeStatus = transcribeStatus; }
+    public Boolean getTranscribeComplete() { return transcribeComplete; }
+    public void setTranscribeComplete(Boolean transcribeComplete) {
+        this.transcribeComplete = transcribeComplete;
+    }
+    public String getTranscribeSources() { return transcribeSources; }
+    public void setTranscribeSources(String transcribeSources) { this.transcribeSources = transcribeSources; }
+    public String getTranscribeReason() { return transcribeReason; }
+    public void setTranscribeReason(String transcribeReason) { this.transcribeReason = transcribeReason; }
+    public Timestamp getTranscribeUpdatedAt() { return transcribeUpdatedAt; }
+    public void setTranscribeUpdatedAt(Timestamp transcribeUpdatedAt) {
+        this.transcribeUpdatedAt = transcribeUpdatedAt;
+    }
     public String getAssemblyState() { return assemblyState; }
     public void setAssemblyState(String assemblyState) { this.assemblyState = assemblyState; }
     public String getAssemblyDigest() { return assemblyDigest; }

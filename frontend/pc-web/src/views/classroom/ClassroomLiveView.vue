@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import {
+  summarizeSttFinalize,
+  type SttFinalizeSummary
+} from '@/features/classroom/stt-finalize'
 import { ApiError, useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import {
@@ -1358,6 +1362,10 @@ function resetFinalize(): void {
    */
   sttFinalized = false
   sttFinishing = null
+  sttFinishOutcome = null
+  sttIncompleteAccepted.value = false
+  sttIncompleteNotice.value = ''
+  sttFinalizeSummary.value = null
   finalizeError.value = ''
   finalizeFailedStage.value = 'idle'
   finishPhase.value = 'idle'
@@ -1424,26 +1432,107 @@ const finishButtonLabel = computed(() => {
   return finalizeKind.value === 'stop' ? '停止中...' : '終了中...'
 })
 
+/**
+ * 書き起こしの収尾の**まとめ**（音源ごとの結果を 1 つに畳んだもの）。
+ *
+ * <p>「識別が完全か」と「終わってよいか」を別々に持つ。やり直しても直らない不完整な終わりは
+ * 終わってよい（利用者を永久に待たせない）が、完全に識別できたわけではない。</p>
+ */
+const sttFinalizeSummary = ref<SttFinalizeSummary | null>(null)
+
 /** 走っている書き起こしの収尾（やり直しで**二重に締めない**）。 */
-let sttFinishing: Promise<string | null> | null = null
-/** **両方の音源**の書き起こしの最終結果を受け取れたか。 */
+let sttFinishing: Promise<SttOutcome> | null = null
+/** **使った音源の全部**について、収尾のけりがついたか（完全とは限らない）。 */
 let sttFinalized = false
+
+/**
+ * 書き起こしの収尾の結果（**成功・不完全・やり直し可能**の 3 通り）。
+ *
+ * <p>以前は「失敗の理由（文字列）か null か」しか返さなかった。それだと
+ * **やり直しても直らない不完整な終わり**（`error=null`）を成功と同じ扱いにしてしまう。</p>
+ */
+/** 最終まとめの**起動**に失敗したか（録音の保存とは別。詳細画面にも残す）。 */
+const noteStartFailed = ref(false)
+
+/** 走っている「最終まとめの起動の受理」を待つ約束（二重に頼まない）。 */
+let noteStartPromise: Promise<boolean> | null = null
+
+/**
+ * 最終まとめの生成の**起動を受理してもらう**（AI の完了は待たない）。
+ *
+ * <p>待つのは「admin-api がタスクを受け付けた」ことだけ。受理の応答が返らない（タイムアウト・
+ * 通信断）ときは**記録を問い合わせて**確かめる（受理されたのに応答を失った回に、二つ目の
+ * タスクを作らない）。</p>
+ *
+ * @return 受理を確認できたら true（既に走っている・作成済みも true）
+ */
+async function acceptClassroomNote(runPath: string): Promise<boolean> {
+  if (noteStartPromise !== null) return noteStartPromise
+  noteStartPromise = (async () => {
+    try {
+      const response = await runClassroomNote(runPath, 'classroom-live-view', 30_000)
+      const data = response.data as { status?: string } | null
+      // 「受理した」「既に走っている」「作成済み」のどれでも、タスクは確かに存在する
+      return data === null || data.status === undefined
+        || data.status === 'GENERATING' || data.status === 'READY'
+    } catch (caught) {
+      if (await noteIsRegistered()) return true
+      syncError.value = messageOf(caught, '最終まとめの生成を開始できませんでした。')
+      return false
+    } finally {
+      noteStartPromise = null
+    }
+  })()
+  return noteStartPromise
+}
+
+/**
+ * 最終まとめのタスクが**記録として存在するか**（受理されたのに応答を失った回の確認）。
+ *
+ * <p>ノートの行（`PENDING`／`GENERATING`／`READY`）が在れば、タスクは作られている。</p>
+ */
+async function noteIsRegistered(): Promise<boolean> {
+  const id = recordId.value
+  if (id === null) return false
+  try {
+    const response = await fetchClassroomRecord(id)
+    return response.data.notes.some((note) => note.kind === 'FINAL')
+  } catch {
+    return false
+  }
+}
+
+type SttOutcome =
+  /** 使った音源が全部完全に済んだ（または音声なし・発話なしの正常な終端）。 */
+  | { kind: 'complete' }
+  /** 識別が不完全なまま、終わってよい（やり直しても直らない終端）。 */
+  | { kind: 'incomplete'; summary: SttFinalizeSummary }
+  /** もう一度やり直せば直る（**終われない**）。理由は利用者に見せる。 */
+  | { kind: 'retryable'; reason: string }
 
 /**
  * 音源ごとの収尾（残りを送り切る → `/finish`）を 1 回だけ走らせる。
  *
  * <p>2 回呼ばれても走るのは 1 回（走っているあいだは同じ約束を返す）。**失敗したらやり直せる**
- * （約束を捨てるので、次の呼び出しでもう一度だけ走る）。戻り値は失敗の理由（**成功なら null**）。</p>
+ * （約束を捨てるので、次の呼び出しでもう一度だけ走る）。戻り値は**結果**（完全・不完全・
+ * やり直し可能）で、「投げなかったこと」を成功の印にしない。</p>
  */
-function finishSttOnce(): Promise<string | null> {
-  if (sttFinalized) return Promise.resolve(null)
+function finishSttOnce(): Promise<SttOutcome> {
+  if (sttFinishOutcome !== null) return Promise.resolve(sttFinishOutcome)
   if (sttFinishing !== null) return sttFinishing
   sttFinishing = runSttFinish()
   return sttFinishing
 }
 
+/**
+ * 直前に済んだ収尾の結果（やり直しで**同じ結果を使い回す**）。
+ *
+ * <p>`sttFinalized`（けりがついたか）とは別に、**何をもって済みとしたか**を残す。</p>
+ */
+let sttFinishOutcome: SttOutcome | null = null
+
 /** 書き起こしの収尾の本体（{@link finishSttOnce} から 1 回だけ呼ばれる）。 */
-async function runSttFinish(): Promise<string | null> {
+async function runSttFinish(): Promise<SttOutcome> {
   try {
     /*
      * **画面が認識した最後の発話を、サーバーへ入れ終えるまで待つ**（ブラウザ認識のとき）。
@@ -1459,23 +1548,65 @@ async function runSttFinish(): Promise<string | null> {
     /*
      * **`finish()` は失敗しても投げない**（後端は HTTP 200 で理由を返し、常時接続は `finished` に
      * 理由を載せて返す）。投げなかったことを成功の印にすると、尾部を取り切れていないのに
-     * 「終わった」と言ってしまい、その文が最終まとめに入らない。**音源ごとに理由を見る**。
+     * 「終わった」と言ってしまい、その文が最終まとめに入らない。
+     *
+     * <p>見るのは**音源ごとの収尾の結果**（`error` だけでは足りない）:</p>
+     * <ul>
+     *   <li>**やり直せる失敗**（`error` あり・まだ途中・確認できない）… 終われない。
+     *       【続きをやり直す】を出す（**同じ音源だけ**をもう一度締める）。</li>
+     *   <li>**やり直しても直らない不完整な終わり**（`error=null` / `finalizeCompleted=false` /
+     *       `retryable=false`）… 終わってよい。ただし**識別は完全ではない**ので、その旨を残す。</li>
+     *   <li>**音声なし・発話なし**… 正常な終端（システムのエラーにしない）。</li>
+     * </ul>
+     *
+     * <p>**実際に使った音源だけ**を数える（単音源の回に、使っていない音源の「音声なし」を
+     * 失敗として数えない）。</p>
      */
-    const failures = SOURCES.map((source) => {
-      const reason = sourceStreams[source]?.finishFailure() ?? ''
-      return reason === '' ? '' : `【${SOURCE_LABELS[source]}】${reason}`
-    }).filter((message) => message !== '')
-    if (failures.length > 0) {
-      return `書き起こしの収尾（最後の確定文の取り込み）が終わりませんでした。${failures.join(' ')}`
+    /*
+     * **書き起こしを送る音源が 1 つも無い回**（ブラウザ認識だけ・音源が立ち上がらなかった回）は、
+     * 収尾の対象が無い。ここを「結果が無い＝不完全」と読むと、終われる回が終われなくなる。
+     */
+    const sources = usedSources()
+    const summary = sources.length === 0
+      ? summarizeSttFinalize([])
+      : summarizeSttFinalize(
+        sources.map((source) => sourceStreams[source]?.finalizeOutcome() ?? null),
+        SOURCES.map((source) => ({ source, label: SOURCE_LABELS[source] })))
+    sttFinalizeSummary.value = sources.length === 0 ? null : summary
+    const nothingToFinalize = sources.length === 0
+    if (!summary.canFinish) {
+      const blocked = [...summary.retryableSources, ...summary.unknownSources]
+        .map((result) => `【${SOURCE_LABELS[result.source as ClassroomSource] ?? result.source}】`
+          + (result.notice ?? '書き起こしの仕上げが済んでいません。'))
+        .join(' ')
+      // **やり直せる**: 結果を覚えない（次の呼び出しでもう一度だけ締める）
+      sttFinishOutcome = null
+      return { kind: 'retryable', reason: `書き起こしの収尾（最後の確定文の取り込み）が終わりませんでした。${blocked}` }
     }
     sttFinalized = true
-    // 済んだので、音源の取り出しと送信を片付ける（**失敗のときは残す**＝やり直せるように）
+    /*
+     * 識別が完全に済んだ回は、そのまま先へ進む。
+     * **不完全なまま終わる回**は結果として残し、終える前に利用者へ知らせる
+     * （「録音は保存したが、書き起こしの一部ができていない」を黙って通さない）。
+     */
+    const outcome: SttOutcome = summary.complete || nothingToFinalize
+      ? { kind: 'complete' }
+      : { kind: 'incomplete', summary }
+    sttFinishOutcome = outcome
+    /*
+     * **識別が不完全な回は音源の送信キューをまだ捨てない**。
+     *
+     * <p>捨てると【続きをやり直す】が効かなくなる（もう一度締めようにも、締める相手が無い）。
+     * 利用者が「このまま終える」を選んだ時点（{@link confirmIncompleteTranscript}）か、
+     * 画面を離れるときに片付ける。</p>
+     */
     releaseSourceCaptures()
-    dropSourceStreams()
-    return null
+    if (summary.complete || nothingToFinalize) dropSourceStreams()
+    return outcome
   } catch (cause) {
-    return '書き起こしの収尾に失敗しました（'
-      + `${cause instanceof Error ? cause.message : String(cause)}）。`
+    sttFinishOutcome = null
+    return { kind: 'retryable', reason: '書き起こしの収尾に失敗しました（'
+      + `${cause instanceof Error ? cause.message : String(cause)}）。` }
   } finally {
     sttFinishing = null
   }
@@ -1501,6 +1632,17 @@ function releaseSourceCaptures(): void {
    * 取り切れない（実測: `/finish` が 1 度も送られなくなった）。やり直せるように、片付けは
    * 収尾が済んだあと（{@link dropSourceStreams}）に行う。</p>
    */
+}
+
+/**
+ * **実際に使った音源**（単音源の設定ならマイクだけ）。
+ *
+ * <p>使っていない音源の結果（「音声なし」など）を混ぜて数えると、単音源の回が必ず
+ * 「識別不完全」になる（利用者の指摘: 未使用の音源で失敗させない）。</p>
+ */
+function usedSources(): ClassroomSource[] {
+  const configured = classroomSourcesOf(configuredAudioMode.value ?? audioMode)
+  return configured.filter((source) => sourceStreams[source] !== undefined || captures[source] !== undefined)
 }
 
 /** 音源ごとの送信キューを捨てる（収尾が済んだあと・画面を離れるとき）。 */
@@ -2051,6 +2193,42 @@ const lostChunkSummary = computed(() => {
   return `保存できなかった音声（連番 ${detail.join('、')}）は、もう一度送っても直りません。`
 })
 
+/**
+ * **書き起こしが不完全なまま終わる**ことを利用者が承知したか。
+ *
+ * <p>承知していれば、収尾の結果が「不完整な終わり」でも止めずに記録を終える
+ * （確認の 1 段を挟む。押し間違いで欠けたまま終えない）。</p>
+ */
+const sttIncompleteAccepted = ref(false)
+
+/** 書き起こしが不完全なまま終わるときの案内（日本語。空なら不完全ではない）。 */
+const sttIncompleteNotice = ref('')
+
+/**
+ * **書き起こしが不完全なまま終える**と利用者が確認した。
+ *
+ * <p>録音と保存はそのまま（音は 1 つも失わない）。ここで初めて音源の送信キューを片付ける。</p>
+ */
+function confirmIncompleteTranscript(): void {
+  sttIncompleteAccepted.value = true
+  dropSourceStreams()
+  void requestFinalize('finish')
+}
+
+/**
+ * **書き起こしの収尾をもう一度やり直す**（音声は送り直さない）。
+ *
+ * <p>「やり直しても直らない」と言われた回でも、接続が戻っていれば拾えることがある。
+ * 押しても直らなければ同じ案内がまた出る（**無限に待たせない**）。</p>
+ */
+function retrySttFinalize(): void {
+  sttFinishOutcome = null
+  sttFinalized = false
+  sttIncompleteAccepted.value = false
+  sttIncompleteNotice.value = ''
+  void requestFinalize('stop')
+}
+
 /** 「不完全なまま終了」を押したときの確認（押し間違いで音を失わない）。 */
 const confirmIncomplete = ref(false)
 
@@ -2121,15 +2299,32 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
       if (left > 0) freezeUnrecoverable(pendingChunks.value.map((chunk) => chunk.seq))
       finalizeProgress.recorderFlushed = true
     }
-    // 2) 両方の音源の書き起こしの最終結果（尾部の確定文）を待つ
+    // 2) 使った音源の書き起こしの最終結果（尾部の確定文）を待つ
     finishPhase.value = 'transcribing'
-    const sttReason = await finishSttOnce()
-    if (sttReason !== null) {
-      stopFinalize(sttReason)
-      return { kind: 'failed', reason: sttReason, lossSeqs: [] }
+    const stt = await finishSttOnce()
+    if (stt.kind === 'retryable') {
+      // **やり直せる失敗**: 成功と言わない（詳細へ進まない・記録を終えない）
+      stopFinalize(stt.reason)
+      return { kind: 'failed', reason: stt.reason, lossSeqs: [] }
+    }
+    if (stt.kind === 'incomplete' && !sttIncompleteAccepted.value) {
+      /*
+       * **やり直しても直らない不完整な終わり**は、終える前に利用者へ知らせる
+       * （「録音は保存したが、書き起こしの一部ができていない」を黙って通さない）。
+       * ここで止めるのは**確認のためだけ**（もどれば【続きをやり直す】も選べる）。
+       */
+      sttIncompleteNotice.value = stt.summary.notice
+        ?? '書き起こしの一部を完了できませんでした。'
+      stopFinalize('書き起こしの一部を完了できませんでした（このまま終えるか、続きをやり直してください）。')
+      return { kind: 'failed', reason: sttIncompleteNotice.value, lossSeqs: [] }
     }
     if (finalizeKind.value === 'stop') {
       finishPhase.value = 'done'
+      // 停止だけの回でも、識別が不完全なら知らせる（黙って「保存しました」と言わない）
+      if (stt.kind === 'incomplete') {
+        finishNotice.value = sttIncompleteNotice.value
+        toast.warning(sttIncompleteNotice.value)
+      }
       return { kind: 'completed', reason: null, lossSeqs: [] }
     }
     const id = recordId.value
@@ -2167,17 +2362,39 @@ async function runFinalize(kind: FinalizeKind, force = false): Promise<FinalizeR
       return { kind: lossSeqs.length > 0 ? 'incomplete' : 'completed', reason: null, lossSeqs }
     }
     if (!finalizeProgress.noteStarted) {
-      finalizeProgress.noteStarted = true
+      /*
+       * **受理を待ってから**「始めた」と印を付ける（利用者の指摘 ②）。
+       *
+       * <p>以前は「投げて、待たずに `noteStarted=true`」にしていた。応答が失敗しても画面は
+       * 起動済みと見なし、そのまま詳細へ進んでいた（利用者には見えない失敗）。ここでは
+       * **受理の応答を待ち**、確認できたときだけ印を付ける。受理の応答は
+       * 「タスクを受け付けた」だけ（AI の完了は待たない）。結果は詳細画面のポーリングで読む。</p>
+       */
       finishPhase.value = 'note'
-      // 最終まとめ（batC62）を起動する。結果は詳細画面のポーリングで出す
-      void runClassroomNote(runPath, 'classroom-live-view').catch((cause: unknown) => {
-        syncError.value = messageOf(cause, '最終まとめの生成を開始できませんでした。')
-      })
+      const accepted = await acceptClassroomNote(runPath)
+      if (!accepted) {
+        /*
+         * **起動できなかった**。録音の保存は成功しているので**そこは戻さない**
+         * （音は残っている）。失敗と次の入口【最終まとめを再試行】を残して詳細へ進む
+         * （詳細画面でも同じ状態と入口を出す）。
+         */
+        noteStartFailed.value = true
+        finishNotice.value = '録音は保存しました。最終まとめの生成を開始できませんでした。'
+          + '詳細画面の【最終まとめを再試行】からやり直せます。'
+        finishPhase.value = 'done'
+        toast.warning(finishNotice.value)
+        backToDetail()
+        return { kind: lossSeqs.length > 0 ? 'incomplete' : 'completed', reason: null, lossSeqs }
+      }
+      finalizeProgress.noteStarted = true
     }
     finishPhase.value = 'done'
     if (lossSeqs.length > 0) {
       // 音を一部失って終えた回は「終わりました」だけと言わない（失った範囲を残す）
-      toast.warning(`録音を終了しました。音声の一部（連番 ${lossSeqs.join('、')}）は保存できていません。`)
+      toast.warning(`録音を終了しました。音声の一部（連番 ${lossSeqs.join('、')}）は保存されていません。`)
+    } else if (outcome.result.transcribe?.complete === false) {
+      // 書き起こしが不完全な回も「録音と書き起こしを保存しました」と言い切らない
+      toast.warning('録音は保存しました。書き起こしの一部を完了できませんでした。')
     } else {
       toast.success('録音を終了しました。')
     }
@@ -2302,12 +2519,24 @@ const statusSummary = computed<LiveStatus>(() => {
   }
   // ④ 収尾が済んで、終了できる（**サーバーが確認したときだけ**「保存されています」と言う）
   if (!recording.value && finishPhase.value === 'done') {
+    /*
+     * **音声の欠落**と**書き起こしの不完全さ**を混ぜない（利用者の指摘 ①-6）。
+     *  - 音声が欠けている回は「録音を保存しました」と言い切らない。
+     *  - 書き起こしだけが不完全な回は「録音は保存したが、書き起こしの一部ができていない」と出す。
+     */
+    const audioMissing = finalizeCheck.value?.complete === false
+    const sttIncomplete = sttIncompleteNotice.value !== ''
+    const detail = audioMissing
+      ? '音声の一部が保存できていません（保存できた音と書き起こしは残ります）。'
+      : sttIncomplete
+        ? '録音は保存しました。書き起こしの一部を完了できませんでした。'
+        : finalizeCheck.value?.complete === true
+          ? '録音と書き起こしを保存しました。'
+          : '書き起こしの最終結果まで受け取りました。'
     return {
       code: 'ready',
       title: '授業を終了できます',
-      detail: finalizeCheck.value?.complete === true
-        ? '音声は保存されています。'
-        : '書き起こしの最終結果まで受け取りました。',
+      detail,
       hint: '【授業を終了】を押すと、最終まとめを作って詳細画面へ進みます。',
       retry: false
     }
@@ -2882,6 +3111,16 @@ onBeforeUnmount(() => {
           <span v-if="lostChunkSummary !== ''" class="cr-status__lost" data-cr-lost-chunks>
             {{ lostChunkSummary }}
           </span>
+          <!--
+            書き起こしが不完全なまま終わる回の**短い 1 行**（音源ごとの理由は【詳細情報】の中）。
+            音声の欠落とは別の欄にする（同じ「一部が欠けました」でまとめない）。
+          -->
+          <span
+            v-if="sttFinalizeSummary !== null && !sttFinalizeSummary.complete"
+            class="cr-status__lost" data-cr-stt-summary
+          >
+            書き起こしの一部を完了できませんでした。
+          </span>
         </div>
         <button
           v-if="statusSummary.retry" type="button" class="btn btn--secondary btn--sm"
@@ -2968,7 +3207,23 @@ onBeforeUnmount(() => {
           <div v-if="finalizeCheck !== null && finalizeCheck.missingSeqs.length > 0">
             <dt>足りない連番</dt><dd data-cr-details-missing>{{ finalizeCheck.missingSeqs.join(', ') }}</dd>
           </div>
+          <!--
+            書き起こしの収尾の結果（**音源ごと**）。主画面は短い 1 行だけにして、
+            理由と件数はここに置く（利用者の指摘 ①-6）。
+          -->
+          <div v-if="sttFinalizeSummary !== null">
+            <dt>書き起こしの収尾</dt>
+            <dd data-cr-details-stt-finalize>
+              {{ sttFinalizeSummary.complete ? '全音源とも完了' : '一部を完了できませんでした' }}
+            </dd>
+          </div>
         </dl>
+        <p
+          v-if="sttFinalizeSummary !== null && sttFinalizeSummary.notice !== null"
+          class="cr-details__missing" data-cr-details-stt-notice
+        >
+          {{ sttFinalizeSummary.notice }}
+        </p>
         <!-- 音源ごとの案内（送れていない・準備できないときの理由） -->
         <template v-for="source in SOURCES" :key="`notice-${source}`">
           <p v-if="noticeOf[source].value !== ''" :data-cr-source-notice="source">
@@ -3214,6 +3469,35 @@ onBeforeUnmount(() => {
             @click="leaveAfterGivingUp"
           >
             音声をあきらめて移動
+          </button>
+        </div>
+      </div>
+
+      <!--
+        **書き起こしが不完全なまま終わりそうなとき**の案内（利用者の指摘 ①-4）。
+        録音と音声は保存できている（失っていない）ので、**音声の欠落とは別の案内**として出す。
+        「このまま終える」か「続きをやり直す」を選べる（やり直しても直らないものを無限に
+        繰り返させない）。
+      -->
+      <div v-if="sttIncompleteNotice !== ''" class="cr-confirm" data-cr-stt-incomplete>
+        <p class="cr-confirm__title">書き起こしの一部を完了できませんでした。</p>
+        <p class="cr-confirm__impact" data-cr-stt-incomplete-notice>{{ sttIncompleteNotice }}</p>
+        <p class="cr-confirm__note">
+          録音した音声は保存できています（音は失っていません）。書き起こしのテキストだけが
+          一部欠けたままになります。最終まとめは、認識できた内容から作ります。
+        </p>
+        <div class="cr-confirm__actions">
+          <button
+            type="button" class="btn btn--secondary btn--sm" data-cr-stt-incomplete-retry
+            :disabled="finishing" @click="retrySttFinalize"
+          >
+            続きをやり直す
+          </button>
+          <button
+            type="button" class="btn btn--danger btn--sm" data-cr-stt-incomplete-ok
+            :disabled="finishing" @click="confirmIncompleteTranscript"
+          >
+            このまま終了
           </button>
         </div>
       </div>

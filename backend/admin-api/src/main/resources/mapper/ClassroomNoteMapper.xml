@@ -18,13 +18,14 @@
         <result property="version"         column="バージョン"/>
         <result property="createdBy"       column="登録者アカウントID"/>
         <result property="createdAt"       column="登録日時"/>
+        <result property="generationStartedAt" column="生成開始日時"/>
         <result property="updatedAt"       column="更新日時"/>
     </resultMap>
 
     <sql id="NoteColumns">
         "授業ノートID", "授業記録ID", "種別", "フェーズ番号", "対象開始連番", "対象終了連番",
         "ノートJSON"::text AS "ノートJSON", "生成状態", "AI呼出履歴ID", "エラーコード", "エラーメッセージ",
-        "再試行回数", "バージョン", "登録者アカウントID", "登録日時", "更新日時"
+        "再試行回数", "バージョン", "登録者アカウントID", "登録日時", "生成開始日時", "更新日時"
     </sql>
 
     <select id="findById" resultMap="NoteMap">
@@ -50,6 +51,35 @@
          ORDER BY "登録日時", "授業ノートID"
          LIMIT 1
     </select>
+
+    <!--
+      生成の**起動を受理する**（1 文で「待ち」→「生成中」に移す）。
+      `PENDING` / `FAILED` の行だけを取るので、**同時に 2 本来ても勝つのは 1 本**だけ
+      （画面のボタンやメモリの真偽値では守らない）。0 行なら「別の要求が既に始めている」。
+    -->
+    <update id="claimGeneration">
+        UPDATE public."CR_授業ノート情報"
+           SET "生成状態"     = 'GENERATING',
+               "生成開始日時" = CURRENT_TIMESTAMP,
+               "更新元コード" = 'APP',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "授業ノートID" = #{noteId}
+           AND "生成状態" IN ('PENDING','FAILED')
+    </update>
+
+    <!--
+      **前に走らせたまま落ちた**行をやり直す（前回の開始から一定時間たった `GENERATING` だけ）。
+      再起動しても「生成中」のまま永久に待たせない。
+    -->
+    <update id="reclaimStaleGeneration">
+        UPDATE public."CR_授業ノート情報"
+           SET "生成開始日時" = CURRENT_TIMESTAMP,
+               "更新元コード" = 'APP',
+               "更新日時"     = CURRENT_TIMESTAMP
+         WHERE "授業ノートID" = #{noteId}
+           AND "生成状態"     = 'GENERATING'
+           AND ("生成開始日時" IS NULL OR "生成開始日時" &lt; #{staleBefore})
+    </update>
 
     <update id="markGenerating">
         UPDATE public."CR_授業ノート情報"

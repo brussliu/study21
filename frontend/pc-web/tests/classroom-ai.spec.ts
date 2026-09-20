@@ -156,6 +156,19 @@ interface ApiOptions {
    * 後端は尾部を取り切れなかったときに HTTP 200 で理由を返す（画面は成功にしない）。
    */
   endErrorTimes?: number
+  /**
+   * 最終まとめの起動（`/api/admin/batch/classroom/notes/{id}/run`）の応答。
+   *
+   * <p>後端は「AI を実行し終えた」ではなく「**受理した**」を返す。`{ status: 'GENERATING' }` が
+   * 受理。ここを差し替えて「受理の前に成功と見なさない」「失敗を隠さない」を確かめる。</p>
+   */
+  noteRun?: Record<string, unknown>
+  /** 起動の応答を**保留**する（受理の前に画面が何をするかを確かめる）。 */
+  holdNoteRun?: Promise<void>
+  /** 起動を**失敗**させる（録音の保存は成功のまま）。 */
+  noteRunFails?: boolean
+  /** 起動が失敗したあとに返す最終まとめの行（詳細のポーリングで読む）。 */
+  notesForDetail?: Record<string, unknown>[]
 }
 
 /**
@@ -201,7 +214,15 @@ function mockApi(options: ApiOptions = {}): { calls: Call[]; fetchMock: ReturnTy
       )
     }
     if (String(url).includes('/api/admin/batch/classroom/notes/')) {
-      return ok({ noteId: 91, kind: 'FINAL', batchCode: 'batC62', status: 'READY' })
+      if (options.holdNoteRun !== undefined) await options.holdNoteRun
+      if (options.noteRunFails === true) {
+        return new Response(JSON.stringify({
+          success: false, code: 'INTERNAL_ERROR', message: 'AI を開始できませんでした。', data: null
+        }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+      }
+      // **受理の応答**（AI の完了ではない）。`accepted` と状態だけを返す
+      return ok(options.noteRun ?? { noteId: 91, accepted: true, status: 'GENERATING',
+        message: '最終まとめの作成を始めました。' })
     }
     if (String(url).includes('/options')) {
       return ok({
@@ -218,12 +239,36 @@ function mockApi(options: ApiOptions = {}): { calls: Call[]; fetchMock: ReturnTy
       if (options.holdSttFinish !== undefined) await options.holdSttFinish
       finishCalls += 1
       if (finishCalls <= (options.sttFinishErrorTimes ?? 0)) {
-        // 後端が「収尾を完了できなかった」と返した場合（HTTP は 200）
-        return ok({ interim: '', added: [], error: '尾部の文を取り切れませんでした。' })
+        // 後端が「収尾を完了できなかった」と返した場合（HTTP は 200・**やり直せる**）
+        return ok({
+          interim: '', added: [], error: '尾部の文を取り切れませんでした。',
+          finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: true,
+          recovery: 'AWAIT_RESULTS', savedCount: 0, pendingCount: 1, notice: null
+        })
       }
       // セッションの終了（つなぎ直しの回数には数えない）
       return ok({
-        interim: '', added: options.sttFinish?.added ?? [], error: options.sttFinish?.error ?? null
+        interim: '', added: options.sttFinish?.added ?? [], error: options.sttFinish?.error ?? null,
+        // 後端は収尾の欄も返す（省くと画面は「確認できない」と見て成功と判定しない）
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        recovery: null, savedCount: 1, pendingCount: 0, notice: null
+      })
+    }
+    if (String(url).includes('/stt/stream/finish')) {
+      finishCalls += 1
+      if (finishCalls <= (options.sttFinishErrorTimes ?? 0)) {
+        // 後端が「収尾を完了できなかった」と返した場合（HTTP は 200・**やり直せる**）
+        return ok({
+          interim: '', added: [], error: '尾部の文を取り切れませんでした。',
+          finalizeStatus: 'FAILED', finalizeCompleted: false, retryable: true,
+          recovery: 'AWAIT_RESULTS', savedCount: 0, pendingCount: 1, notice: null
+        })
+      }
+      // セッションの終了（つなぎ直しの回数には数えない）
+      return ok({
+        interim: '', added: options.sttFinish?.added ?? [], error: options.sttFinish?.error ?? null,
+        finalizeStatus: 'SAVED', finalizeCompleted: true, retryable: false,
+        recovery: null, savedCount: 1, pendingCount: 0, notice: null
       })
     }
     if (String(url).includes('/stt/stream')) {
@@ -295,7 +340,10 @@ function mockApi(options: ApiOptions = {}): { calls: Call[]; fetchMock: ReturnTy
       return ok({ recordId: 12, deletedAudio: true })
     }
     if (/\/api\/user\/classroom\/\d+$/.test(String(url))) {
-      return ok(options.detail ?? detail())
+      const base = options.detail ?? detail()
+      // 詳細のノート行も差し替えられる（最終まとめの状態を確かめるのに使う）
+      return ok(options.notesForDetail === undefined ? base
+        : { ...base, notes: options.notesForDetail })
     }
     return ok({})
   })
@@ -2164,6 +2212,8 @@ describe('授業録音：録音中', () => {
     await flushPromises()
 
     // 発話が入ってから終える（順番で固定）
+    console.log('DBG html=', wrapper.html().slice(0, 400))
+    console.log('DBG calls=', calls.map((call) => call.url).join(' | '))
     const transcriptIndex = calls.findIndex((call) => call.url.includes('/transcripts'))
     const endIndex = calls.findIndex((call) => call.url.includes('/classroom/12/end'))
     expect(transcriptIndex).toBeGreaterThanOrEqual(0)

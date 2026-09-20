@@ -2,13 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   allocateUnits,
   compareUnit,
+  detectUnitSize,
   displayFailureReason,
   emptyFilters,
   filterWords,
   hasFilter,
+  normalizeHeading,
   paginate,
-  parsePaste,
-  splitReadings,
+  parseWords,
   summarizeParsed,
   unitIndex,
   unitName
@@ -52,85 +53,60 @@ function word(overrides: Partial<DemoWord> = {}): DemoWord {
 
 const DISPLAY = { listMode: 'NORMAL' as const, detailMode: 'FULL' as const, saveMode: 'NORMAL' as const }
 
-describe('デモ：貼り付けテキストの解釈', () => {
-  it('タブ・カンマ・2 つ以上の空白で区切る（空白 1 つは区切らない）', () => {
-    const rows = parsePaste(['図書館\tとしょかん\t图书馆', '相談，そうだん，商量', '準備  じゅんび  准备'].join('\n'))
+describe('デモ：貼り付けテキストの解釈（単語だけ）', () => {
+  it('1 行 1 語として読み、読みと意味は入れない（あとで AI から取得する）', () => {
+    const rows = parseWords('図書館\n相談\n準備')
 
-    expect(rows.map((row) => [row.heading, row.reading, row.chineseMeaning])).toEqual([
-      ['図書館', 'としょかん', '图书馆'],
-      ['相談', 'そうだん', '商量'],
-      ['準備', 'じゅんび', '准备']
-    ])
+    expect(rows.map((row) => row.heading)).toEqual(['図書館', '相談', '準備'])
     expect(rows.every((row) => row.state === 'OK')).toBe(true)
+    // 読みと中国語の意味は、この時点では持たない
+    expect(rows.every((row) => row.reading === '' && row.chineseMeaning === '')).toBe(true)
   })
 
   it('空行は飛ばすが、行番号は入力のまま残す', () => {
-    const rows = parsePaste('図書館\tとしょかん\n\n\n相談\tそうだん')
+    const rows = parseWords('図書館\n\n\n相談')
 
     expect(rows.map((row) => row.line)).toEqual([1, 4])
   })
 
-  it('区切りが読み取れない行は形式エラーにする（区切り文字の混在・区切りの無い長い行）', () => {
-    // タブとカンマの混在: どちらの区切りか決められない
-    const mixed = parsePaste('図書館\tとしょかん,图书馆')
-    expect(mixed[0]?.state).toBe('FORMAT_ERROR')
-    expect(mixed[0]?.note).toContain('区切り')
+  it('Excel から余計な列が混ざっても 1 列目だけを使う', () => {
+    const rows = parseWords('図書館\t图书馆\tメモ\n相談\t商量\tメモ')
 
-    // 区切りがまったく無く、空白だけの行: 見出し語の一部か、意味のつもりか決められない
-    const noDelimiter = parsePaste('書類を出す 提出文件')
-    expect(noDelimiter[0]?.state).toBe('FORMAT_ERROR')
-
-    // 1 語だけの行は「読みが空」として扱う（見出し語だけの登録は許す）
-    const single = parsePaste('書類を出す')
-    expect(single[0]?.state).toBe('BLANK_READING')
-
-    expect(summarizeParsed(mixed).errors).toBe(1)
-    expect(summarizeParsed(mixed).importable).toBe(0)
+    expect(rows.map((row) => row.heading)).toEqual(['図書館', '相談'])
+    expect(rows.every((row) => row.state === 'OK')).toBe(true)
   })
 
-  it('見出し語が空・読みが空・区切りが多すぎる行を見分ける', () => {
-    const rows = parsePaste(['\tとしょかん\t图书馆', '相談\t\t商量', '準備\tじゅんび\t准备\t多い'].join('\n'))
+  it('単語が空の行は取り込まない', () => {
+    const rows = parseWords('図書館\n\tメモだけ\n相談')
 
-    expect(rows[0]?.state).toBe('BLANK_WORD')
-    expect(rows[1]?.state).toBe('BLANK_READING')
-    // 4 つ目以降はタブ区切りを保ったまま中国語意味へ足す（形式エラーにしない）
-    expect(rows[2]?.chineseMeaning).toBe('准备 多い')
-    expect(rows[2]?.state).toBe('OK')
+    expect(rows.map((row) => row.state)).toEqual(['OK', 'BLANK_WORD', 'OK'])
+    expect(summarizeParsed(rows).blank).toBe(1)
   })
 
   it('同じ入力の中の重複を見つけ、先に出た行番号を案内する', () => {
-    const rows = parsePaste(['図書館\tとしょかん\n相談\tそうだん\n図書館\tとしょかん'].join('\n'))
+    const rows = parseWords('図書館\n相談\n図書館')
 
     expect(rows[2]?.state).toBe('DUPLICATE')
     expect(rows[2]?.note).toContain('1 行目')
     expect(summarizeParsed(rows).duplicates).toBe(1)
-    expect(summarizeParsed(rows).importable).toBe(2)
   })
 
-  it('母表にある語は「収録を追加」として区別する（重複として捨てない）', () => {
-    const existing = [{ heading: '図書館', reading: 'としょかん' }]
-    const rows = parsePaste('図書館\tとしょかん\t图书馆', existing)
+  it('重複の判定は 2 通り（この書籍の中／すべての書籍）', () => {
+    const inBook = ['図書館']
+    // ① この書籍の中の重複だけ飛ばす（既定）: ほかの書籍にある語は取り込む
+    const bookMode = parseWords('相談', inBook, 'BOOK')
+    expect(bookMode[0]?.state).toBe('OK')
+
+    // ② すべての書籍と重複するものを飛ばす
+    const allMode = parseWords('図書館', inBook, 'ALL')
+    expect(allMode[0]?.state).toBe('DUPLICATE_EXISTING')
+    expect(summarizeParsed(allMode).existingReuse).toBe(1)
+  })
+
+  it('全角と半角・前後の空白の揺れは同じ単語として扱う', () => {
+    const rows = parseWords('図書館', ['　図書館 '], 'ALL')
 
     expect(rows[0]?.state).toBe('DUPLICATE_EXISTING')
-    expect(rows[0]?.note).toContain('収録を追加')
-    expect(summarizeParsed(rows).existingReuse).toBe(1)
-    expect(summarizeParsed(rows).duplicates).toBe(0)
-  })
-
-  it('同じ見出し語でも読みが違えば重複にしない（同表記・別読み）', () => {
-    const existing = [{ heading: '開く', reading: 'あく' }]
-    const rows = parsePaste('開く\tひらく\t开；打开', existing)
-
-    expect(rows[0]?.state).toBe('OK')
-  })
-
-  it('読みが複数書かれている行は、選ばせる状態にする（勝手に 1 つに決めない）', () => {
-    const rows = parsePaste('開く\tあく・ひらく\t开；打开')
-
-    expect(rows[0]?.state).toBe('MULTI_READING')
-    expect(rows[0]?.readingCandidates).toEqual(['あく', 'ひらく'])
-    expect(rows[0]?.note).toContain('別の単語')
-    expect(splitReadings('あく/ひらく')).toEqual(['あく', 'ひらく'])
   })
 })
 
@@ -207,6 +183,39 @@ describe('デモ：Unit の自動割り当て（入力順と容量だけ。AI �
       ['Unit003', 3]
     ])
     expect(result.words[0]?.seq).toBe(1)
+  })
+
+  it('既存の書籍から 1 Unit の語数を自動で決める（いちばん多い Unit を基準にする）', () => {
+    // 20 / 20 / 20 / 18 の本 → 20（入力途中の 18 に引っ張られない）
+    expect(detectUnitSize({
+      id: 'b', name: 'A', unitSize: 20,
+      units: [
+        { name: 'Unit001', count: 20, capacity: 20 },
+        { name: 'Unit002', count: 20, capacity: 20 },
+        { name: 'Unit003', count: 18, capacity: 20 }
+      ],
+      note: ''
+    })).toBe(20)
+
+    // 12 語ずつの本 → 12
+    expect(detectUnitSize({
+      id: 'b2', name: 'B', unitSize: 12,
+      units: [{ name: 'Unit001', count: 12, capacity: 12 }, { name: 'Unit002', count: 12, capacity: 12 }],
+      note: ''
+    })).toBe(12)
+
+    // 空の本・語が 1 つも入っていない本は、決められないので既定値
+    expect(detectUnitSize(null)).toBe(20)
+    expect(detectUnitSize({ id: 'b3', name: 'C', unitSize: 20, units: [], note: '' })).toBe(20)
+    expect(detectUnitSize({
+      id: 'b4', name: 'D', unitSize: 20,
+      units: [{ name: 'Unit001', count: 0, capacity: 20 }], note: ''
+    })).toBe(20)
+  })
+
+  it('見出し語の揺れ（全角・空白）をならして比べる', () => {
+    expect(normalizeHeading('　図書館 ')).toBe('図書館')
+    expect(normalizeHeading('ＡＢＣ')).toBe('abc')
   })
 
   it('Unit 名は番号で比べる（Unit010 > Unit009）', () => {

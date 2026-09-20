@@ -35,6 +35,11 @@
         <result property="recordedEndSample" column="録音終了サンプル"/>
         <result property="recordedComplete"  column="録音完備"/>
         <result property="lostSeqs"          column="録音欠落連番"/>
+        <result property="transcribeStatus"  column="認識収尾状態"/>
+        <result property="transcribeComplete" column="認識完備"/>
+        <result property="transcribeSources" column="認識音源状態"/>
+        <result property="transcribeReason"  column="認識収尾理由"/>
+        <result property="transcribeUpdatedAt" column="認識収尾更新日時"/>
         <result property="assemblyState"     column="結合状態"/>
         <result property="assemblyDigest"    column="結合元ダイジェスト"/>
         <result property="assemblyDuration"  column="結合長秒"/>
@@ -51,6 +56,7 @@
         "録音ファイル保存先", "保存ファイル名", "録音MIME", "録音ファイルサイズ",
         "録音時間秒", "転写済み文字数", "保持期限",
         "録音分塊最終連番", "録音分塊宣言数", "録音終了サンプル", "録音完備", "録音欠落連番",
+        "認識収尾状態", "認識完備", "認識音源状態", "認識収尾理由", "認識収尾更新日時",
         "結合状態", "結合元ダイジェスト", "結合長秒", "結合理由", "結合開始日時", "結合終了日時",
         "バージョン", "更新者アカウントID", "登録元コード", "更新元コード", "登録日時", "更新日時"
     </sql>
@@ -237,6 +243,22 @@
                "結合終了日時"     = CASE WHEN #{state} IN ('READY', 'FAILED', 'INCOMPLETE')
                                           THEN CURRENT_TIMESTAMP
                                           ELSE "結合終了日時" END,
+               "更新日時"         = CURRENT_TIMESTAMP
+         WHERE "授業記録ID" = #{recordId}
+    </update>
+
+    <!--
+      書き起こし（認識）の収尾の結果を残す（**画面を開き直しても分かるように**）。
+      「やり直しても直らない不完整な終わり」は `error` が null なので、応答だけでは
+      後から「識別が完全だったか」を確かめられない。
+    -->
+    <update id="updateTranscribeState">
+        UPDATE public."CR_授業記録情報"
+           SET "認識収尾状態"     = #{status},
+               "認識完備"         = #{complete},
+               "認識音源状態"     = #{sources},
+               "認識収尾理由"     = #{reason},
+               "認識収尾更新日時" = CURRENT_TIMESTAMP,
                "更新日時"         = CURRENT_TIMESTAMP
          WHERE "授業記録ID" = #{recordId}
     </update>
