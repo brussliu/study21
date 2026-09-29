@@ -9,8 +9,8 @@ const generatedDir = path.join(webRoot, 'src', 'views', 'prototype', 'generated'
 const appCss = readFileSync(path.join(webRoot, 'src', 'assets', 'app', 'app.css'), 'utf8')
 
 describe('migrated prototype pages', () => {
-  it('旧ログインを除く94画面をVueコンポーネントとして登録する', () => {
-    expect(prototypePages).toHaveLength(94)
+  it('旧ログインを除く93画面をVueコンポーネントとして登録する', () => {
+    expect(prototypePages).toHaveLength(93)
     expect(prototypePageMap.has('home')).toBe(true)
     expect(prototypePageMap.has('english')).toBe(true)
     expect(prototypePageMap.has('math-wrong')).toBe(true)

@@ -2,6 +2,7 @@ package com.study21.admin.geometryai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.study21.admin.ai.AiErrorMessages;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.ImageContent;
 import dev.langchain4j.data.message.SystemMessage;
@@ -117,13 +118,18 @@ public class GeometryAiLangChain4jClient implements GeometryAiClient {
                 .apiKey(request.apiKey())
                 .modelName(request.model())
                 .temperature(request.temperature())
-                .maxTokens(request.maxCompletionTokens())
                 .timeout(Duration.ofSeconds(Math.max(1, request.timeoutSeconds())))
                 // 再試行はバッチ側（履歴・再試行回数）が持つので、ここでは重ねない
                 .maxRetries(0)
                 // プロンプトと応答は BAT_AI呼出履歴情報 に残すので、ライブラリのログには出さない
                 .logRequests(false)
                 .logResponses(false);
+        // 出力の上限の指定方法はモデルで違う（GPT-5 系は max_tokens を受け付けない）
+        if (GeometryAiClient.requiresCompletionTokens(request.model())) {
+            builder.maxCompletionTokens(request.maxCompletionTokens());
+        } else {
+            builder.maxTokens(request.maxCompletionTokens());
+        }
         if (request.jsonResponse()) {
             // 従来実装と同じ response_format（JSON を返せるモデルにだけ付ける）
             builder.responseFormat("json_object");
@@ -193,9 +199,11 @@ public class GeometryAiLangChain4jClient implements GeometryAiClient {
     private AiResponse clientError(int status, AiRequest request, RuntimeException cause) {
         log.warn("geometry ai call rejected (langchain4j). provider={} model={} status={} message={}",
                 request.provider(), request.model(), status, cause.getMessage());
+        // LangChain4j の例外メッセージには**プロバイダーが返した本文**が入っている
+        // （例: {"error":{"message":"Access denied ...","code":"Arrearage"}}）。
+        // 定型文だけでは原因が分からないので、そのまま後ろに付けて画面・履歴へ返す
         return AiResponse.failure(status, "HTTP_4XX",
-                "AI がリクエストを受け付けませんでした（HTTP " + status
-                        + "）。API Key とモデル名を確認してください。");
+                AiErrorMessages.clientError(status, cause.getMessage()));
     }
 
     /** LangChain4j（JDK の HTTP クライアント）は割り込みを RuntimeException で包むので、原因をたどる。 */

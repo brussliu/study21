@@ -55,6 +55,10 @@ CREATE TABLE IF NOT EXISTS public."JPN_テスト出題情報" (
     "回答完了日時"           TIMESTAMP    NULL,
     -- 出題時点の単語・詳細の写し（あとで教材が変わっても問題内容を再現できるように残す）
     "単語スナップショットJSON" JSONB      NOT NULL DEFAULT '{}',
+    -- 出題した選択肢と、その回の回答履歴（2026-09-13 の移行で追加。
+    -- **新規構築でも要る**のでここにも定義する。空配列が既定）
+    "出題選択肢JSON"         JSONB       NOT NULL DEFAULT '[]',
+    "回答履歴JSON"           JSONB       NOT NULL DEFAULT '[]',
     "登録者アカウントID"     BIGINT       NULL,
     "更新者アカウントID"     BIGINT       NULL,
     "登録元コード"           VARCHAR(20)  NOT NULL DEFAULT 'APP',

@@ -31,6 +31,8 @@ const emit = defineEmits<{
 }>()
 
 const table = ref<HTMLTableElement | null>(null)
+/** 表を入れる枠（固定の高さにして、行が増えたら縦にスクロールさせる）。 */
+const scrollBox = ref<HTMLDivElement | null>(null)
 const limit = computed(() => props.maxRows ?? 500)
 
 /* ---------- 選択と編集（Excel と同じ 2 つのモード） ---------- */
@@ -59,8 +61,12 @@ function range(): { top: number; bottom: number; left: number; right: number } {
   }
 }
 
-/** セルの見た目（Excel 風の緑）。 */
+/** セルの見た目（Excel 風の緑）。選んでいる範囲と、いま入力中のセルを示す。 */
 function cellClasses(row: number, col: number): Record<string, boolean> {
+  // 入力中のセルは、選んでいなくても分かるようにする
+  if (isEditing(row, col)) {
+    return { 'is-editing': true }
+  }
   if (cursor.value === null) {
     return {}
   }
@@ -349,31 +355,42 @@ function removeRow(row: number): void {
 /* ---------- 列の幅（見出しの右端をつまんで変える） ---------- */
 
 /**
- * 単語の列の幅（**px**。画面の幅に左右されない）。
+ * 単語の列の幅（**px**。つまみで決めた幅を保つ）。
  *
- * **× と NO は固定**（TODO の表と同じで、つまみも置かない）。単語だけを px で持ち、
- * 残りは表の幅が吸収するので、単語の幅を変えても × と NO は動かない。
+ * **× と NO は固定**（TODO の表と同じで、つまみも置かない）。
+ * 既定は `null` で、そのときは置かれた幅いっぱいを単語の列が使う。
+ * つまみを動かしたときだけ px を持ち、その幅を保つ（**狭くも広くもできる**。
+ * 置かれた幅より広くすると、表が横に伸びて置き場所が横スクロールになる）。
  */
-const MIN_WIDTH = 120
+const MIN_WIDTH = 80
 const DEFAULT_WIDTH = 520
-const width = ref(DEFAULT_WIDTH)
+const width = ref<number | null>(null)
 
 function resetWidth() {
-  width.value = DEFAULT_WIDTH
+  width.value = null
 }
 
-/** 単語の列の幅を変える（× と NO は固定なので動かない）。 */
+/** いま使っている単語の列の幅（px）。未指定なら置かれた幅から決める。 */
+function currentWidth(): number {
+  if (width.value !== null) {
+    return width.value
+  }
+  const box = scrollBox.value?.getBoundingClientRect().width ?? 0
+  return box > 0 ? Math.max(MIN_WIDTH, box - 7 * 16) : DEFAULT_WIDTH
+}
+
+/** 単語の列の幅を変える（**狭くも広くもできる**。× と NO は固定なので動かない）。 */
 function startResize(event: MouseEvent): void {
-  const element = table.value
-  if (element === null) {
+  if (table.value === null) {
     return
   }
   const startX = event.clientX
-  const startWidth = width.value
-  const tableWidth = element.getBoundingClientRect().width
+  const startWidth = currentWidth()
+  // 上限は置き場所の広さに余裕を足した幅。ここまで伸ばすと表が横スクロールになる。
+  // ドラッグ中は測り直さない（伸ばすほど上限も伸びて、止まらなくなるため）。
+  const max = (scrollBox.value?.clientWidth ?? 1200) + 400
+  width.value = startWidth
   const move = (moveEvent: MouseEvent): void => {
-    // 単語の列だけを広げる／狭める（× と NO は固定なので触らない）
-    const max = tableWidth > 0 ? Math.max(MIN_WIDTH, tableWidth - 140) : 2000
     width.value = Math.min(Math.max(startWidth + (moveEvent.clientX - startX), MIN_WIDTH), max)
   }
   const up = (): void => {
@@ -384,17 +401,16 @@ function startResize(event: MouseEvent): void {
   window.addEventListener('mouseup', up)
 }
 
-/** つまみのキーボード操作（←→ で 1%、Shift で 5%）。 */
+/** つまみのキーボード操作（←→ で 40px ずつ）。 */
 function onResizeKeydown(event: KeyboardEvent): void {
-  const step = event.shiftKey ? 40 : 10
+  const step = 40
   const delta = event.key === 'ArrowLeft' ? -step : event.key === 'ArrowRight' ? step : 0
   if (delta === 0) {
     return
   }
   event.preventDefault()
-  const tableWidth = table.value?.getBoundingClientRect().width ?? 0
-  const max = tableWidth > 0 ? Math.max(MIN_WIDTH, tableWidth - 140) : 2000
-  width.value = Math.min(Math.max(width.value + delta, MIN_WIDTH), max)
+  const max = (scrollBox.value?.clientWidth ?? 1200) + 400
+  width.value = Math.min(Math.max(currentWidth() + delta, MIN_WIDTH), max)
 }
 
 
@@ -424,74 +440,78 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <table
-    ref="table" class="jp-sheet" tabindex="0" aria-label="登録する単語" data-demo-word-grid
-    :style="{ width: `calc(7rem + ${width}px)` }"
+  <!-- 表を入れる枠。高さを決めておき、行が増えたらこの中を縦にスクロールさせる -->
+  <div ref="scrollBox" class="jp-sheet-scroll" data-demo-word-scroll>
+    <table
+      ref="table" class="jp-sheet" tabindex="0" aria-label="登録する単語" data-demo-word-grid
+      :style="width === null ? { width: 'calc(100% - 1px)' } : { width: `calc(7rem + ${width}px)` }"
 
-    @copy="onCopy" @paste="onPaste" @keydown="onKeydown"
-  >
-    <colgroup>
-      <!--
+      @copy="onCopy" @paste="onPaste" @keydown="onKeydown"
+    >
+      <colgroup>
+        <!--
         左の 2 列（× と NO）は**固定**（TODO の表と同じ）。つまみも置かない。
-        残りを単語の列が取る（単語の幅を変えても、この 2 列は動かない）。
+        単語の列はつまみで幅を決めるまでは、残りを全部使う。
       -->
-      <col style="width: 3.5rem">
-      <col style="width: 3.5rem">
-      <col :style="{ width: `${width}px` }">
-    </colgroup>
-    <thead>
-      <tr>
-        <th class="jp-sheet__no-head" aria-label="削除" />
-        <th class="jp-sheet__no-head">NO</th>
-        <th data-col="word" style="position: relative">
-          単語
-          <span
-            class="jp-sheet__resizer" role="separator" aria-orientation="vertical" tabindex="0"
-            aria-label="単語の幅を変える" data-demo-col-resizer="word"
-            title="ドラッグで幅を変えます（ダブルクリックで既定に戻す）"
-            @mousedown.stop.prevent="startResize($event)"
-            @dblclick.stop="resetWidth()"
-            @keydown.stop="onResizeKeydown($event)"
-          />
-        </th>
-      </tr>
-    </thead>
-    <tbody data-demo-word-grid-body>
-      <tr v-for="(value, row) in values" :key="row" :data-demo-word-row-index="row">
-        <td class="jp-sheet__remove">
-          <button
-            type="button" class="btn btn--icon btn--sm" :aria-label="`${row + 1} 行目を削除`"
-            :data-demo-remove-row="row" @click="removeRow(row)"
+        <col style="width: 3.5rem">
+        <col style="width: 3.5rem">
+        <col :style="width === null ? undefined : { width: `${width}px` }">
+      </colgroup>
+      <thead>
+        <tr>
+          <th class="jp-sheet__no-head" aria-label="削除" />
+          <th class="jp-sheet__no-head">NO</th>
+          <th data-col="word" style="position: relative">
+            単語
+            <span
+              class="jp-sheet__resizer" role="separator" aria-orientation="vertical" tabindex="0"
+              aria-label="単語の幅を変える" data-demo-col-resizer="word"
+              title="ドラッグで幅を変えます（ダブルクリックで既定に戻す）"
+              @mousedown.stop.prevent="startResize($event)"
+              @dblclick.stop="resetWidth()"
+              @keydown.stop="onResizeKeydown($event)"
+            />
+          </th>
+        </tr>
+      </thead>
+      <tbody data-demo-word-grid-body>
+        <tr v-for="(value, row) in values" :key="row" :data-demo-word-row-index="row">
+          <td class="jp-sheet__remove">
+            <button
+              type="button" class="btn btn--icon btn--sm" :aria-label="`${row + 1} 行目を削除`"
+              :data-demo-remove-row="row" @click="removeRow(row)"
+            >
+              <AppIcon name="x" size="sm" class="icon--danger" />
+            </button>
+          </td>
+          <td class="jp-sheet__no">{{ row + 1 }}</td>
+          <td
+            data-col="word" :data-cell="`${row}-0`" :data-demo-word-cell="row" :class="cellClasses(row, 0)"
+            @mousedown="startSelection(row, 0, $event)"
+            @mouseenter="extendSelection(row, 0)"
+            @click="focusTable()"
+            @dblclick="startEdit(row, 0)"
           >
-            <AppIcon name="x" size="sm" class="icon--danger" />
-          </button>
-        </td>
-        <td class="jp-sheet__no">{{ row + 1 }}</td>
-        <td
-          data-col="word" :data-cell="`${row}-0`" :data-demo-word-cell="row" :class="cellClasses(row, 0)"
-          @mousedown="startSelection(row, 0, $event)"
-          @mouseenter="extendSelection(row, 0)"
-          @click="focusTable()"
-          @dblclick="startEdit(row, 0)"
-        >
-          <input
-            v-if="isEditing(row, 0)"
-            :value="value" type="text" :aria-label="`${row + 1} 行目の単語`"
-            :data-demo-word-input="row"
-            @input="setCell(row, ($event.target as HTMLInputElement).value)"
-            @keydown="onEditorKeydown" @blur="commitEdit"
-          >
-          <span v-else class="jp-sheet__value" :data-demo-word-value="row">{{ value }}</span>
-        </td>
-      </tr>
-      <tr v-if="values.length === 0">
-        <td colspan="3" class="jp-hint" style="padding: var(--sp-3)">
-          Excel から単語の列をコピーして、この表に貼り付けてください（1 行に 1 語）。
-        </td>
-      </tr>
-    </tbody>
-  </table>
+            <input
+              v-if="isEditing(row, 0)"
+              :value="value" type="text" :aria-label="`${row + 1} 行目の単語`"
+              :data-demo-word-input="row"
+              @input="setCell(row, ($event.target as HTMLInputElement).value)"
+              @keydown="onEditorKeydown" @blur="commitEdit"
+            >
+            <span v-else class="jp-sheet__value" :data-demo-word-value="row">{{ value }}</span>
+          </td>
+        </tr>
+        <tr v-if="values.length === 0">
+          <td colspan="3" class="jp-hint" style="padding: var(--sp-3)">
+            Excel から単語の列をコピーして、この表に貼り付けてください（1 行に 1 語）。
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
 
-  <!-- 行追加は画面には出さない（Excel の貼り付けで足りるため。動作確認用に残す） -->
+  <!-- 行の追加は画面の見出し（TODO の新規と同じ位置）に置く。
+       ここは動作確認用の入口として残す（画面には出さない）。 -->
   <span hidden data-demo-add-row @click="addRow" />
 </template>

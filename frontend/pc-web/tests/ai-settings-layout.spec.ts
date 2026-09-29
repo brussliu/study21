@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   AI_TABS,
+  AI_TAB_DATA,
   aiIsFullWidth,
   aiLabelOf,
   aiSliderOf,
   aiTabOf,
   aiTabsOf,
+  aiTabsWithData,
   normalizeAiFields,
   sortAiFields,
   type AiFieldLike
@@ -164,6 +166,32 @@ describe('AI 設定の共通レイアウト', () => {
     expect(aiTabsOf([{ key: 'c05AiModel' }, { key: 'c05PromptZh' }])).toEqual(['基本設定', 'System Prompt'])
     expect(aiTabsOf([{ key: 'c042UserPrompt' }, { key: 'c042AiProvider' }])).toEqual(['基本設定', 'User Prompt'])
     expect(aiTabsOf([])).toEqual([])
+  })
+
+  /**
+   * Data TAB（AI 出力 DTO の構造を見るタブ）は**項目を持たない**ので `aiTabsOf` では出てこない。
+   * 「区画が出力 DTO を持つか」で足し、並びは プロンプトの後ろ・その他の前 に固定する。
+   *
+   * ここが抜けると、日本語単語AI の 4 区画から Data が消える（実際に消えていた。
+   * 区画定義に tabs を書いても、設定ランタイムがこの関数の結果で上書きする）。
+   */
+  it('Data TAB は プロンプトの後ろ・その他の前に入る（無いときは足さない）', () => {
+    expect(AI_TAB_DATA).toBe('Data')
+    const tabs = aiTabsOf([
+      { key: 'c25AiProvider' }, { key: 'c25SystemPrompt' }, { key: 'c25UserPrompt' }, { key: 'c25RetryLimit' }
+    ])
+    expect(tabs).toEqual(['基本設定', 'System Prompt', 'User Prompt', 'その他'])
+    expect(aiTabsWithData(tabs, true))
+      .toEqual(['基本設定', 'System Prompt', 'User Prompt', 'Data', 'その他'])
+    // 出力 DTO を持たない区画には足さない
+    expect(aiTabsWithData(tabs, false)).toEqual(tabs)
+    // 「その他」が無い区画（プロンプトだけ）でも、Data は最後に来る
+    expect(aiTabsWithData(['基本設定', 'System Prompt'], true))
+      .toEqual(['基本設定', 'System Prompt', 'Data'])
+    // Data は AI_TABS（設定項目の TAB）には入れない（aiTabOf が返してはいけない）
+    expect(AI_TABS).not.toContain(AI_TAB_DATA)
+    // 元の配列は変えない
+    expect(aiTabsWithData(tabs, true)).not.toBe(tabs)
   })
 
   it('sortAiFields は TAB と項目の順に並べ替える（TAB や名称は変えない）', () => {

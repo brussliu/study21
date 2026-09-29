@@ -12,6 +12,8 @@
         <result property="readingKey"        column="読みキー"/>
         <result property="jlptLevel"         column="JLPTレベル"/>
         <result property="partOfSpeech"      column="品詞"/>
+        <!-- 中国語訳は有効版の詳細から引く（単語情報に列が無い） -->
+        <result property="chineseMeaning"    column="中国語訳"/>
         <result property="stateCode"         column="状態コード"/>
         <result property="note"              column="備考"/>
         <result property="version"           column="バージョン"/>
@@ -28,11 +30,25 @@
         <result property="learned"           column="習得済フラグ"/>
         <result property="lastStudiedAt"     column="最終学習日時"/>
         <result property="nextReviewAt"      column="次回復習日時"/>
+        <!-- AI 取得の状態（一覧の「取得状態」列。検索のときだけ入る） -->
+        <result property="detailAiState"            column="詳細AI状態"/>
+        <result property="readingProblemAiState"    column="読問題AI状態"/>
+        <result property="kanjiProblemReadingState" column="漢字読問題AI状態"/>
+        <result property="contextProblemAiState"    column="文脈問題AI状態"/>
+        <result property="kanjiProblemAiState"      column="漢字問題AI状態"/>
     </resultMap>
 
     <sql id="WordColumns">
         w."単語ID", w."旧単語ID", w."見出し語", w."読み", w."見出し語キー", w."読みキー",
-        w."JLPTレベル", w."品詞", w."状態コード", w."備考", w."バージョン",
+        w."JLPTレベル", w."状態コード", w."備考", w."バージョン",
+        <!--
+          品詞・中国語訳は AI の詳細（有効版）から補う。
+          品詞は人が単語情報へ入れた値が優先。中国語訳は有効版の最初の語義の中国語
+          （語義が無い版だけ、詳細の 説明_中国語 へ戻す）。
+          1 語 1 版のヘッダ（d の断片）と、その版の最初の語義（sense の断片）を参照する。
+        -->
+        COALESCE(NULLIF(BTRIM(w."品詞"), ''), d."品詞") AS "品詞",
+        COALESCE(sense."中国語", d."説明_中国語") AS "中国語訳",
         col."書籍", col."分類", col."レベル", col."単語SEQ", COALESCE(col."収録数", 0) AS "収録数",
         COALESCE(s."学習状態", 'NOT_STARTED') AS "学習状態",
         COALESCE(s."総合習得度", 0) AS "総合習得度",
@@ -40,7 +56,8 @@
         COALESCE(s."正解回数", 0) AS "正解回数",
         COALESCE(s."お気に入りフラグ", false) AS "お気に入りフラグ",
         COALESCE(s."習得済フラグ", false) AS "習得済フラグ",
-        s."最終学習日時", s."次回復習日時"
+        s."最終学習日時", s."次回復習日時",
+        ai."詳細AI状態", ai."読問題AI状態", ai."漢字読問題AI状態", ai."文脈問題AI状態", ai."漢字問題AI状態"
     </sql>
 
     <!-- 教材のどこに載っているかは 1 語につき 1 件だけ出す（残りは 収録数 で示す） -->
@@ -55,13 +72,63 @@
              ORDER BY c."レベル", c."書籍", c."分類", c."単語SEQ"
              LIMIT 1
         ) col ON TRUE
+        <!--
+          一覧の「品詞」「中国語訳」。AI の詳細は 1 語 N 版（有効版は部分 UNIQUE 索引で 1 つ）なので、
+          有効版のヘッダを 1 件引き、その版の最初の語義（表示順 → 語義ID）を 1 件引く。
+          詳細がまだ無い語（AI 未取得）は NULL のまま＝画面は「—」を出す。
+        -->
+        LEFT JOIN LATERAL (
+            SELECT dv."詳細ID", dv."品詞", dv."説明_中国語"
+              FROM public."JPN_単語詳細情報" dv
+             WHERE dv."単語ID" = w."単語ID" AND dv."状態コード" = 'ACTIVE'
+             ORDER BY dv."詳細ID" DESC
+             LIMIT 1
+        ) d ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT sn."中国語"
+              FROM public."JPN_単語詳細_語義情報" sn
+             WHERE sn."詳細ID" = d."詳細ID"
+             ORDER BY sn."表示順", sn."語義ID"
+             LIMIT 1
+        ) sense ON TRUE
+        <!--
+          AI 取得の状態（一覧の「取得状態」列）。履歴は 1 語 1 内容種別に何行もできるので、
+          ビュー v_jpn_word_ai_state（最新 1 行 ＋ 成功あり）を 4 つの区画にまとめて 1 行で返す。
+          一度でも成功していれば「SUCCEEDED」として返す（内容は DB に残っているため）。
+          どれも成功していなければ、一番新しい実行の状態（FAILED / RUNNING など）。
+        -->
+        LEFT JOIN LATERAL (
+            SELECT
+                (array_agg(CASE WHEN a."成功あり" THEN 'SUCCEEDED' ELSE a."状態コード" END
+                           ORDER BY a."成功あり" DESC, a."登録日時" DESC NULLS LAST)
+                    FILTER (WHERE a."内容種別コード" = 'A_DETAIL'))[1] AS "詳細AI状態",
+                (array_agg(CASE WHEN a."成功あり" THEN 'SUCCEEDED' ELSE a."状態コード" END
+                           ORDER BY a."成功あり" DESC, a."登録日時" DESC NULLS LAST)
+                    FILTER (WHERE a."内容種別コード" = 'C1_READING'))[1] AS "読問題AI状態",
+                (array_agg(CASE WHEN a."成功あり" THEN 'SUCCEEDED' ELSE a."状態コード" END
+                           ORDER BY a."成功あり" DESC, a."登録日時" DESC NULLS LAST)
+                    FILTER (WHERE a."内容種別コード" = 'C2_KANJI'))[1] AS "漢字読問題AI状態",
+                (array_agg(CASE WHEN a."成功あり" THEN 'SUCCEEDED' ELSE a."状態コード" END
+                           ORDER BY a."成功あり" DESC, a."登録日時" DESC NULLS LAST)
+                    FILTER (WHERE a."内容種別コード" = 'D_CONTEXT_MEANING'))[1] AS "文脈問題AI状態",
+                (array_agg(CASE WHEN a."成功あり" THEN 'SUCCEEDED' ELSE a."状態コード" END
+                           ORDER BY a."成功あり" DESC, a."登録日時" DESC NULLS LAST)
+                    FILTER (WHERE a."内容種別コード" = 'E_KANJI_USAGE'))[1] AS "漢字問題AI状態"
+              FROM public."v_jpn_word_ai_state" a
+             WHERE a."単語ID" = w."単語ID"
+        ) ai ON TRUE
     </sql>
 
+    <!--
+      一覧の絞り込み（条件だけ。**WHERE は呼ぶ側で付ける**）。
+      呼ぶ側が <where> で包むのは、条件が 1 つも無いときに WHERE を出さないため
+      （逆に、条件を SELECT 側へ素の AND で足すと WHERE が出ずに JOIN の ON に付いて効かなくなる。
+       実際に踏んだ。2026-09-27）。
+    -->
     <sql id="WordWhere">
-        <where>
-            <if test="keyword != null and keyword != ''">
-                AND (w."見出し語" ILIKE '%' || #{keyword} || '%' OR w."見出し語キー" ILIKE '%' || #{keyword} || '%')
-            </if>
+        <if test="keyword != null and keyword != ''">
+            AND (w."見出し語" ILIKE '%' || #{keyword} || '%' OR w."見出し語キー" ILIKE '%' || #{keyword} || '%')
+        </if>
             <if test="reading != null and reading != ''">
                 AND (w."読み" ILIKE '%' || #{reading} || '%' OR w."読みキー" ILIKE '%' || #{reading} || '%')
             </if>
@@ -69,7 +136,8 @@
                 AND w."JLPTレベル" = #{jlpt}
             </if>
             <if test="part != null and part != ''">
-                AND COALESCE(w."品詞", '') ILIKE '%' || #{part} || '%'
+                <!-- 表示と同じ値で絞り込む（AI が入れた品詞でも絞り込める） -->
+                AND COALESCE(NULLIF(BTRIM(w."品詞"), ''), d."品詞") ILIKE '%' || #{part} || '%'
             </if>
             <if test="state != null and state != ''">
                 AND w."状態コード" = #{state}
@@ -81,25 +149,112 @@
                 AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cb
                              WHERE cb."単語ID" = w."単語ID" AND cb."書籍" ILIKE '%' || #{book} || '%')
             </if>
-            <if test="category != null and category != ''">
-                AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cc
-                             WHERE cc."単語ID" = w."単語ID" AND cc."分類" ILIKE '%' || #{category} || '%')
+            <!--
+              分類は**範囲**（From ～ To。教材の課次 Unit001〜Unit005 など）。
+              片方だけでもよい。**同じ収録の行**で両端を見る（別々の EXISTS にすると、
+              「別の Unit で From を満たし、さらに別の Unit で To を満たす語」まで拾ってしまう）。
+            -->
+            <if test="(categoryFrom != null and categoryFrom != '') or (categoryTo != null and categoryTo != '')">
+                AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cr
+                             WHERE cr."単語ID" = w."単語ID"
+                    <if test="categoryFrom != null and categoryFrom != ''">
+                               AND cr."分類" &gt;= #{categoryFrom}
+                    </if>
+                    <if test="categoryTo != null and categoryTo != ''">
+                               AND cr."分類" &lt;= #{categoryTo}
+                    </if>
+                           )
             </if>
-        </where>
     </sql>
 
     <select id="count" resultType="long">
         SELECT count(*)
         <include refid="WordJoins"/>
-        <include refid="WordWhere"/>
+        <where>
+            <include refid="WordWhere"/>
+        </where>
     </select>
 
     <select id="search" resultMap="WordMap">
         SELECT <include refid="WordColumns"/>
         <include refid="WordJoins"/>
-        <include refid="WordWhere"/>
-         ORDER BY w."見出し語キー" ASC, w."単語ID" ASC
+        <where>
+            <include refid="WordWhere"/>
+        </where>
+         <!--
+           並びは「書籍 → 分類 → 単語SEQ → 単語ID」。
+           教材の並び（Unit の中の順番）で読めるようにする（見出し語の五十音順ではない）。
+           収録が無い語（書籍・分類が NULL）は NULLS LAST で後ろにまとめる。
+         -->
+         ORDER BY col."書籍" ASC NULLS LAST,
+                  col."分類" ASC NULLS LAST,
+                  COALESCE(col."単語SEQ", 0) ASC,
+                  w."単語ID" ASC
          LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!--
+      「その取得区分の状態」。一覧（JpnWordMapper の LATERAL ＋ JapaneseServiceImpl#orElseState）と
+      **同じまとめ方**にする（変えるときは両方そろえる）:
+        ・A・B は詳細（A_DETAIL）そのもの
+        ・C は C1・C2 をまとめる（どちらか成功なら SUCCEEDED、でなければ値のあるほう）
+        ・D・E はそれぞれの内容種別そのもの
+      ※ <sql> は**使う前に**置く（MyBatis は文書順に解決する）。
+    -->
+    <sql id="AiAreaState">
+        <choose>
+            <!-- 1 文字の区分は**二重引用符**で書く（OGNL では 'C' が char になり、
+                 String と比べようとして NumberFormatException になる。実際に踏んだ） -->
+            <when test='kind == "DETAIL"'>ai."詳細AI状態"</when>
+            <when test='kind == "C"'>
+                (CASE WHEN ai."読問題AI状態" = 'SUCCEEDED' OR ai."漢字読問題AI状態" = 'SUCCEEDED' THEN 'SUCCEEDED'
+                      WHEN ai."読問題AI状態" IS NOT NULL THEN ai."読問題AI状態"
+                      ELSE ai."漢字読問題AI状態" END)
+            </when>
+            <when test='kind == "D"'>ai."文脈問題AI状態"</when>
+            <otherwise>ai."漢字問題AI状態"</otherwise>
+        </choose>
+    </sql>
+
+    <!--
+      AI 取得の対象（検索条件に一致する語のうち、今回受付ける分）。
+      絞り込みは一覧と同じ WordWhere を <where> で包んで使い、その**中に**「取得済み・取得中を除く」を足す。
+      並びも一覧と同じ（書籍 → 分類 → 単語SEQ → 単語ID）。**ID だけ**を返す。
+      ※ 条件を <where> の外へ素の AND で書かない（絞り込みが空だと WHERE が出ず、直前の
+       LEFT JOIN LATERAL ... ON TRUE に付いて効かなくなる。実際に踏んだ。2026-09-27）
+    -->
+    <select id="findAiTargets" resultType="long">
+        SELECT w."単語ID"
+        <include refid="WordJoins"/>
+        <where>
+            <include refid="WordWhere"/>
+            <if test="skipAcquired">
+                <!-- 取得済み（SUCCEEDED）と取得中（RUNNING / QUEUED）は今回の対象にしない。
+                     IS DISTINCT FROM は NULL を「違う」と見るので、まだ取得していない語は対象に残る
+                     （画面の needsAiFetch と同じ判定）。<where> の中に置く理由は上のコメント参照 -->
+                AND (<include refid="AiAreaState"/>) IS DISTINCT FROM 'SUCCEEDED'
+                AND (<include refid="AiAreaState"/>) IS DISTINCT FROM 'RUNNING'
+                AND (<include refid="AiAreaState"/>) IS DISTINCT FROM 'QUEUED'
+            </if>
+        </where>
+        ORDER BY col."書籍" ASC NULLS LAST,
+                 col."分類" ASC NULLS LAST,
+                 COALESCE(col."単語SEQ", 0) ASC,
+                 w."単語ID" ASC
+        LIMIT #{limit}
+    </select>
+
+    <!-- 窓に出す件数（一致総数・取得済み・今回取得できる数）。一覧と同じビューを見る -->
+    <select id="countAiTargets" resultType="com.study21.user.japanese.JpnAiTargetCountsEntity">
+        SELECT count(*) AS "total",
+               count(*) FILTER (WHERE (<include refid="AiAreaState"/>) = 'SUCCEEDED') AS "acquired",
+               count(*) FILTER (WHERE (<include refid="AiAreaState"/>) IS DISTINCT FROM 'SUCCEEDED'
+                                  AND (<include refid="AiAreaState"/>) IS DISTINCT FROM 'RUNNING'
+                                  AND (<include refid="AiAreaState"/>) IS DISTINCT FROM 'QUEUED') AS "candidates"
+        <include refid="WordJoins"/>
+        <where>
+            <include refid="WordWhere"/>
+        </where>
     </select>
 
     <select id="totals" resultType="com.study21.user.japanese.JpnTotalsEntity">
@@ -119,10 +274,16 @@
          WHERE w."単語ID" = #{wordId}
     </select>
 
+    <!--
+      同じ見出し語・同じ読みの語を探す。
+      読みは任意（未取得は NULL）なので、**NULL 同士でも一致する**ように IS NOT DISTINCT FROM で比べる
+      （`=` だと NULL = NULL が成立せず、読みなしの重複を見逃す）。
+    -->
     <select id="findByWordAndReading" resultType="com.study21.user.japanese.JpnWordEntity">
         SELECT "単語ID" AS "wordId", "見出し語" AS "word", "読み" AS "reading"
           FROM public."JPN_単語情報"
-         WHERE "見出し語" = #{word} AND "読み" = #{reading}
+         WHERE "見出し語" = #{word}
+           AND "読み" IS NOT DISTINCT FROM #{reading}
          LIMIT 1
     </select>
 
@@ -132,7 +293,7 @@
             "見出し語", "読み", "見出し語キー", "読みキー", "JLPTレベル", "品詞", "状態コード", "備考",
             "登録者アカウントID", "登録元コード"
         ) VALUES (
-            #{word}, #{reading}, #{wordKey}, #{readingKey}, #{jlptLevel}, #{partOfSpeech}, #{stateCode}, #{note},
+            #{word}, #{reading,jdbcType=VARCHAR}, #{wordKey}, #{readingKey}, #{jlptLevel,jdbcType=VARCHAR}, #{partOfSpeech}, #{stateCode}, #{note},
             #{createdBy}, 'APP'
         )
     </insert>
@@ -140,10 +301,10 @@
     <update id="update" parameterType="com.study21.user.japanese.JpnWordEntity">
         UPDATE public."JPN_単語情報"
            SET "見出し語"         = #{word},
-               "読み"             = #{reading},
+               "読み"             = #{reading,jdbcType=VARCHAR},
                "見出し語キー"     = #{wordKey},
                "読みキー"         = #{readingKey},
-               "JLPTレベル"       = #{jlptLevel},
+               "JLPTレベル"       = #{jlptLevel,jdbcType=VARCHAR},
                "品詞"             = #{partOfSpeech},
                "状態コード"       = #{stateCode},
                "備考"             = #{note},
@@ -169,6 +330,90 @@
          ORDER BY "レベル", "書籍", "分類", "単語SEQ"
     </select>
 
+    <!--
+      収録を 1 件つくる（新規登録画面の保存）。
+      書籍マスタがあるときは 書籍ID も入れる（無くても 書籍 の名前だけで一覧には出る）。
+      `レベル` は NOT NULL なので、指定が無ければ 2.0 と同じ 'N1-N5' を使う。
+    -->
+    <insert id="insertCollection">
+        INSERT INTO public."JPN_単語収録情報" (
+            "単語ID", "レベル", "書籍", "書籍ID", "分類", "単語SEQ",
+            "掲載見出し語", "掲載品詞", "掲載中国語意味", "出典JSON", "状態コード",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{wordId},
+            COALESCE(NULLIF(#{level}, ''), 'N1-N5'),
+            #{book},
+            (SELECT b."書籍ID" FROM public."JPN_書籍情報" b WHERE b."書籍名" = #{book} LIMIT 1),
+            #{category},
+            #{wordSeq},
+            #{listedWord}, #{listedPartOfSpeech}, #{listedChineseMeaning},
+            '{}'::jsonb, 'ACTIVE',
+            #{accountId}, 'APP'
+        )
+    </insert>
+
+    <select id="countCollection" resultType="long">
+        SELECT count(*)
+          FROM public."JPN_単語収録情報"
+         WHERE "単語ID" = #{wordId} AND "書籍" = #{book} AND "分類" = #{category}
+    </select>
+
+    <select id="maxCollectionSeq" resultType="java.lang.Integer">
+        SELECT MAX("単語SEQ")
+          FROM public."JPN_単語収録情報"
+         WHERE "書籍" = #{book} AND "分類" = #{category}
+    </select>
+
+    <!-- その位置（書籍・分類・SEQ）が既に使われているか。画面が送った SEQ をそのまま使ってよいかの判断 -->
+    <select id="countCollectionSeq" resultType="long">
+        SELECT count(*)
+          FROM public."JPN_単語収録情報"
+         WHERE "書籍" = #{book} AND "分類" = #{category} AND "単語SEQ" = #{wordSeq}
+    </select>
+
+    <!-- 書籍マスタ。無い書籍名で登録されたときに 1 行作る（収録の 書籍ID を空にしない） -->
+    <select id="findBookIdByName" resultType="java.lang.Long">
+        SELECT b."書籍ID"
+          FROM public."JPN_書籍情報" b
+         WHERE b."書籍名" = #{book}
+         ORDER BY b."書籍ID"
+         LIMIT 1
+    </select>
+
+    <!--
+      数字だけの書籍コードの最大値（'01' の次は '02'）。
+      2.0 由来のコードは数字なので、その続きを振る。数字でないコードは無視する。
+    -->
+    <select id="maxBookCode" resultType="java.lang.Integer">
+        SELECT MAX(b."書籍コード"::int)
+          FROM public."JPN_書籍情報" b
+         WHERE b."書籍コード" ~ '^[0-9]+$'
+    </select>
+
+    <insert id="insertBook">
+        INSERT INTO public."JPN_書籍情報" (
+            "書籍コード", "書籍名", "分類数", "収録語数", "状態コード",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{bookCode}, #{bookName}, 0, 0, 'ACTIVE', #{accountId}, 'APP'
+        )
+    </insert>
+
+    <!-- 統計は収録から数え直す（画面の並べ替えと表示に使う） -->
+    <update id="refreshBookCounts">
+        UPDATE public."JPN_書籍情報" AS b
+           SET "分類数" = c."分類数",
+               "収録語数" = c."収録語数",
+               "更新日時" = CURRENT_TIMESTAMP
+          FROM (
+              SELECT COUNT(DISTINCT col."分類") AS "分類数", COUNT(*) AS "収録語数"
+                FROM public."JPN_単語収録情報" col
+               WHERE col."書籍" = #{book} AND col."状態コード" = 'ACTIVE'
+          ) AS c
+         WHERE b."書籍名" = #{book}
+    </update>
+
     <select id="listQuestions" resultType="com.study21.user.japanese.JpnQuestionEntity">
         SELECT q."問題ID" AS "questionId", q."単語ID" AS "wordId", q."問題種別" AS "questionType",
                q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa", q."正解値" AS "correctValue",
@@ -178,12 +423,68 @@
          ORDER BY q."問題種別", q."問題番号", q."問題ID"
     </select>
 
-    <select id="findDetail" resultType="com.study21.user.japanese.JpnWordDetailEntity">
-        SELECT "詳細ID" AS "detailId", "単語ID" AS "wordId", "内容版数" AS "contentVersion",
-               "詳細JSON"::text AS "detailJson", "AIプロバイダ" AS "aiProvider", "AIモデル" AS "aiModel",
-               "取得日時" AS "fetchedAt"
-          FROM public."JPN_単語詳細情報"
+    <!--
+      問題（C/D/E）の版の一覧（一覧の「取得状態」のタグから開く履歴。新しい版が先）。
+      2.0 の「詳細情報取得履歴」と同じ考えで、**AI の取得 1 回 = 1 行**にする（生成履歴が正）。
+      その版で書かれた問題の数と、今使われているかを見る（問題が 0 件の版＝失敗した取得は
+      切り替えられない）。
+    -->
+    <select id="listQuestionVersions" resultType="com.study21.user.japanese.JpnQuestionVersionEntity">
+        SELECT g."内容種別コード" AS "questionType",
+               g."内容版数"       AS "contentVersion",
+               g."状態コード"     AS "generationState",
+               g."AI区分"         AS "aiProvider",
+               g."モデル名"       AS "aiModel",
+               g."生成件数"       AS "generatedCount",
+               g."失敗件数"       AS "failedCount",
+               g."エラーメッセージ" AS "errorMessage",
+               g."開始日時"       AS "startedAt",
+               g."終了日時"       AS "finishedAt",
+               g."生成ID"         AS "generationId",
+               (SELECT count(*) FROM public."JPN_単語問題情報" q
+                 WHERE q."単語ID" = g."単語ID"
+                   AND q."問題種別" = g."内容種別コード"
+                   AND q."内容版数" = g."内容版数")               AS "questionCount",
+               (SELECT COALESCE(bool_or(q."状態コード" = 'ACTIVE'), false)
+                  FROM public."JPN_単語問題情報" q
+                 WHERE q."単語ID" = g."単語ID"
+                   AND q."問題種別" = g."内容種別コード"
+                   AND q."内容版数" = g."内容版数")               AS "active"
+          FROM public."JPN_AI生成履歴情報" g
+         WHERE g."単語ID" = #{wordId}
+           AND g."内容種別コード" IN ('C1_READING', 'C2_KANJI', 'D_CONTEXT_MEANING', 'E_KANJI_USAGE')
+         ORDER BY g."内容種別コード", g."内容版数" DESC, g."生成ID" DESC
+    </select>
+
+    <!--
+      問題の版を切り替える（その種別の中で指定した版だけ ACTIVE、ほかは ARCHIVED）。
+      問題は消さない（テストの出題が参照している。2.0 と同じ扱い）。
+      指定した版に問題が無ければ 0 行（呼ぶ側が 400 にする）。
+    -->
+    <update id="activateQuestionVersion">
+        UPDATE public."JPN_単語問題情報"
+           SET "状態コード" = CASE WHEN "内容版数" = #{contentVersion} THEN 'ACTIVE' ELSE 'ARCHIVED' END,
+               "更新者アカウントID" = #{accountId},
+               "更新元コード" = 'APP',
+               "更新日時" = CURRENT_TIMESTAMP
          WHERE "単語ID" = #{wordId}
+           AND "問題種別" = #{questionType}
+    </update>
+
+    <!--
+      同じ見出し語で別の読みを持つ語の読み（画面の「同じ表記に「〜」の読みもあります」）。
+      2.0 は 詳細JSON に持っていたが、2.1 はここで引く（読みが未取得の語は出さない）。
+    -->
+    <select id="findAlternateReading" resultType="java.lang.String">
+        SELECT other."読み"
+          FROM public."JPN_単語情報" w
+          JOIN public."JPN_単語情報" other
+            ON other."見出し語キー" = w."見出し語キー"
+           AND other."単語ID" &lt;&gt; w."単語ID"
+           AND other."状態コード" = 'ACTIVE'
+           AND NULLIF(BTRIM(COALESCE(other."読み", '')), '') IS NOT NULL
+         WHERE w."単語ID" = #{wordId}
+         ORDER BY other."単語ID"
          LIMIT 1
     </select>
 </mapper>

@@ -12,6 +12,23 @@ package com.study21.admin.geometryai;
  */
 public interface GeometryAiClient {
 
+    /**
+     * 出力の上限を {@code max_completion_tokens} で送る必要があるモデルか。
+     *
+     * <p>OpenAI の GPT-5 系・o 系は {@code max_tokens} を受け付けず、送ると
+     * <b>HTTP 400</b>「Unsupported parameter: 'max_tokens'」で失敗する（2026-09-27 に
+     * {@code gpt-5.4-mini} で実測）。モデル名で判断して、指定方法を切り替える。</p>
+     */
+    static boolean requiresCompletionTokens(String model) {
+        if (model == null || model.isBlank()) {
+            return false;
+        }
+        String name = model.trim().toLowerCase(java.util.Locale.ROOT);
+        return name.startsWith("gpt-5")
+                || name.startsWith("gpt-6")
+                || name.matches("^o\\d.*");
+    }
+
     /** 1 回の呼び出し（OpenAI 互換の chat/completions を想定）。 */
     record AiRequest(
             String provider,

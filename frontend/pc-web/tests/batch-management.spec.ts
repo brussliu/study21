@@ -11,7 +11,7 @@ import type { BatchExecutionRow, BatchTaskRow } from '@/api/batch'
  * 2.1 の要点:
  *   * 上部の「バッチ検索条件」カードは置かない
  *   * 「並列」の列は持たない（2.1 は並列実行の仕組みを持たないため）
- *   * 有効にできるのは S / L / R。起動時に走るのは batS01 だけ
+ *   * 有効にできるのは S / L / R と、業務処理が実装済みの種別 C（呼出）。起動時に走るのは batS01 だけ
  *   * 【再実行】は有効／無効に関係なく押せる（業務処理が未実装のバッチは押せない）
  *   * 種別 C（呼出）は他の処理から呼ばれるバッチなので、【再実行】ボタン自体を出さない
  */
@@ -276,6 +276,40 @@ describe('バッチ一覧（バッチ管理＞バッチ一覧）', () => {
 
     const input = wrapper.get('tbody tr[data-batch-code="batC04"] input[type="checkbox"]')
     expect((input.element as HTMLInputElement).disabled).toBe(true)
+    expect(input.element.closest('label')?.getAttribute('title')).toContain('業務処理が未実装')
+  })
+
+  it('実装済みの呼出（C）バッチは有効スイッチを切り替えられる', async () => {
+    // 種別 C の有効は「いま使っているか」の目印であり、無効にすると呼出が拒否される。
+    // 実装済み（＝サーバーが canToggleActive を true で返す）なら画面から切り替えられる
+    const { wrapper, fetchMock } = await setup({
+      tasks: [
+        taskRow({ taskCode: 'batS01' }),
+        taskRow({
+          taskCode: 'batC41',
+          taskType: 'C',
+          description: '日本語単語 詳細情報AI取得（A・B共通）',
+          active: true,
+          canToggleActive: true,
+          canManualRerun: false,
+          canRerun: true,
+          runsOnStartup: false,
+          pageCode: 'JAPANESE_WORD_AI'
+        })
+      ]
+    })
+
+    const input = wrapper.get('tbody tr[data-batch-code="batC41"] input[type="checkbox"]')
+    expect((input.element as HTMLInputElement).disabled).toBe(false)
+    expect((input.element as HTMLInputElement).checked).toBe(true)
+
+    await input.trigger('change')
+    await flushPromises()
+
+    const call = recorded(fetchMock).find((entry) => entry.url.endsWith('/tasks/batC41/active'))
+    expect(call?.method).toBe('POST')
+    expect(call?.body).toEqual({ active: false, operator: undefined })
+    expect(toastMessages().join(' ')).toContain('バッチの有効設定を更新しました。')
   })
 
   it('【再実行】で rerun API を叩き、結果を表示して履歴を読み直す', async () => {

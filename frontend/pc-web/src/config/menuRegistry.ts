@@ -42,24 +42,21 @@ export function prototypeMenu(area: AppArea, role?: Role): MenuItem[] {
       screen(area, 'english-reading-intensive', '英語読解・精読', 'english-reading-intensive', 'book'),
       screen(area, 'english-essay', '英作文AI添削', 'english-essay', 'edit'),
       screen(area, 'english-cloze', '英語穴埋め問題', 'english-cloze', 'filter'),
-      screen(area, 'ai', 'AI英語学習', 'ai', 'play'),
-      screen(area, 'english-grammar', '英語文法管理', 'english-grammar', 'type'),
-      screen(area, 'english-word-textbook', '英単語教材取込', 'english-word-textbook', 'book-open'),
-      screen(area, 'testword', '単語テスト', 'testword', 'play'),
-      screen(area, 'phrase-test', '熟語テスト', 'phrase-test', 'clipboard'),
-      screen(area, 'word', '単語情報管理', 'word', 'folder'),
-      screen(area, 'word-status', '単語勉強状況', 'word-status', 'clock')
+      screen(area, 'english-words', '単語勉強', 'testword', 'book-open', [
+        screen(area, 'testword', '単語テスト', 'testword', 'play'),
+        screen(area, 'word', '単語情報管理', 'word', 'folder'),
+        screen(area, 'word-status', '単語勉強状況', 'word-status', 'clock')
+      ]),
+      screen(area, 'english-phrases', '熟語勉強', 'phrase-test', 'type', [
+        screen(area, 'phrase-test', '熟語テスト', 'phrase-test', 'clipboard'),
+        screen(area, 'phrase', '熟語情報管理', 'phrase', 'folder'),
+        screen(area, 'phrase-status', '熟語勉強状況', 'phrase-status', 'clock')
+      ])
     ]),
     screen(area, 'japanese', '日本語勉強', 'japanese', 'book-open', [
       screen(area, 'japanese-test', '単語テスト', 'japanese-test', 'play'),
       screen(area, 'japanese-word', '単語情報管理', 'japanese-word', 'folder'),
-      screen(area, 'japanese-word-status', '単語勉強状況', 'japanese-word-status', 'clock'),
-      /*
-       * 画面確認用の単語情報管理（仮データだけで動き、本番 API は呼ばない）。
-       * 本番の「単語情報管理」と MENU 上で見分けられるよう「（新画面）」を付けている。
-       * 確認が済んだら、この 1 行を外す。
-       */
-      screen(area, 'japanese-demo', '単語情報管理（新画面）', 'japanese-demo', 'eye')
+      screen(area, 'japanese-word-status', '単語勉強状況', 'japanese-word-status', 'clock')
     ]),
     screen(area, 'math', '数学勉強', 'math', 'sigma', [
       screen(area, 'math-knowledge', '知識点管理', 'math-knowledge', 'grid'),

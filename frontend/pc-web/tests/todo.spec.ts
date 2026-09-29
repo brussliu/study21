@@ -515,14 +515,17 @@ describe('TODO', () => {
     wrapper.unmount()
   })
 
-  it('ダブルクリックで編集状態になり、そのセルが選ばれる', async () => {
+  it('ダブルクリックで編集状態になり、そのセルに「入力中」の印が付く', async () => {
     const { wrapper } = await setup({ attachTo: true })
 
     await openCreateDialog(wrapper)
     const input = await editCell(wrapper, '0-0')
 
-    expect(wrapper.get('[data-cell="0-0"]').attributes('data-editing')).toBe('true')
-    expect(wrapper.get('[data-cell="0-0"]').classes()).toContain('is-selected')
+    const cell = wrapper.get('[data-cell="0-0"]')
+    expect(cell.attributes('data-editing')).toBe('true')
+    // 入力中の印は選択の印と分ける（重ねると罫線が二重に見える）
+    expect(cell.classes()).toContain('is-editing')
+    expect(cell.classes()).not.toContain('is-selected')
     expect(document.activeElement).toBe(input.element)
     // 入力するとその場でモデルに入り、他のセルをクリックすると確定する
     await input.setValue('問1〜3')

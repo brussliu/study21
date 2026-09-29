@@ -31,6 +31,29 @@ export const AI_TAB_SYSTEM: AiTab = 'System Prompt'
 export const AI_TAB_USER: AiTab = 'User Prompt'
 export const AI_TAB_OTHER: AiTab = 'その他'
 
+/**
+ * Data TAB（AI 出力 DTO の JSON Schema を見るタブ）。
+ *
+ * <p>**項目を持たない**タブなので、`aiTabsOf`（項目の TAB から作る）では出てこない。
+ * 出すかどうかは区画が**出力 DTO（dataTask）を持つか**で決まり、並びは
+ * プロンプトの後ろ・その他の前（基本設定 | System Prompt | User Prompt | Data | その他）。
+ * 規則はこの 1 か所に置く（`aiTabsWithData`）。</p>
+ */
+export const AI_TAB_DATA = 'Data'
+
+/**
+ * Data TAB を差し込む（区画が出力 DTO を持たないときは、そのまま返す）。
+ *
+ * <p>Data は `AiTab` の語彙には入れない（設定項目の TAB ではないため、`aiTabOf` が返してはいけない）。
+ * 「その他」の**前**に入れるのは、その他が実行条件（スレッド数・再実行回数）で、
+ * 出力の形を見る Data とは性格が違うため（利用者の指示でこの並びに固定）。</p>
+ */
+export function aiTabsWithData(tabs: readonly string[], hasData: boolean): string[] {
+  if (!hasData) return [...tabs]
+  const withoutOther = tabs.filter((tab) => tab !== AI_TAB_OTHER)
+  return [...withoutOther, AI_TAB_DATA, ...(tabs.includes(AI_TAB_OTHER) ? [AI_TAB_OTHER] : [])]
+}
+
 /** 設定項目（runtime の field 定義と、コンポーネントの手書き項目の共通の形）。 */
 export interface AiFieldLike {
   key: string

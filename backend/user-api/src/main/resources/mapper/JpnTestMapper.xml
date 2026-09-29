@@ -44,6 +44,55 @@
         </if>
     </sql>
 
+    <!-- 書籍と分類は同じ収録行に対して判定する。語は1回だけ選ぶ。 -->
+    <sql id="CandidateCollection">
+        JOIN LATERAL (
+            SELECT c.* FROM public."JPN_単語収録情報" c WHERE c."単語ID" = w."単語ID"
+            <if test="level != null and level != ''">AND c."レベル" = #{level}</if>
+            <if test="book != null and book != ''">AND c."書籍" = #{book}</if>
+            <if test="categoryFrom != null and categoryFrom != ''">AND c."分類" &gt;= #{categoryFrom}</if>
+            <if test="categoryTo != null and categoryTo != ''">AND c."分類" &lt;= #{categoryTo}</if>
+            ORDER BY c."書籍", c."分類", c."単語SEQ", c."収録ID" LIMIT 1
+        ) col ON TRUE
+    </sql>
+    <select id="pickWords" resultType="com.study21.user.japanese.JpnWordEntity">
+        SELECT w."単語ID" AS "wordId", w."見出し語" AS "word", w."読み" AS "reading",
+               col."収録ID" AS "collectionId", col."書籍" AS "book", col."分類" AS "category",
+               COALESCE(sn."中国語", d."説明_中国語", col."掲載中国語意味") AS "chineseMeaning"
+        FROM public."JPN_単語情報" w
+        <include refid="CandidateCollection"/>
+        LEFT JOIN public."JPN_単語詳細情報" d ON d."単語ID" = w."単語ID" AND d."状態コード" = 'ACTIVE'
+        LEFT JOIN LATERAL (SELECT "中国語" FROM public."JPN_単語詳細_語義情報" WHERE "詳細ID" = d."詳細ID" ORDER BY "表示順", "語義ID" LIMIT 1) sn ON TRUE
+        WHERE w."状態コード" = 'ACTIVE'
+        <if test='"B".equals(testType)'>
+          AND NULLIF(BTRIM(w."読み"), '') IS NOT NULL
+          AND NULLIF(BTRIM(COALESCE(sn."中国語", d."説明_中国語", col."掲載中国語意味")), '') IS NOT NULL
+        </if>
+        ORDER BY <choose><when test="random">random()</when><otherwise>col."書籍", col."分類", col."単語SEQ", w."単語ID"</otherwise></choose>
+        LIMIT #{limit}
+    </select>
+    <select id="books" resultType="string">
+        SELECT DISTINCT "書籍" FROM public."JPN_単語収録情報" WHERE "書籍" IS NOT NULL ORDER BY "書籍"
+    </select>
+    <select id="categories" resultType="string">
+        SELECT DISTINCT "分類" FROM public."JPN_単語収録情報" WHERE "分類" IS NOT NULL
+        <if test="book != null and book != ''">AND "書籍" = #{book}</if> ORDER BY "分類"
+    </select>
+    <sql id="RangeWhere">
+        <include refid="TestWhere"/>
+        <if test="book != null and book != ''">AND t."書籍" = #{book}</if>
+        <if test="categoryFrom != null and categoryFrom != ''">AND t."分類開始" &gt;= #{categoryFrom}</if>
+        <if test="categoryTo != null and categoryTo != ''">AND t."分類終了" &lt;= #{categoryTo}</if>
+    </sql>
+    <select id="countRange" resultType="long">SELECT count(*) FROM public."JPN_テスト情報" t <include refid="RangeWhere"/></select>
+    <select id="searchRange" resultMap="TestMap">
+        SELECT <include refid="TestColumns"/> FROM public."JPN_テスト情報" t <include refid="RangeWhere"/>
+        ORDER BY t."テストID" DESC LIMIT #{limit} OFFSET #{offset}
+    </select>
+    <select id="lockTest" resultType="long">SELECT "テストID" FROM public."JPN_テスト情報" WHERE "テストID" = #{testId} FOR UPDATE</select>
+    <update id="appendHistory">
+        UPDATE public."JPN_テスト出題情報" SET "回答履歴JSON" = "回答履歴JSON" || CAST(#{history} AS jsonb) WHERE "出題ID" = #{entryId}
+    </update>
     <select id="count" resultType="long">
         SELECT count(*)
           FROM public."JPN_テスト情報" t
@@ -63,7 +112,7 @@
                count(*) FILTER (WHERE t."状態コード" = 'COMPLETED')        AS "completedCount",
                count(*) FILTER (WHERE t."状態コード" = 'RUNNING')          AS "runningCount",
                COALESCE(round(avg(CASE WHEN t."完了出題数" > 0
-                                       THEN t."正解数" * 100.0 / t."完了出題数" END)
+                                       THEN t."正解数" * 100.0 / NULLIF(t."正解数" + t."不正解数", 0) END)
                                FILTER (WHERE t."状態コード" = 'COMPLETED')), 0)::int AS "averageScore",
                COALESCE(sum(t."有効学習時間ms"), 0)                        AS "totalActiveMs"
           FROM public."JPN_テスト情報" t
@@ -91,7 +140,7 @@
             "登録者アカウントID", "登録元コード"
         ) VALUES (
             #{testNo}, #{accountId}, #{testType}, #{level}, #{book}, #{categoryFrom}, #{categoryTo},
-            #{difficulty}, #{mode}, #{questionCount}, 0, 0, 0, 'RUNNING', #{startedAt},
+            #{difficulty}, #{mode}, #{questionCount}, 0, 0, 0, 'CREATED', #{startedAt},
             #{accountId}, 'APP'
         )
     </insert>
@@ -152,7 +201,9 @@
         <result property="difficulty"    column="難易度"/>
         <result property="book"          column="書籍"/>
         <result property="category"      column="分類"/>
+        <result property="historyJson" column="回答履歴JSON"/>
         <result property="snapshotJson"  column="単語スナップショットJSON"/>
+        <result property="choicesJson"   column="出題選択肢JSON"/>
     </resultMap>
 
     <sql id="EntryColumns">
@@ -161,6 +212,8 @@
         w."見出し語", w."読み",
         q."問題種別", q."問題文_日本語", q."正解値", q."解説_日本語", q."難易度",
         e."単語スナップショットJSON"::text AS "単語スナップショットJSON",
+        e."出題選択肢JSON"::text AS "出題選択肢JSON",
+        e."回答履歴JSON"::text AS "回答履歴JSON",
         col."書籍", col."分類"
     </sql>
 
@@ -200,10 +253,12 @@
             useGeneratedKeys="true" keyProperty="entryId">
         INSERT INTO public."JPN_テスト出題情報" (
             "テストID", "単語ID", "収録ID", "出題順", "問題ID", "出題状態", "単語スナップショットJSON",
-            "登録者アカウントID", "登録元コード"
+            "出題選択肢JSON", "登録者アカウントID", "登録元コード"
         ) VALUES (
             #{testId}, #{wordId}, #{collectionId}, #{orderNo}, #{questionId}, 'PENDING',
             COALESCE(#{snapshotJson}, '{}')::jsonb,
+            -- テスト作成時に選んで固定した「今回提示した選択肢」（A・B も同じ形で書く）
+            COALESCE(#{choicesJson}, '[]')::jsonb,
             #{accountId}, 'APP'
         )
     </insert>
@@ -223,47 +278,29 @@
 
     <!-- テスト作成: 条件に合う問題から出題数ぶん選ぶ（出題方式 RANDOM ならランダム） -->
     <select id="pickQuestions" resultType="com.study21.user.japanese.JpnQuestionEntity">
-        SELECT q."問題ID" AS "questionId", q."単語ID" AS "wordId", q."問題種別" AS "questionType",
-               q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa",
-               q."正解値" AS "correctValue", q."難易度" AS "difficulty"
-          FROM public."JPN_単語問題情報" q
-          JOIN public."JPN_単語情報" w ON w."単語ID" = q."単語ID"
-         WHERE q."状態コード" = 'ACTIVE'
-           AND w."状態コード" = 'ACTIVE'
-        <if test='"C".equals(testType)'>
-            AND q."問題種別" IN ('C1_READING', 'C2_KANJI')
-        </if>
-        <if test='"D".equals(testType)'>
-            AND q."問題種別" = 'D_CONTEXT_MEANING'
-        </if>
-        <if test='"E".equals(testType)'>
-            AND q."問題種別" = 'E_KANJI_USAGE'
-        </if>
-        <if test="difficulty != null and difficulty != '' and difficulty != 'NORMAL'">
-            AND q."難易度" = #{difficulty}
-        </if>
-        <if test="level != null and level != ''">
-            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cl
-                         WHERE cl."単語ID" = q."単語ID" AND cl."レベル" = #{level})
-        </if>
-        <if test="book != null and book != ''">
-            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cb
-                         WHERE cb."単語ID" = q."単語ID" AND cb."書籍" ILIKE '%' || #{book} || '%')
-        </if>
-        <if test="categoryFrom != null and categoryFrom != ''">
-            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" cf
-                         WHERE cf."単語ID" = q."単語ID" AND cf."分類" &gt;= #{categoryFrom})
-        </if>
-        <if test="categoryTo != null and categoryTo != ''">
-            AND EXISTS (SELECT 1 FROM public."JPN_単語収録情報" ct
-                         WHERE ct."単語ID" = q."単語ID" AND ct."分類" &lt;= #{categoryTo})
-        </if>
-         ORDER BY
-        <choose>
-            <when test="random">random()</when>
-            <otherwise>w."見出し語キー", q."問題種別", q."問題番号"</otherwise>
-        </choose>
-         LIMIT #{limit}
+        SELECT q."問題ID" AS "questionId", w."単語ID" AS "wordId", q."問題種別" AS "questionType",
+               q."問題番号" AS "questionNo", q."問題文_日本語" AS "questionTextJa", q."問題文_中国語" AS "questionTextZh",
+               q."対象表記" AS "targetWord", q."対象読み" AS "targetReading", q."例文_日本語" AS "exampleJa",
+               q."正解値" AS "correctValue", q."解説_日本語" AS "explanationJa", q."難易度" AS "difficulty",
+               col."収録ID" AS "collectionId", col."書籍" AS "book", col."分類" AS "category"
+        FROM public."JPN_単語情報" w
+        <include refid="CandidateCollection"/>
+        JOIN LATERAL (
+            SELECT p.* FROM public."JPN_単語問題情報" p
+            WHERE p."単語ID" = w."単語ID" AND p."状態コード" = 'ACTIVE'
+            <choose>
+                <when test='"C".equals(testType)'>AND p."問題種別" IN ('C1_READING', 'C2_KANJI')</when>
+                <when test='"D".equals(testType)'>AND p."問題種別" = 'D_CONTEXT_MEANING'</when>
+                <otherwise>AND p."問題種別" = 'E_KANJI_USAGE'</otherwise>
+            </choose>
+            <if test="difficulty != null and difficulty != '' and difficulty != 'NORMAL'">AND p."難易度" = #{difficulty}</if>
+            AND (SELECT count(*) FROM public."JPN_単語問題選択肢情報" o WHERE o."問題ID" = p."問題ID" AND o."正解フラグ") = 1
+            AND (SELECT count(*) FROM public."JPN_単語問題選択肢情報" o WHERE o."問題ID" = p."問題ID" AND NOT o."正解フラグ") &gt;= 3
+            ORDER BY random() LIMIT 1
+        ) q ON TRUE
+        WHERE w."状態コード" = 'ACTIVE'
+        ORDER BY <choose><when test="random">random()</when><otherwise>col."書籍", col."分類", col."単語SEQ", w."単語ID"</otherwise></choose>
+        LIMIT #{limit}
     </select>
 
     <select id="listChoices" resultType="com.study21.user.japanese.JpnChoiceEntity">
@@ -298,3 +335,4 @@
          LIMIT 1
     </select>
 </mapper>
+

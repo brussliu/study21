@@ -1,0 +1,819 @@
+/* 英作文AI添削【詳細】（`views/english/EssayDetailView.vue` と
+   `features/english-essay/components/*`）のレイアウト。
+
+   2.0 の `css/english_essay.css`（レポートの見せ方）を 2.1 の設計システムへ移植したもの。
+   色は tokens.css の変数だけを使う（`assets/prototype/*.css` は変更しない）。
+   枠・面・ボタンは既存クラス（`.card` / `.badge` / `.btn` / `.overlay` / `.dialog`）を再利用する。
+
+   クラス名は**詳細画面だけ**のもの（一覧画面の `essay-list.css` と同じ `ee-` 接頭辞を使うので、
+   一覧側と重なる `.ee-page` / `.ee-score` / `.ee-empty` は避けている）。 */
+
+/* ページの外枠と欄の並べ方は `essay-page.css`（2.0 のグリッド）が決める。
+   ここに `display: flex` を置くと、詳細の欄構成が崩れる。 */
+
+/* ---------- 題（一覧へ戻るは英雄の操作の中） ---------- */
+
+.ee-title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-missing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+}
+
+.ee-missing__text {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-md);
+}
+
+/* ---------- 作文の内容（設問 : 作文の 2 面） ----------
+   2.0 の詳細の `recognition-card` は `.ocr-grid`（`.85fr : 1.15fr`）に
+   `.ocr-panel` を 2 つ並べる。2.1 も詳細ページでは同じ 2 面（中身は読み取り専用）。
+   並べ方（`grid-template-columns`）は `EssayDetailView.vue` の `.ee-meta__grid` が持ち、
+   面の見た目は `EssayForm.vue` と同じ `.ee-ocr-panel`（`essay-list.css`）を使う。 */
+
+.ee-meta {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.ee-block__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-block__lead {
+  margin: 4px 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 登録画像（2.0 の `upload-card` ＝ `.essay-image-grid` の一覧） ----------
+   2.0 は 1 枚ごとに「サムネイル 78px ＋ ファイル名・大きさ・区分」の横並びの札を
+   縦に積む（`grid-template-columns: 1fr` / `gap: 12px`）。 */
+
+.ee-images {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.ee-images__list {
+  display: grid;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+
+.ee-images__item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 78px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.ee-images__thumb {
+  display: block;
+  width: 78px;
+  height: 78px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  cursor: zoom-in;
+}
+
+.ee-images__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 実体を読めなかった画像（DB に行はあるがファイルが無い 2.0 の移行分など）。
+   割れた絵の代わりに、枠の中へ理由を出す（拡大はさせない＝親が `disabled` にする） */
+.ee-images__missing {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 2px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.ee-images__thumb:hover {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-primary) 22%, transparent);
+}
+
+/* 2.0 の `.essay-image-order`（順番の数字。画像の左下に重ねる） */
+.ee-images__order {
+  position: absolute;
+  bottom: var(--sp-3);
+  left: var(--sp-3);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-md);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+}
+
+.ee-images__meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-1);
+}
+
+.ee-images__meta strong {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--color-text-strong);
+  font-size: var(--fs-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ee-images__meta small {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.ee-images__zoom {
+  margin-top: var(--sp-1);
+}
+
+/* ---------- 添削の回（历次の切り替え） ---------- */
+
+.ee-report-card {
+  padding: var(--sp-4) var(--sp-5);
+}
+
+.ee-round {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-3);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 回の切り替えはタブ（利用者の指示。見た目は 2.0 の言語切替のセグメントに寄せる） */
+.ee-round__tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.ee-round__tab {
+  min-width: 78px;
+  height: 28px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ee-round__tab.is-active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.ee-round__state {
+  font-weight: 400;
+}
+
+/* 結果言語の切替（2.0 の `word2-language-toggle` と同じセグメント。詳細画面の見出しの右）。
+   回のタブ（`.ee-round__tab`）と同じ形なので、ここに並べて置く */
+.ee-lang {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.ee-lang__item {
+  min-width: 54px;
+  height: 28px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ee-lang__item.is-active {
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+/* タブ（回の切り替え）の直後の中身は余白を詰める（上のタブ列が余白を持つ。
+   中身は `role="tabpanel"` の包みなので、包みの中のレポートに対して当てる） */
+.ee-report-card__panel > .ee-report {
+  padding-top: 0;
+}
+
+.ee-round__count {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.ee-no-report {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4);
+}
+
+.ee-no-report__text {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-md);
+}
+
+/* 失敗した回（理由を出して、レポートは出さない） */
+
+.ee-failed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--color-danger);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-soft);
+}
+
+.ee-failed__title {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: var(--fs-md);
+  font-weight: 600;
+}
+
+.ee-failed__reason {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ee-failed__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+/* ---------- レポート（2.0 の `renderReport` と同じ 5 ブロック） ---------- */
+
+.ee-report {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  padding-top: var(--sp-3);
+}
+
+.ee-sec {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.ee-sec__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.ee-sec__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+/* 2 面・4 観点・修正ポイント・改善後の作文例の**枠**（2.0 の `.correction-list` /
+   `.model-answer` ＝ 枠・角丸・見出しの下の罫線・薄い下地の見出し）。
+   2.1 は 2.0 で別々だった見出しの作りを `.ee-panel__head` 1 つにまとめる。 */
+
+.ee-panel {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.ee-panel__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+/* 題と副題（「4 件の改善候補」「語数の目安 200〜240語」）は 1 つのかたまりにする。
+   面が狭いときは、かたまりごと次の行へ回す（語が途中で折れない） */
+.ee-panel__title {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-panel__sub {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+}
+
+.ee-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 1. 得点と総合コメント（2.0 の `.report-overview` ＝ `190px 1fr` / `gap: 28px` /
+   `padding: 22px` / 角丸 13px / 緑がかった薄い下地） */
+
+.ee-overview {
+  position: relative;
+  display: grid;
+  grid-template-columns: 190px minmax(0, 1fr);
+  gap: var(--sp-6);
+  align-items: center;
+  padding: var(--sp-5);
+  border-radius: var(--radius-xl);
+  background: linear-gradient(135deg, var(--color-primary-soft), var(--color-surface-alt));
+}
+
+/* 2.1 の足しもの。2.0 の総合評価には見出しが無いので、拡大表示だけ右上の小さなボタンに置く */
+.ee-overview__zoom {
+  position: absolute;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
+  border-radius: var(--radius-md);
+}
+
+/* 2.0 の `.score-ring`（145px の輪・中は 116px の白丸・数字は 45px）。
+   得点が分からない回（`—`）は輪を空にする（達成率 0）。 */
+
+.ee-report-score {
+  --ee-ring-size: 148px;
+  --ee-ring-hole: 116px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--ee-ring-size);
+  height: var(--ee-ring-size);
+  margin: 0 auto;
+  border-radius: 50%;
+  background: conic-gradient(
+    var(--color-primary-strong) calc(var(--ee-score) * 1%),
+    var(--color-border) 0
+  );
+}
+
+.ee-report-score::before {
+  content: '';
+  position: absolute;
+  width: var(--ee-ring-hole);
+  height: var(--ee-ring-hole);
+  border-radius: 50%;
+  background: var(--color-surface);
+}
+
+.ee-report-score__inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  text-align: center;
+}
+
+.ee-report-score__value {
+  color: var(--color-primary);
+  font-size: var(--fs-4xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+}
+
+.ee-report-score__max {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.ee-report-score__level {
+  max-width: 96px;
+  margin-top: var(--sp-1);
+  color: var(--color-text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-report__label {
+  color: var(--color-primary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.12em;
+}
+
+.ee-overview__title {
+  margin: var(--sp-1) 0 var(--sp-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-overview__summary {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+}
+
+/* 2.0 の `.report-tags`（緑の札。3 つ目だけ橙の `.warn`） */
+
+.ee-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.ee-tag {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-tag.is-warn {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+/* 3. 4 観点（2.0 の `.rubric-grid` ＝ `repeat(4, 1fr)` / `gap: 11px` / `padding: 14px`） */
+
+.ee-rubric-panel .ee-rubric {
+  padding: var(--sp-3);
+}
+
+.ee-rubric {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+.ee-rubric__item {
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.ee-rubric__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.ee-rubric__score {
+  color: var(--color-text-strong);
+}
+
+.ee-rubric__meter {
+  width: 100%;
+  height: 8px;
+  margin: var(--sp-2) 0 var(--sp-1);
+  accent-color: var(--color-primary-strong);
+}
+
+.ee-rubric__note {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+/* 4. 修正ポイント（左）と改善後の作文例（右）。2.0 の `.feedback-grid` ＝ `1.18fr .82fr` */
+
+.ee-columns {
+  display: grid;
+  grid-template-columns: 1.18fr 0.82fr;
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* 2.0 の `.correction-scroll`（`max-height: 390px` / `scrollbar-gutter: stable`） */
+
+.ee-corrections {
+  max-height: 390px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+  scrollbar-gutter: stable;
+}
+
+.ee-correction {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ee-correction:last-child {
+  border-bottom: 0;
+}
+
+/* 2.0 の `.correction-no`（24px の四角・薄い下地の数字） */
+.ee-correction__no {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+}
+
+.ee-correction__pair {
+  margin: 0 0 var(--sp-2);
+  color: var(--color-text);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: var(--fs-md);
+}
+
+.ee-correction__arrow {
+  margin: 0 var(--sp-2);
+  color: var(--color-text-subtle);
+}
+
+.ee-correction del {
+  color: var(--color-danger);
+  text-decoration-color: var(--color-danger);
+}
+
+.ee-correction ins {
+  color: var(--color-success);
+  font-weight: var(--fw-bold);
+  text-decoration: none;
+}
+
+.ee-correction__reason {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-normal);
+}
+
+.ee-correction__cat {
+  margin-right: var(--sp-2);
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+/* 2.0 の `.model-answer > div`（`padding: 18px` / Georgia 15px / `line-height: 1.9`） */
+
+.ee-model {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--color-text);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: var(--fs-md);
+  line-height: 1.9;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 5. 英検対策のワンポイントと注意書き（2.0 の `.next-advice` ＝ 橙の枠 1 つに
+   アイコン＋本文＋注意書き） */
+
+.ee-advice-sec {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-lg);
+  background: var(--color-warning-soft);
+}
+
+.ee-advice-sec__icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-warning);
+}
+
+.ee-advice-sec__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.ee-advice-sec__title {
+  color: var(--color-warning);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.ee-advice {
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+}
+
+.ee-notice {
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  line-height: var(--lh-normal);
+}
+
+/* 2.1 の足しもの。設問が求めていること（2.0 には無い節。総合評価と 4 観点の間） */
+
+.ee-requirements-sec {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-alt);
+}
+
+/* ---------- 拡大表示のモーダル（2.0 の report preview） ---------- */
+
+.ee-zoom__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.ee-zoom__score {
+  margin: 0;
+  color: var(--color-primary);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+}
+
+.ee-zoom__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+}
+
+.ee-zoom__rubric {
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.ee-zoom__rubric p {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.ee-zoom__rubric meter {
+  width: 100%;
+  height: 10px;
+  margin: var(--sp-2) 0;
+  accent-color: var(--color-primary-strong);
+}
+
+.ee-zoom__correction {
+  padding: var(--sp-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ee-zoom__correction:last-child {
+  border-bottom: 0;
+}
+
+.ee-zoom__correction p:first-child {
+  margin: 0 0 var(--sp-2);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: var(--fs-lg);
+}
+
+.ee-zoom__correction p:last-child {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.ee-zoom__correction del {
+  color: var(--color-danger);
+  text-decoration-color: var(--color-danger);
+}
+
+.ee-zoom__correction ins {
+  color: var(--color-success);
+  font-weight: var(--fw-bold);
+  text-decoration: none;
+}
+
+.ee-zoom__req {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-sm);
+}
+
+.ee-model--zoom {
+  font-size: var(--fs-md);
+}
+
+/* 狭い画面では 2 カラムを 1 カラムへ（2.0 の 1000px の規則と、設計システムの
+   ブレークポイントに合わせる）。2.0 は `.rubric-grid` を 1000px で 2 列、
+   700px で 1 列にしている */
+
+@media (max-width: 1024px) {
+  .ee-rubric {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1000px) {
+  .ee-columns,
+  .ee-overview {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ee-advice-sec {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 700px) {
+  .ee-rubric {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

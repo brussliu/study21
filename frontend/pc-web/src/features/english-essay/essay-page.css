@@ -1,0 +1,477 @@
+@import './essay-list.css';
+
+/* 英作文AI添削の**新規・編集ページ**と**詳細ページ**のスタイル（2.0 の
+   `css/english_essay.css` の見た目に寄せる）。
+   色は tokens.css の変数だけを使う（暗色テーマも自動で付いてくる）。
+   検索条件・表・バッジ・窓の骨格は既存クラス（.search-panel / .data-table / .badge /
+   .overlay / .dialog / .btn）をそのまま使い、ここでは英作文に固有の見た目だけを足す。
+
+   **上の `@import` は必須**。新規・編集の中身（`EssayForm.vue`）はドロップゾーン・画像の一覧・
+   設問 : 作文の 2 面（`.ee-ocr-panel` / `.ee-ocr-text`）・足元を `essay-list.css` の定義で
+   描くので、これが無いと**一覧を経由せずこのページを開いたとき（再読込・直リンク）だけ**
+   見た目が崩れる。詳細ページも同じ定義を使う。
+   ここ（`@import` は先頭に置く決まり）で 1 か所だけ繋ぐ。 */
+
+/* 2.0 との対応:
+   - `.ee-page-form` / `.ee-detail` = 2.0 の `.essay-editor-panel`（**ページ変種**。全幅）
+   - `.ee-form` / `.ee-detail` のグリッド = 2.0 の `.essay-editor-content`
+     （`grid-template-areas` の **hero / steps / side / recognition / result**）
+   - `.ee-hero`      = `.essay-hero`（見出し・説明・英雄の右の操作）
+   - `.ee-stepper`   = `.essay-stepper`（1 画像アップロード → 2 文字認識・確認 → 3 AI添削）
+   - `.ee-upload-side` = `.upload-card`（**右の柱**＝グリッドの `side`。上に貼り付く）
+   - `.ee-card`      = `.essay-card`（01 画像を追加 / 02 AI文字認識 / 03 AI添削レポート）
+   - `.section-number` = 2.0 の `.section-number`（01 / 02 / 03 の四角）
+   - `.ee-status`    = 2.0 の `.essay-status`（画像待ち / 文字認識中 / 認識済み） */
+
+/* ---------- ページの外枠（利用者の指示で**箱にしない**） ----------
+   2.0 の `.essay-editor-panel` は薄い枠・影・角丸・灰色の下地を持っていたが、
+   2.1 では**アプリのページ本文にそのまま載せる**（灰色の框を出さない）。
+   余白も `.page`（`--sp-5 --sp-6 --sp-9`）に任せる。高さで引き伸ばす `min-height` も持たない
+   （下の `.ee-form` の行をストレッチさせ、カード間の余白が広がる原因になる）。 */
+
+.ee-page-form,
+.ee-detail {
+  display: grid;
+  width: 100%;
+}
+
+/* ---------- 新規・編集の中身のグリッド（2.0 の `.essay-editor-content`） ---------- */
+
+.ee-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(380px, 0.9fr);
+  /* 左の柱（`main`）に 02 と 03 をまとめ、右の柱（`side`）に 01 画像を追加を置く。
+     右の柱は**1 行**に収める（2 行にまたがると、升が右の柱の高さまで引き伸ばされて
+     02 と 03 の間に 16px より広い空白ができる。実機の Chrome で確認） */
+  grid-template-areas:
+    'hero hero'
+    'steps .'
+    'main side';
+  align-items: start;
+  /* 行の高さは**中身に合わせる**。既定（`stretch`）だと、外の升の高さを行に配って
+     カードとカードの間に 16px より広い空白ができる */
+  align-content: start;
+  gap: var(--sp-4);
+  min-height: 0;
+}
+
+/* 左の柱（02 AI文字認識 → 03 AI添削レポート）。この柱の中の間隔は常に 16px */
+.ee-form__main {
+  grid-area: main;
+  display: grid;
+  align-content: start;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+/* 柱の中では**並び**で置く（`.ee-form` の領域の名前は、右の柱と 1 列のときだけ使う） */
+.ee-form__main > .ee-card {
+  grid-area: auto;
+}
+
+/* 英雄の右端の段（前回の得点と、呼ぶ側の操作）。**英雄の中に置く**ので、
+   グリッドの領域は増えない（2.0 の 5 領域のまま） */
+.ee-page-form .ee-hero__actions [data-ee-previous-score] {
+  margin-right: var(--sp-1);
+}
+
+/* 画像アップロード（2.0 の `upload-card`）。**右の柱**で、広い画面では上に貼り付く */
+.ee-upload-side {
+  grid-area: side;
+  position: sticky;
+  top: 18px;
+  align-self: start;
+}
+
+/* 02 AI文字認識（2.0 の `recognition-card`）と 03 AI添削レポート（2.0 の `result-card`）は
+   **左の柱の中**に並べる（`.ee-form__main > .ee-card { grid-area: auto }`）。領域の名前は
+   使わない＝右の柱の高さで升が引き伸ばされない */
+
+/* 設問 : 作文の 2 面（2.0 の `.ocr-grid`。設問がやや狭く、作文が広い） */
+.ee-ocr-grid {
+  display: grid;
+  grid-template-columns: 0.85fr 1.15fr;
+  gap: var(--sp-4);
+}
+
+/* 英雄とステップは領域を名乗る（`.ee-form` の `grid-template-areas` と対にする） */
+.ee-form .ee-hero {
+  grid-area: hero;
+}
+
+.ee-form .ee-stepper {
+  grid-area: steps;
+}
+
+/* ---------- 見出しと説明（2.0 の essay-hero） ---------- */
+
+.ee-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.ee-hero__main {
+  min-width: 0;
+}
+
+.ee-hero h1 {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-2xl);
+  line-height: 1.3;
+}
+
+.ee-hero h1 .icon {
+  color: var(--color-primary);
+}
+
+.ee-hero p {
+  max-width: 720px;
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+  line-height: 1.55;
+}
+
+.ee-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-3);
+  margin-top: var(--sp-2);
+}
+
+.ee-hero__meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.ee-hero__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* 英雄の中の札（2.0 の `essay-demo-pill` に当たる位置。「デモ」の語は使わない） */
+.ee-pill {
+  padding: 4px 10px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+/* ---------- 3 ステップ（2.0 の essay-stepper） ---------- */
+
+.ee-stepper {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  width: 100%;
+  margin: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+  list-style: none;
+}
+
+.ee-stepper li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  color: var(--color-text-subtle);
+}
+
+.ee-stepper li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: 18px;
+  left: calc(50% + 58px);
+  width: calc(100% - 116px);
+  height: 2px;
+  background: var(--color-border-strong);
+}
+
+.ee-stepper li > span {
+  display: grid;
+  place-items: center;
+  width: 35px;
+  height: 35px;
+  border: 2px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+}
+
+.ee-stepper strong,
+.ee-stepper small {
+  display: block;
+}
+
+.ee-stepper strong {
+  font-size: var(--fs-sm);
+}
+
+.ee-stepper small {
+  margin-top: 2px;
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-regular);
+}
+
+.ee-stepper li.is-active {
+  color: var(--color-primary);
+}
+
+.ee-stepper li.is-active > span {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.ee-stepper li.is-complete > span {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.ee-stepper li.is-complete::after {
+  background: var(--color-primary);
+}
+
+/* ---------- カード（01 / 02 / 03。2.0 の essay-card） ---------- */
+
+.ee-card {
+  padding: 18px var(--sp-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/* `.ee-form` の並べ方は**上のグリッド**（2.0 の `.essay-editor-content`）が決める。
+   ここに `display: flex` を置き直さない（グリッドが上書きされて欄構成が崩れる）。 */
+
+.ee-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+
+.ee-card__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.ee-card__head h2 {
+  margin: 0 0 3px;
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+}
+
+.ee-card__head p {
+  margin: 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.ee-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+/* 2.0 の `.section-number`（01 / 02 / 03） */
+.section-number {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-lg);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+
+/* ---------- 文字認識の状態（2.0 の essay-status） ---------- */
+
+.ee-status {
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.ee-status.is-ready {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+}
+
+.ee-status.is-processing {
+  background: var(--color-info-soft);
+  color: var(--color-info);
+}
+
+/* ---------- 03 の題の 2 欄（2.0 の essay-title-fields。2 列） ---------- */
+
+.ee-title-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+}
+
+/* 足元の並べ方（`.ee-form__foot`）の定義は無い。利用者の指示で新規・編集ページの足元
+   （前回の得点と【キャンセル】）を無くし、得点は英雄の右へ移したため。
+   窓の足元は `.dialog__foot` が受け持つ */
+
+.ee-form__spacer {
+  flex: 1;
+}
+
+/* ---------- 詳細（2.0 の `body.essay-detail-page` の並び） ---------- */
+
+/* 左に設問・作文とレポート、右に登録画像。2.0 の詳細は
+   `minmax(0, 3fr) minmax(250px, .65fr)`（`css/english_essay.css` の
+   `body.essay-detail-page .essay-editor-content`）＝ 右の柱は細い。2.1 のページは
+   外枠（サイドバー）ぶん狭いので、狭くなりすぎない 280px を下限にする。
+   詳細は steps が消えるので 3 領域（hero / recognition / result ＋ side）。 */
+.ee-detail {
+  grid-template-columns: minmax(0, 3fr) minmax(280px, 0.7fr);
+  grid-template-areas:
+    'hero hero'
+    'recognition side'
+    'result side';
+  align-items: start;
+  /* 詳細も 1 つのクラスが外枠とグリッドを兼ねる。行は中身の高さにする（カード間を広げない） */
+  align-content: start;
+  gap: var(--sp-4);
+}
+
+.ee-detail .ee-hero {
+  grid-area: hero;
+}
+
+/* 設問・作文（2.0 の `recognition-card`） */
+.ee-detail .ee-meta {
+  grid-area: recognition;
+}
+
+/* 登録画像（2.0 の `upload-card`。詳細では**右の柱**に固定して、読み進めても見える。
+   2.0 の `body.essay-detail-page .upload-card { top: 14px }` に合わせる） */
+.ee-detail .ee-images {
+  grid-area: side;
+  position: sticky;
+  top: 14px;
+  align-self: start;
+}
+
+/* AI添削レポート（2.0 の `result-card`） */
+.ee-detail .ee-report-card {
+  grid-area: result;
+}
+
+/* 「見つかりません」の案内は欄に属さない（1 行ぶん使う）。
+   領域を名乗らないまま置くと、`recognition` の升へ落ちて作文の欄と重なる */
+.ee-detail > .ee-missing {
+  grid-column: 1 / -1;
+}
+
+/* ---------- 画面の幅で並べ替える（2.0 のブレークポイント） ---------- */
+
+/* 狭い画面: 1 列にして、右の柱を本文の下へ回す（2.0 と同じ順:
+   hero → steps → side → main（02 → 03）。詳細は steps が無いので
+   hero → side → 設問と作文 → レポート） */
+@media (max-width: 1180px) {
+  .ee-form,
+  .ee-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ee-form {
+    grid-template-areas:
+      'hero'
+      'steps'
+      'side'
+      'main';
+  }
+
+  .ee-detail {
+    grid-template-areas:
+      'hero'
+      'side'
+      'recognition'
+      'result';
+  }
+
+  .ee-upload-side {
+    position: static;
+  }
+
+  .ee-detail .ee-images {
+    position: static;
+  }
+}
+
+/* 中間の狭さ: 設問 : 作文の 2 面と題の 2 欄を 1 列へ（2.0 と同じ） */
+@media (max-width: 1000px) {
+  .ee-ocr-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ee-title-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 広い画面: 3 ステップの帯を畳んで、設問・作文とレポートへ幅を渡す（2.0 と同じ）。
+   2.0 は `min-width` を持たず、狭い画面の規則（1180px）が既定を兼ねていた。2.1 はページの
+   外枠（サイドバー 248px ＋ 余白）ぶん狭いので、**中の幅が 1180px を超える**画面の幅に読み替える
+   （右の柱が 320px を割らない 1330px）。狭い画面の規則より**後**に書く（同じ特異性なので、
+   後に書いたほうが勝つ） */
+@media (min-width: 1330px) {
+  .ee-form {
+    grid-template-columns: minmax(0, 3fr) minmax(330px, 0.8fr);
+    grid-template-areas:
+      'hero hero'
+      'main side';
+  }
+
+  .ee-form .ee-stepper {
+    display: none;
+  }
+}
+
+/* ページの英雄の操作（【一覧へ戻る】【保存】） */
+.ee-page-form .ee-hero__actions .btn[data-ee-save] {
+  min-width: 120px;
+}
+

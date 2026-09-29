@@ -348,8 +348,8 @@ describe('日本語勉強【単語勉強状況】', () => {
 
     // 凡例は種別 A〜E と色の対応
     const legend = wrapper.get('.jp-legend')
-    expect(legend.text()).toContain('A 読み確認')
-    expect(legend.text()).toContain('E 漢字の使い方')
+    expect(legend.text()).toContain('A 勉強')
+    expect(legend.text()).toContain('E 漢字選択')
     expect(legend.findAll('.jp-legend__item')).toHaveLength(5)
   })
 
@@ -501,8 +501,8 @@ describe('日本語勉強【単語勉強状況】', () => {
     // 一覧の見出しには一覧アイコンを付ける（他の一覧画面と揃える）
     const skillsTitle = wrapper.findAll('.card__title').find((el) => el.text().includes('技能別の習得'))
     expect(skillsTitle?.get('use').attributes('href')).toBe('#i-list')
-    expect(table.text()).toContain('B：表記・読み')
-    expect(table.text()).toContain('D：文脈の意味')
+    expect(table.text()).toContain('B：意味→日本語')
+    expect(table.text()).toContain('D：文脈詞義判断')
     expect(table.text()).toContain('MEANING')
     expect(table.text()).toContain('CONTEXT')
 

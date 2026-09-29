@@ -222,7 +222,7 @@ export interface DemoDetailUsageNote {
 export interface DemoDetailMemoryHint {
   /** 一言の覚え方 */
   hint: string
-  /** 何に結びつけるか（漢字の形・場面など） */
+  /** 中国語で書く連想の説明（漢字の形・場面など） */
   basis: string
 }
 

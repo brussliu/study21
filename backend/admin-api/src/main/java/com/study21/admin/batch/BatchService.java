@@ -30,9 +30,22 @@ public interface BatchService {
      * この 1 件ずつを順に呼ぶ。`要求内容` に `{"aiRequestId": N}` を入れるので、ハンドラは
      * **どの要求を処理するか**を実行履歴から知れる（省略時は「未処理の最古の 1 件」を拾う）。</p>
      *
-     * <p>`rerun` との違いは `要求内容` を渡せることだけ（有効／無効に関係なく実行できることも同じ）。</p>
+     * <p>`rerun` との違いは `要求内容` を渡せることと、**有効設定が OFF のバッチを拒否すること**。
+     * 種別 C の有効は「いま使っているか」の目印で、OFF は「その処理を使わない」という意思表示
+     * なので、呼出の入口（この入口）で止める（バッチ一覧のスイッチがそのまま効く。
+     * 画面の【再実行】は 2.0 と同じく無効でも実行できる）。</p>
      */
     Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson);
+
+    /**
+     * 呼出（{@link #rerunStep}）や<b>受付</b>の前提: 有効設定が ON であること（OFF なら例外）。
+     *
+     * <p>種別 C の「有効」は「いま使っているか」の目印であり、「その処理を使わない」という
+     * 意思表示でもある（バッチ一覧のスイッチをそのまま効かせる。2026-09-22 の利用者指示）。
+     * 非同期の受付（例: 日本語単語の AI 取得）は {@code rerunStep} を通らないので、
+     * 受付の入口が**これを呼んで**同じ規則を守る。</p>
+     */
+    void requireCallable(String batchCode);
 
     /**
      * スケジューラ用: **記録済み（待機中）の実行**を実行する（実行記録はスケジューラが作る）。
@@ -97,7 +110,10 @@ public interface BatchService {
 
     /**
      * バッチの有効／無効を切り替える（BAT_バッチコントロール情報）。
-     * 切り替えられるのは batS / batL / batR のみ（C は実行のきっかけを持たない）。
+     *
+     * <p>切り替えられるのは batS / batL / batR と、**業務処理が実装済みの呼出（種別 C）**。
+     * 未実装の C は動かしようがないので拒否する。種別 C を無効にすると、他の処理からの
+     * 呼出（{@link #rerunStep}）が拒否される。</p>
      */
     Map<String, Object> updateActive(String batchCode, boolean active, String operator);
 }

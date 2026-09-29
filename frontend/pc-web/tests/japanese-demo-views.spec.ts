@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createRouter, createWebHashHistory } from 'vue-router'
@@ -67,6 +69,9 @@ describe('単語情報管理：画面', () => {
     })
     vi.stubGlobal('fetch', fetchSpy)
     window.localStorage.clear()
+    // jsdom には無いもの（一覧は「今の位置へスクロール」を呼ぶ）。
+    // スタブしないと unhandled error になり、テストが落ちていなくても vitest が非 0 で終わる
+    window.scrollTo = vi.fn()
   })
 
   it('一覧は本物の画面と同じ見た目で描画され、本番 API を呼ばない', async () => {
@@ -158,6 +163,8 @@ describe('単語情報管理：画面', () => {
     await wrapper.get('[data-demo-new]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(true)
+    // 画面の高さに収める（ページに縦スクロールを出さない）
+    expect(wrapper.find('.jp-demo-new-overlay').exists()).toBe(true)
     // 手順を分けず、1 ページにまとめて出す
     expect(wrapper.find('[data-demo-step="1"]').exists()).toBe(true)
     expect(wrapper.find('[data-demo-step="2"]').exists()).toBe(true)
@@ -185,6 +192,200 @@ describe('単語情報管理：画面', () => {
     await vi.waitFor(() => expect(wrapper.find('[data-demo-new-dialog]').exists()).toBe(false))
     expect(wrapper.get('[data-demo-notice-bar]').text()).toContain('登録しました')
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('新規登録の並びは「書籍 → 単語 → オプション」の順で、選択はオプションにまとめる', async () => {
+    const { wrapper, store } = await mountList()
+
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    store.setRegisterHeadings(['りんご', 'みかん'])
+    await flushPromises()
+
+    // 上から順に: 1 書籍、2 単語、3 オプション（最後に登録する内容）
+    const dialog = wrapper.get('[data-demo-new-dialog]')
+    const order = dialog
+      .findAll('[data-demo-step]')
+      .map((section) => section.attributes('data-demo-step'))
+    expect(order.slice(0, 3)).toEqual(['1', '2', '3'])
+    expect(dialog.get('[data-demo-step="1"]').text()).toContain('書籍')
+    expect(dialog.get('[data-demo-step="1"]').text()).not.toContain('書籍と Unit')
+    expect(dialog.get('[data-demo-step="1"]').find('[data-demo-word-grid]').exists()).toBe(false)
+    expect(dialog.get('[data-demo-step="2"]').find('[data-demo-word-grid]').exists()).toBe(true)
+
+    // 重複の扱いと登録位置は、まとめてオプションの中に置く
+    const options = dialog.get('[data-demo-step="3"]')
+    expect(options.find('[data-demo-book-select]').exists()).toBe(false)
+    for (const selector of [
+      '[data-demo-duplicate-book]',
+      '[data-demo-duplicate-all]',
+      '[data-demo-placement-continue]',
+      '[data-demo-placement-new-unit]',
+      '[data-demo-duplicate-note]'
+    ]) {
+      expect(options.find(selector).exists(), selector).toBe(true)
+    }
+
+    // まとめ（登録する内容）はオプションより後ろ
+    const summary = dialog.get('[data-demo-confirm-summary]').element
+    const optionsElement = options.element
+    expect(optionsElement.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('オプションは単語の表の下に、見出し・枠なしで「登録開始Unit」と「重複判定範囲」を左右に並べる', async () => {
+    const { wrapper, store } = await mountList()
+
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    store.setRegisterHeadings(['りんご', 'みかん'])
+    await flushPromises()
+
+    const dialog = wrapper.get('[data-demo-new-dialog]')
+    const wordSection = dialog.get('[data-demo-step="2"]').element
+    const options = dialog.get('[data-demo-step="3"]')
+
+    // 並びは「単語の表 → オプション」（右には置かない）
+    expect(wordSection.compareDocumentPosition(options.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    // 「オプション」の子見出しを置く（囲みの枠は付けない）
+    expect(options.get('.jp-demo-section__title').text()).toBe('オプション')
+
+    // 2 つの組が左右に並ぶ（それぞれ見出しの下に選択肢）
+    const groups = options.findAll('.jp-demo-options')
+    expect(groups.length).toBe(2)
+    expect(groups[0]?.element.compareDocumentPosition(groups[1]!.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const nameOf = (selector: string) => options.get(selector).element.closest('label')?.textContent?.trim() ?? ''
+    const group = (index: number) => options.findAll('.jp-demo-options')[index]!
+    expect(group(0).text()).toContain('登録開始Unit')
+    expect(nameOf('[data-demo-placement-continue]')).toBe('最後の Unit の続きから')
+    expect(nameOf('[data-demo-placement-new-unit]')).toBe('新しい Unit から')
+    expect(group(1).text()).toContain('重複判定範囲')
+    expect(nameOf('[data-demo-duplicate-book]')).toBe('登録対象書籍')
+    expect(nameOf('[data-demo-duplicate-all]')).toBe('すべて書籍')
+
+    // 説明は「登録開始 Unit」と「重複判定範囲」の、それぞれの列の下に出す
+    expect(group(0).find('[data-demo-placement-note]').exists()).toBe(true)
+    expect(group(1).find('[data-demo-duplicate-note]').exists()).toBe(true)
+    expect(group(0).find('[data-demo-duplicate-note]').exists()).toBe(false)
+
+    // 組の中の 2 つは上下に並べる（左右ではない）
+    for (const each of groups) {
+      expect(each.findAll('.jp-demo-option').length).toBe(2)
+    }
+
+    // 選ぶものは 4 つ。1 つずつは短い見出しだけで、説明文を付けない
+    const choices = options.findAll('.jp-demo-option')
+    expect(choices.length).toBe(4)
+    for (const choice of choices) {
+      expect(choice.findAll('small').length).toBe(0)
+      expect(choice.text().length).toBeLessThanOrEqual(42)
+    }
+  })
+
+  it('1 Unit あたりの単語数は、既存・新規どちらも同じ位置のプルダウンで選ぶ', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+
+    // 既存の書籍: その本の語数（20）が選ばれた状態で出る
+    const unitSelect = wrapper.get('[data-demo-unit-size]')
+    expect(unitSelect.element.tagName).toBe('SELECT')
+    const options = unitSelect.findAll('option').map((option) => option.text())
+    expect(options).toEqual(['10 語', '15 語', '20 語', '30 語', '50 語'])
+    expect((unitSelect.element as HTMLSelectElement).value).toBe('20')
+    expect(store.registerUnitSize).toBe(20)
+
+    // 選び直すと、その値で割り当てを計算する
+    await unitSelect.setValue('15')
+    await flushPromises()
+    expect(store.registerUnitSize).toBe(15)
+
+    // 新しい書籍に切り替えても、同じ場所に同じ形で出る（自動計算の文字は置かない）
+    await wrapper.get('[data-demo-book-select]').setValue('__NEW_BOOK__')
+    await flushPromises()
+    expect(wrapper.get('[data-demo-unit-size]').element.tagName).toBe('SELECT')
+    expect(wrapper.find('[data-demo-unit-size-auto]').exists()).toBe(false)
+
+    // 3 つは同じ行に並ぶ。既存の書籍のときは、名前の欄は枠だけ残して隠す
+    // （枠ごと消すと語数のプルダウンが左へ寄り、位置が食い違うため）
+    const bookRow = wrapper.get('.jp-demo-register__book')
+    expect(bookRow.findAll('.filter-item').length).toBe(3)
+    const nameField = bookRow.get('[data-demo-book-name-field]')
+    expect(nameField.find('[data-demo-book-name]').exists()).toBe(true)
+
+    await wrapper.get('[data-demo-book-select]').setValue(store.bookNameOptions[0]!)
+    await flushPromises()
+    expect(nameField.classes()).toContain('is-placeholder')
+
+    await wrapper.get('[data-demo-book-select]').setValue('__NEW_BOOK__')
+    await flushPromises()
+    expect(wrapper.get('[data-demo-book-name-field]').classes()).not.toContain('is-placeholder')
+  })
+
+  it('行を足すボタンは「単語」の見出しの右にあり、押すと表の行が増える（消すと減る）', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(1)
+    const button = wrapper.get('[data-demo-step="2"] [data-demo-add-row-button]')
+    expect(button.element.closest('.jp-demo-register__wordhead')).not.toBe(null)
+    await button.trigger('click')
+    await flushPromises()
+    expect(store.registerHeadings.length).toBe(2)
+    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(2)
+
+    store.setRegisterHeadings(['あ', 'い', 'う'])
+    await flushPromises()
+    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(3)
+
+    await wrapper.get('[data-demo-remove-row="1"]').trigger('click')
+    await flushPromises()
+    expect(store.registerHeadings).toEqual(['あ', 'う'])
+  })
+
+  it('単語の表は決め打ちの幅にせず、置かれた幅いっぱいを使う（はみ出しを作らない）', async () => {
+    const { wrapper } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+
+    // 幅は px で決め打ちしない（列の幅をつまむまでは、置かれた幅いっぱいを使う）。
+    // 100% ちょうどだと枠の端数で 1px はみ出し、初期状態で横スクロールバーが出るため 1px 引く。
+    const table = wrapper.get('[data-demo-word-grid]')
+    expect(table.attributes('style') ?? '').toBe('width: calc(100% - 1px);')
+    expect(table.findAll('col').at(-1)?.attributes('style') ?? '').not.toContain('width')
+  })
+
+  it('単語の表の枠は高さを固定し、下の欄に重ならないようにする', async () => {
+    // 枠を伸び縮みさせると、画面が低いときに枠が潰れて
+    // 中の表が「オプション」に重なり、マウスが表に当たらなくなる。
+    const css = readFileSync(resolve(__dirname, '../src/features/japanese-demo/japanese-demo.css'), 'utf8')
+    const rule = css.match(/\.jp-demo-register \.jp-sheet-scroll \{([^}]*)\}/)?.[1] ?? ''
+    expect(rule).toContain('height: 24rem')
+    expect(rule).toContain('overflow: auto')
+    expect(rule).not.toContain('flex: 1')
+  })
+
+  it('Excel 風の表: 入力中のセルは緑の罫線 1 本で示す（内側の枠は足さない）', async () => {
+    const { wrapper, store } = await mountList()
+    await wrapper.get('[data-demo-new]').trigger('click')
+    await flushPromises()
+    store.setRegisterHeadings(['りんご', 'みかん'])
+    await flushPromises()
+
+    await wrapper.get('[data-demo-word-cell="0"]').trigger('mousedown')
+    await wrapper.get('[data-demo-word-grid]').trigger('keydown', { key: 'F2' })
+    await flushPromises()
+
+    // 入力中の印がセルに付く（以前は付いておらず、選択の枠と二重に見えていた）
+    const editing = wrapper.get('[data-demo-word-cell="0"]')
+    expect(editing.classes()).toContain('is-editing')
+    expect(editing.find('[data-demo-word-input]').exists()).toBe(true)
+
+    // 入力中のセルには選択の印を重ねない
+    expect(editing.classes()).not.toContain('is-selected')
+    expect(editing.classes()).not.toContain('is-range')
   })
 
   it('Excel 風の表: クリックでは入力欄が出ず、ダブルクリック / F2 で入力する', async () => {
@@ -278,26 +479,6 @@ describe('単語情報管理：画面', () => {
     expect(store.registerHeadings).toEqual(['りんご', 'ぶどう', 'もも', 'なし'])
   })
 
-  it('Excel 風の表: 行の追加と削除', async () => {
-    const { wrapper, store } = await mountList()
-    await wrapper.get('[data-demo-new]').trigger('click')
-    await flushPromises()
-
-    // 開いた直後は空行 1 つ。行追加で 2 行になる
-    expect(store.registerHeadings).toEqual([''])
-    await wrapper.get('[data-demo-add-row]').trigger('click')
-    await flushPromises()
-    expect(store.registerHeadings.length).toBe(2)
-
-    store.setRegisterHeadings(['あ', 'い', 'う'])
-    await flushPromises()
-    expect(wrapper.findAll('[data-demo-word-row-index]').length).toBe(3)
-
-    await wrapper.get('[data-demo-remove-row="1"]').trigger('click')
-    await flushPromises()
-    expect(store.registerHeadings).toEqual(['あ', 'う'])
-  })
-
   it('書籍はプルダウンで選び、最後の「新しい書籍を追加…」で入力欄が出る', async () => {
     const { wrapper, store } = await mountList()
 
@@ -306,14 +487,13 @@ describe('単語情報管理：画面', () => {
     store.setRegisterHeadings(['りんご', 'みかん'])
     await flushPromises()
 
-    // 既存の書籍: 1 Unit の語数は本から自動で計算される（入力欄は出ない）
+    // 既存の書籍: 1 Unit の語数は本から自動で決まり、その値が選ばれた状態で出る
     const options = wrapper.get('[data-demo-book-select]').findAll('option').map((option) => option.text())
     expect(options.at(-1)).toBe('新しい書籍を追加…')
     expect(options.length).toBe(store.bookNameOptions.length + 1)
-    expect(wrapper.find('[data-demo-unit-size]').exists()).toBe(false)
-    expect(wrapper.get('[data-demo-unit-size-auto]').text()).toContain('自動')
+    expect((wrapper.get('[data-demo-unit-size]').element as HTMLSelectElement).value).toBe('20')
 
-    // 「新しい書籍を追加…」を選ぶと、名前と語数の入力欄が出る
+    // 「新しい書籍を追加…」を選ぶと、名前の入力欄が出る（語数のプルダウンは同じ場所のまま）
     await wrapper.get('[data-demo-book-select]').setValue('__NEW_BOOK__')
     await flushPromises()
     expect(wrapper.find('[data-demo-book-name]').exists()).toBe(true)
@@ -446,7 +626,51 @@ describe('単語情報管理：画面', () => {
     expect(store.draft?.heading).toBe('変更した見出し')
   })
 
-  it('学習画面は既定で要点だけを見せ、残りはタブに分ける', async () => {
+  it('学習画面は日本語と中国語を分けて見せ、見出し・発音・タブの順に組む（2.0 と同じ）', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const store = useJapaneseDemoStore()
+    const word = store.findWord('w-toshokan')!
+
+    const wrapper = mount(DemoWordStudyView, { props: { word }, global: { plugins: [pinia] } })
+    await flushPromises()
+
+    // 見出しの帯に、語・読み・品詞・JLPT と収録（書籍／Unit）をまとめる
+    const hero = wrapper.get('[data-demo-study-hero]')
+    expect(hero.get('[data-demo-study-word]').text()).toBe('図書館')
+    expect(hero.get('[data-demo-study-reading]').text()).toBe('としょかん')
+    expect(hero.text()).toContain('名詞')
+    expect(hero.text()).toContain('N5')
+    expect(wrapper.get('[data-demo-study-head]').get('[data-demo-study-collection]').text()).toContain('Unit001')
+
+    // 中国語の意味は、日本語と混ぜずに独立した帯で見せる
+    expect(wrapper.get('[data-demo-study-primary-text]').text()).toBe('图书馆')
+    expect(wrapper.find('[data-demo-study-primary]').element.getAttribute('lang')).toBe(null)
+    expect(wrapper.get('[data-demo-study-primary-text]').element.getAttribute('lang')).toBe('zh-CN')
+    expect(wrapper.find('[data-demo-study-lang="zh"]').exists()).toBe(true)
+
+    // 例文と会話は 1 文ずつ、日本語と中国語を分けて出す
+    await wrapper.get('[data-demo-study-tab="examples"]').trigger('click')
+    const firstExample = wrapper.get('[data-demo-study-example]')
+    expect(firstExample.find('[data-demo-study-lang="ja"]').exists()).toBe(true)
+    expect(firstExample.find('[data-demo-study-lang="zh"]').exists()).toBe(true)
+
+    await wrapper.get('[data-demo-study-tab="examples"]').trigger('click')
+    await flushPromises()
+    const firstLine = wrapper.get('[data-demo-dialog-line]')
+    expect(firstLine.find('[data-demo-study-lang="ja"]').exists()).toBe(true)
+    expect(firstLine.find('[data-demo-study-lang="zh"]').exists()).toBe(true)
+
+    // タブは 2.0 の A 学習と同じ並び（語義・説明 / 発音 / コロケーション / 例文 / 関連語・使用注意 / 練習）
+    const tabs = wrapper.findAll('[data-demo-study-tab]').map((tab) => tab.attributes('data-demo-study-tab'))
+    expect(tabs.slice(0, 5)).toEqual(['meaning', 'form', 'collocations', 'examples', 'compare'])
+
+    // 両言語は常に表示する。
+    expect(wrapper.findAll('[data-demo-study-lang="zh"]').length).toBeGreaterThan(0)
+    expect(wrapper.findAll('[data-demo-study-lang="ja"]').length).toBeGreaterThan(0)
+  })
+
+  it('学習内容は選択中のタブだけに出し、切り替え入口の前に積み上げない', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useJapaneseDemoStore()
@@ -457,12 +681,20 @@ describe('単語情報管理：画面', () => {
 
     expect(wrapper.get('[data-demo-study-word]').text()).toBe('図書館')
     expect(wrapper.get('[data-demo-study-core]').text()).not.toBe('')
+    expect(wrapper.find('[data-demo-study-example]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-study-caution]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('まず覚えること')
+    expect(wrapper.findAll('[role="tabpanel"]').length).toBe(1)
+    await wrapper.get('[data-demo-study-tab="collocations"]').trigger('click')
+    expect(wrapper.find('[data-demo-study-pattern]').exists()).toBe(true)
+    await wrapper.get('[data-demo-study-tab="examples"]').trigger('click')
     expect(wrapper.findAll('[data-demo-study-example]').length).toBeGreaterThanOrEqual(2)
+    await wrapper.get('[data-demo-study-tab="compare"]').trigger('click')
     expect(wrapper.find('[data-demo-study-caution]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('デモ')
 
     const tabs = wrapper.findAll('[data-demo-study-tab]').map((tab) => tab.attributes('data-demo-study-tab'))
-    expect(tabs).toEqual(['meaning', 'examples', 'compare', 'form', 'practice'])
+    expect(tabs).toEqual(['meaning', 'form', 'collocations', 'examples', 'compare', 'practice'])
 
     // ミニ練習はこの画面の中で完結する
     await wrapper.get('[data-demo-study-tab="practice"]').trigger('click')
@@ -472,7 +704,7 @@ describe('単語情報管理：画面', () => {
     expect(wrapper.find('[data-demo-quiz-result]').exists()).toBe(true)
   })
 
-  it('学習画面は中国語訳と読みを切り替えられる', async () => {
+  it('学習画面は読みと中国語訳を常に表示し、音声ボタンをスピーカーに統一する', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useJapaneseDemoStore()
@@ -482,13 +714,24 @@ describe('単語情報管理：画面', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-demo-study-reading]').exists()).toBe(true)
-    await wrapper.get('[data-demo-toggle-reading]').setValue(false)
-    expect(wrapper.find('[data-demo-study-reading]').exists()).toBe(false)
-
-    await wrapper.get('[data-demo-toggle-chinese]').setValue(false)
-    expect(wrapper.find('[data-demo-study-core]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-toggle-reading]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-toggle-chinese]').exists()).toBe(false)
+    expect(wrapper.find('[data-demo-study-primary]').exists()).toBe(true)
+    expect(wrapper.find('[data-demo-study-core]').exists()).toBe(true)
     // 日本語は残る
     expect(wrapper.get('[data-demo-study-word]').text()).toBe('図書館')
+    for (const tab of ['meaning', 'form', 'examples']) {
+      await wrapper.get(`[data-demo-study-tab="${tab}"]`).trigger('click')
+      const buttons = wrapper.findAll('button.jp-study-sound')
+      expect(buttons.length).toBeGreaterThan(0)
+      for (const button of buttons) {
+        expect(button.get('use').attributes('href')).toBe('#i-speaker')
+        expect(button.text()).toBe('')
+        expect(button.attributes('aria-label')).toBeTruthy()
+      }
+    }
+    await wrapper.get('[data-demo-dialog-play]').trigger('click')
+    expect(wrapper.get('[data-demo-study-dialog]').text()).toContain('再生中')
   })
 
   it('下書きを表示するときは、未保存であることを示す', async () => {

@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS public."RED_書籍情報" (
     "教科"               VARCHAR(20)  NOT NULL DEFAULT '英語',
     "書籍名"             VARCHAR(150) NOT NULL,
     "作者"               VARCHAR(120) NOT NULL,
+    -- ---- 分類・言語・公開範囲（2026-09-13/14 の移行で追加。**新規構築でも要る**のでここにも定義する） ----
+    -- 分類（RED_書籍分類情報 への参照。未分類は NULL）
+    "分類ID"             BIGINT       NULL,
+    -- 本の言語（画面の絞り込みに使う）
+    "言語"               VARCHAR(20)  NOT NULL DEFAULT '英語',
+    -- 公開範囲（FAMILY = 家族だけ / PUBLIC = 全員）
+    "公開範囲コード"     VARCHAR(20)  NOT NULL DEFAULT 'FAMILY',
+    -- 家族ごとに見せるときの持ち主（公開範囲コード = 'FAMILY' のとき使う）
+    "所有家族学生ID"     BIGINT       NULL,
     -- Starter / Elementary / Intermediate / Upper
     "難易度"             VARCHAR(20)  NOT NULL DEFAULT 'Elementary',
     -- 未着手 / 読書中 / 一時停止 / 読了

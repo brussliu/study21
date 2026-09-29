@@ -126,11 +126,16 @@ public final class SettingPageFields {
         put(m, "essayOcrAiProvider",   "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_AI_PROVIDER");
         put(m, "essayOcrMaxImagePixels", "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_MAX_IMAGE_PIXELS");
         put(m, "essayOcrRequestTimeoutSeconds", "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_REQUEST_TIMEOUT_SECONDS");
+        // 実行パラメータ（2.0 はコード固定だった。設定ページの「OCR：Temperature」などで変える）
+        put(m, "essayOcrMaxCompletionTokens", "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_MAX_COMPLETION_TOKENS");
+        put(m, "essayOcrTemperature",  "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_TEMPERATURE");
         put(m, "essayOcrPrompt",       "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_PROMPT");
         put(m, "essayOcrUserPrompt",   "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_USER_PROMPT");
         put(m, "essayOcrRetryLimit",   "ENGLISH_ESSAY", "ENGLISH_ESSAY_OCR_RETRY_LIMIT");
         put(m, "essayGradingAiProvider", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_AI_PROVIDER");
         put(m, "essayGradingRequestTimeoutSeconds", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_REQUEST_TIMEOUT_SECONDS");
+        put(m, "essayGradingMaxCompletionTokens", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_MAX_COMPLETION_TOKENS");
+        put(m, "essayGradingTemperature", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_TEMPERATURE");
         put(m, "essayGradingPrompt",   "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_PROMPT");
         put(m, "essayGradingUserPrompt", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_USER_PROMPT");
         put(m, "essayGradingRetryLimit", "ENGLISH_ESSAY", "ENGLISH_ESSAY_GRADING_RETRY_LIMIT");

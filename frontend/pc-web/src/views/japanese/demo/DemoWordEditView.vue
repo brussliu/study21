@@ -13,6 +13,7 @@ import {
 } from '@/features/japanese-demo/logic'
 import type { DemoCautionKind, DemoPracticeKind } from '@/features/japanese-demo/types'
 import '@/features/japanese-demo/japanese-demo.css'
+import type { WordEditorContract } from '@/features/japanese-word/editorContract'
 
 /**
  * 日本語勉強【単語情報管理】：詳細編集（別ウィンドウ）。
@@ -26,13 +27,16 @@ import '@/features/japanese-demo/japanese-demo.css'
  * プレビューは下書きをそのまま学習画面の見た目で見る（保存済みの内容とは混ざらない）。
  */
 
-const store = useJapaneseDemoStore()
+const props = defineProps<{ store?: WordEditorContract }>()
+const demoStore = props.store ? null : useJapaneseDemoStore()
+const store = props.store ?? demoStore!
 
 const draft = computed(() => store.draft)
 
 const emit = defineEmits<{
   close: []
   preview: [{ draft: boolean }]
+  saved: []
 }>()
 
 /** 選択中の欄（タブ）。 */
@@ -68,14 +72,12 @@ const isVerb = computed(() => draft.value?.partOfSpeech === '動詞' || draft.va
 
 /** 新しい配列項目の雛形を作る（id はストア側で採番できないのでここで作る）。 */
 function tempId(prefix: string): string {
-  tempId.counter += 1
-  return `${prefix}-new-${tempId.counter}`
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 }
-tempId.counter = 0
 
 function addSense(): void {
   const detail = draft.value?.detail
-  const nextNumber = (detail?.senses.length ?? 0) + 1
+  const nextNumber = Math.max(0, ...(detail?.senses.map(sense => sense.number) ?? [])) + 1
   store.addListItem('senses', {
     id: tempId('sense'), number: nextNumber, japanese: '', chinese: '', context: '', style: '普通'
   })
@@ -171,11 +173,12 @@ function enableTransitivityPair(): void {
 const saving = computed(() => store.saveState === 'SAVING')
 
 async function save(): Promise<void> {
-  await store.saveDraft()
+  if (await store.saveDraft()) emit('saved')
 }
 
 /** 一覧へ戻る（未保存なら確認する）。 */
 function close(): void {
+  if (saving.value) return
   if (store.draftDirty) {
     leavePrompt.value = '保存していない変更があります。破棄して一覧へ戻りますか？'
     return
@@ -199,14 +202,15 @@ function preview(): void {
   emit('preview', { draft: true })
 }
 
-/** 競合のときに、自分の入力を残したまま相手の版を確認する。 */
+/** 競合のときに、自分の入力を残したまま相手の版を確認する（**デモだけ**の操作）。 */
 function keepMine(): void {
-  store.resolveConflictAsMine()
+  demoStore?.resolveConflictAsMine()
 }
 
 function collectionsText(): string[] {
   return draft.value === null ? [] : draft.value.collections.map((collection) => collectionLabel(collection))
 }
+defineExpose({ close })
 </script>
 
 <template>
@@ -222,7 +226,7 @@ function collectionsText(): string[] {
           <h1 class="jp-demo-editor__title" data-demo-editor-word>{{ draft.heading }}</h1>
           <div class="jp-demo-editor__sub">
             {{ draft.reading }} ／ {{ draft.partOfSpeech }}
-            <template v-if="draft.jlpt"> ／ {{ draft.jlpt }}（例）</template>
+            <template v-if="draft.jlpt"> ／ {{ draft.jlpt }}</template>
           </div>
         </div>
         <span class="jp-demo-status">
@@ -235,7 +239,7 @@ function collectionsText(): string[] {
           <button type="button" class="btn btn--secondary btn--sm" data-demo-preview @click="preview">
             <AppIcon name="eye" size="sm" /> 学習画面で確認
           </button>
-          <button type="button" class="btn btn--secondary btn--sm" data-demo-editor-cancel @click="close">
+          <button type="button" class="btn btn--secondary btn--sm" data-demo-editor-cancel :disabled="saving" @click="close">
             キャンセル
           </button>
           <button
@@ -262,7 +266,7 @@ function collectionsText(): string[] {
         <p style="margin: 0 0 var(--sp-2)">{{ store.saveMessage }}</p>
         <p style="margin: 0 0 var(--sp-2)" class="jp-demo-meta">{{ store.conflictNote }}</p>
         <div class="jp-demo-array-actions">
-          <button type="button" class="jp-demo-linkbtn" data-demo-conflict-keep @click="keepMine">
+          <button v-if="!props.store" type="button" class="jp-demo-linkbtn" data-demo-conflict-keep @click="keepMine">
             いまの入力で続ける
           </button>
           <button type="button" class="jp-demo-linkbtn" data-demo-conflict-reload @click="store.openEditor(draft.id)">
@@ -283,21 +287,21 @@ function collectionsText(): string[] {
       </div>
 
       <!-- AI の補助（人の入力を自動で上書きしない） -->
-      <section class="jp-demo-panel">
+      <section v-if="demoStore" class="jp-demo-panel">
         <div class="jp-demo-panel__body" style="padding-top: var(--sp-3)">
           <div class="jp-demo-array-actions">
-            <button type="button" class="btn btn--secondary btn--sm" data-demo-supplement @click="store.startGeneration(draft.id)">
+            <button type="button" class="btn btn--secondary btn--sm" data-demo-supplement @click="demoStore.startGeneration(draft.id)">
               <AppIcon name="copy" size="sm" /> AI で補足案を作る
             </button>
-            <button type="button" class="btn btn--secondary btn--sm" data-demo-regenerate @click="store.startGeneration(draft.id)">
+            <button type="button" class="btn btn--secondary btn--sm" data-demo-regenerate @click="demoStore.startGeneration(draft.id)">
               <AppIcon name="rotate" size="sm" /> 詳細情報を再生成
             </button>
             <span class="jp-demo-meta">
               案を採用するかどうかは人が選びます（いまの入力は自動で上書きしません）。
             </span>
           </div>
-          <p v-if="store.runningJobs.length > 0" class="jp-demo-meta" data-demo-job-running>
-            生成しています…（{{ store.runningJobs.length }} 件）しばらくすると結果が入ります。
+          <p v-if="demoStore.runningJobs.length > 0" class="jp-demo-meta" data-demo-job-running>
+            生成しています…（{{ demoStore.runningJobs.length }} 件）しばらくすると結果が入ります。
           </p>
         </div>
       </section>
@@ -315,7 +319,7 @@ function collectionsText(): string[] {
           </button>
         </nav>
 
-        <div class="jp-demo-editor__body">
+        <div class="jp-demo-editor__body" :inert="saving || undefined">
           <!-- 1. 基本情報 -->
           <section v-if="activeSection === 'basic'" class="jp-demo-section" data-demo-editor-section="basic">
             <h2 class="jp-demo-section__title">基本情報</h2>
@@ -340,11 +344,12 @@ function collectionsText(): string[] {
                   class="select" :value="draft.partOfSpeech" data-demo-edit-part
                   @change="store.updateDraftBasic({ partOfSpeech: ($event.target as HTMLSelectElement).value as typeof draft.partOfSpeech })"
                 >
+                  <option v-if="!PART_OF_SPEECH_OPTIONS.includes(draft.partOfSpeech)" :value="draft.partOfSpeech">{{ draft.partOfSpeech }}</option>
                   <option v-for="part in PART_OF_SPEECH_OPTIONS" :key="part" :value="part">{{ part }}</option>
                 </select>
               </label>
               <label class="filter-item">
-                <span class="filter-item__label">JLPT（例示値）</span>
+                <span class="filter-item__label">JLPT</span>
                 <input
                   class="input" :value="draft.jlpt ?? ''" placeholder="未確認なら空" data-demo-edit-jlpt
                   @input="store.updateDraftBasic({ jlpt: ($event.target as HTMLInputElement).value || null })"
@@ -366,6 +371,7 @@ function collectionsText(): string[] {
               </label>
             </div>
 
+            <slot name="basic-extra"></slot>
             <p v-if="sameHeading.length > 0" class="alert alert--warning" data-demo-same-heading>
               同じ表記で読みが違う単語があります（
               <template v-for="(other, index) in sameHeading" :key="other.id">

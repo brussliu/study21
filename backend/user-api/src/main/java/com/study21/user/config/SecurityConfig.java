@@ -65,6 +65,8 @@ public class SecurityConfig {
                                 // 授業録音 / AI 授業記録（ログイン必須。
                                 // anyRequest().denyAll() なので、明示しないと 403 になる）
                                 "/api/user/classroom", "/api/user/classroom/**",
+                                // 英語勉強（英作文AI添削。作文の保管・配信と、**AI 添削の受付**）
+                                "/api/user/english-essays", "/api/user/english-essays/**",
                                 // 学習日報（閲覧のみ）
                                 "/api/user/daily-reports", "/api/user/daily-reports/**",
                                 "/api/user/study-monitor", "/api/user/study-monitor/**",

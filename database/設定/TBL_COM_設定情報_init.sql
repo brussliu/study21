@@ -359,8 +359,13 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_MAX_IMAGE_PIXELS','GLOBAL','2048') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_REQUEST_TIMEOUT_SECONDS','GLOBAL','600') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_RETRY_LIMIT','GLOBAL','1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+-- 実行パラメータ（2.0 はコード固定だった値。設定ページの「OCR：Temperature」などで変える）
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_MAX_COMPLETION_TOKENS','GLOBAL','4096') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_TEMPERATURE','GLOBAL','0.0') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_REQUEST_TIMEOUT_SECONDS','GLOBAL','600') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_RETRY_LIMIT','GLOBAL','1') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_MAX_COMPLETION_TOKENS','GLOBAL','8192') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_PROMPT','GLOBAL','あなたは英語試験文書のOCRおよびレイアウト分析アシスタントです。
                     複数画像を question、answer、both、unknown に分類し、作文問題と学生の手書き作文を別々に抽出してください。
                     複数ページは画像順に結合してください。学生原文の綴り、文法、大文字小文字、句読点の誤りは修正せず、そのまま保持してください。
@@ -1504,17 +1509,27 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_REQUEST_TIMEOUT_SECONDS','GLOBAL','300') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_MAX_COMPLETION_TOKENS','GLOBAL','12000') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
-INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_SYSTEM_PROMPT','GLOBAL','あなたは日本語教育・日本語辞書編集の専門家です。学習者向け詳細情報を正確に生成してください。
-                    出力JSON:
-                    {"partOfSpeech":"日本語品詞","conjugationType":"活用種類または空文字","transitivity":"TRANSITIVE|INTRANSITIVE|BOTH|NONE",
-                     "jlpt":"N5|N4|N3|N2|N1|null","importance":1から5,"chineseMeaning":"简体中文释义","japaneseExplanation":"やさしい日本語説明","chineseExplanation":"与日文说明对应的详细简体中文说明",
-                     "senses":[{"japanese":"日本語語義","chinese":"中文语义","context":"使用場面","style":"FORMAL|NEUTRAL|INFORMAL|WRITTEN|SPOKEN","noteJapanese":"補足","noteChinese":"中文补充"}],
-                     "pronunciations":[{"reading":"読み","accent":"アクセント表記","accentType":0,"moraCount":1}],
-                     "examples":[{"japanese":"自然な日本語例文","reading":"例文の読み","chinese":"简体中文翻译","contextJapanese":"文脈語義","contextChinese":"中文语境义"}],
-                     "collocations":[{"expression":"重要コロケーション","reading":"読み","chinese":"中文意思","exampleJapanese":"例文","exampleChinese":"中文翻译"}],
-                     "relatedWords":[{"relationType":"HOMOPHONE|SIMILAR_KANJI|SYNONYM|ANTONYM|CONFUSABLE","heading":"表記","reading":"読み","chinese":"中文意思","differenceJapanese":"相違点","differenceChinese":"中文区别","eCandidate":false}],
-                     "usageNotes":[{"noteType":"USAGE|KANJI|READING|GRAMMAR|REGISTER|COMMON_ERROR","japanese":"日本語説明","chinese":"中文解说","wrongExample":"誤用例","correctExample":"正用例"}]}
-                    語義1件以上、例文2件以上、コロケーション2件以上を生成してください。中文字段必须使用简体中文。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_SYSTEM_PROMPT','GLOBAL','あなたは日本語教育・日本語辞書編集の専門家です。中国語を母語とする学習者が「読んで覚える」ための詳細情報を作ります。
+出力する JSON の形は、このあとに付く「出力形式（JSON Schema）」が唯一の定義です。キー名・入れ子・型はそれに従い、**スキーマに無いキーを足さないでください**（Markdown のコードフェンスも付けない）。
+内容のルール:
+・coreMeaning は日本語の一言の意味（学習画面で見出しの下に出る）。簡潔に一文で。
+・descriptionJa はやさしい日本語、descriptionZh はそれに対応する簡体中文。
+・senses は語義を番号順に。context は「どんな場面で使うか」、style は 普通／やや硬い／話し言葉 などの文体。
+・examples は各語義に最低 1 件、全体で 2 件以上。level は BASIC（やさしい）か APPLIED（応用）。reading は必ず付ける。
+・patterns は助詞や活用の型（例: 人**に**相談する）。その語の使い方が分かる型を優先する。
+・dialogs は 2〜4 文の短いやりとり（職場・学校・店など、実際に使う場面）。
+・synonyms は類義語・対義語・間違えやすい語。shared に共通点、difference に違いを書く。
+・cautions は中国語母語の学習者が**実際に間違える**ポイント（日中同形異義語、助詞、不自然な直訳）。wrong / correct に対比を書く。
+・conjugations は動詞・形容詞のときだけ。form は「て形」「た形」「ない形」など。
+・transitivityPair は自他動詞の対応が**あるときだけ**。
+・pronunciation は reading とアクセント。**reading は必ず書く**（入力の reading が空の語は、ここに書いた読みが単語情報へ書き戻される）。**アクセントが確認できないときは accentType と accentNotation を null にしてください**（推測で埋めない）。hasAudioSample は false。
+・collocations は実際によく使う言い回しを 2 件以上。
+・relatedWords は relatedWords にまとめる（relation は 類義語／対義語／間違えやすい／同じ読み）。
+・usageNotes は register（話し言葉／書き言葉／どちらも）と politeness（カジュアル／普通／丁寧）、誰に使うか。
+・memoryHint は覚え方の一言（hint）と、その根拠（basis。漢字の形・場面など）。
+・practices はミニ練習。kind は PARTICLE（助詞）／SYNONYM（類義語の使い分け）／SCENE（場面に合う言い方）／WRITING（自由造句）。
+　選択式は choices と answer を、WRITING は freeWriting を true にして answer に模範例文を入れる。
+中文字段必须使用简体中文。日本語の例文は自然で、実際に使われる文にしてください（教科書的な不自然な文は避ける）。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C41_USER_PROMPT','GLOBAL','以下の日本語単語データを分析し、指定JSONスキーマだけを出力してください。Markdownは禁止です。
                     取得区分: {{kind}}
                     入力:
@@ -1526,15 +1541,15 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_REQUEST_TIMEOUT_SECONDS','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_MAX_COMPLETION_TOKENS','GLOBAL','4000') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
-INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_SYSTEM_PROMPT','GLOBAL','日本語の読み・漢字認識問題を作成してください。C1では漢字を提示し、四つの仮名選択肢から読みを選ばせます。再生音声や音声ボタンは不要です。
-                    C1のcorrectValueは入力word.readingをそのまま使用し、options内に完全一致する正解を1件だけ含めてください。
-                    C2では読みの音声を聞き、四つの漢字表記から選ばせます。C2のcorrectValueは入力word.headingをそのまま使用し、options内に完全一致する正解を1件だけ含めてください。
-                    出力JSON: {"problems":[
-                      {"problemType":"C1_READING","questionJapanese":"漢字を見て正しい読みを選んでください","targetHeading":"対象表記","targetReading":"読み","correctValue":"正しい仮名","options":[{"value":"仮名","reading":"仮名","wrongType":"READING_SIMILAR"}×4]},
-                      {"problemType":"C2_KANJI","questionJapanese":"音声を聞いて正しい漢字表記を選んでください","targetHeading":"対象表記","targetReading":"読み","audioText":"読み","correctValue":"正しい表記","options":[{"value":"表記","reading":"読み","wrongType":"KANJI_SIMILAR"}×4]}
-                    ]}。
-                    C1/C2ともoptionsは必ず4件、4件のvalueはすべて異なり、correctValueと一致するvalueは必ず1件だけにしてください。
-                    valueが同じでreadingだけが異なるものも重複です。出力前に各問題のvalueを照合し、重複があれば修正してからJSONを出力してください。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_SYSTEM_PROMPT','GLOBAL','日本語の読み・漢字認識問題を作成してください。出力する JSON の形は、このあとに付く「出力形式（JSON Schema）」が唯一の定義です（スキーマに無いキーを足さない・Markdown 禁止）。
+C1（C1_READING）: 漢字を見せて、**仮名**から読みを選ばせる。questionJapanese は「漢字を見て正しい読みを選んでください」。correctValue は入力の reading をそのまま使う。**入力の reading が空のときは、targetReading に正しい読みを書き、選択肢にもその読みを入れる**（読みを持たずに登録された語は、その読みが正解になる）。音声は不要（audioText は空）。
+C2（C2_KANJI）: 読みの音声を聞かせて、**漢字表記**から選ばせる。questionJapanese は「音声を聞いて正しい漢字表記を選んでください」。correctValue は入力の heading をそのまま使う。audioText に読みを入れる（音声合成に使う）。
+どちらも守ること:
+・options は**正解 1 件 ＋ 誤答 4〜6 件（合計 5〜7 件）**（選択肢のプール。学習画面にはこのうち 4 件だけを出す）。value はすべて異なる（同じ value で reading だけ違うものも重複とみなす）。
+・correctValue と一致する value は必ず 1 件だけ。
+・誤答は「読み間違い・似た漢字」など、学習者が実際に迷うものにする（でたらめな語は作らない）。
+・wrongType は誤答の理由（READING_SIMILAR / KANJI_SIMILAR など）。
+・出力前に各自の問題の value を照合し、重複があれば直してから出力する。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C42_USER_PROMPT','GLOBAL','以下の日本語単語データを分析し、指定JSONスキーマだけを出力してください。Markdownは禁止です。
                     取得区分: {{kind}}
                     入力:
@@ -1546,9 +1561,13 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_REQUEST_TIMEOUT_SECONDS','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_MAX_COMPLETION_TOKENS','GLOBAL','4000') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
-INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_SYSTEM_PROMPT','GLOBAL','文脈から日本語単語の意味を判断する四択問題を作成してください。選択肢・解説は简体中文にしてください。
-                    出力JSON: {"questionJapanese":"指示","targetHeading":"表記","targetReading":"読み","sentenceJapanese":"自然な例文","sentenceReading":"例文読み","audioText":"例文","correctValue":"该语境中的正确中文含义","correctNote":"補足","explanationJapanese":"日本語解説","explanationChinese":"详细中文解说","difficulty":"EASY|NORMAL|HARD","options":[{"value":"中文选项","wrongType":"MEANING_SIMILAR|CONTEXT_MISMATCH|OTHER","explanationChinese":"说明"}×4]}。
-                    正解は1件だけです。explanationChineseは学習者が誤答理由まで理解できる簡体中文にしてください。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_SYSTEM_PROMPT','GLOBAL','文脈から日本語単語の意味を判断する四択問題を作成してください。出力する JSON の形は、このあとに付く「出力形式（JSON Schema）」が唯一の定義です（スキーマに無いキーを足さない・Markdown 禁止）。選択肢と解説は簡体中文にしてください。
+・sentenceJapanese は、その語が**その意味で**使われている自然な例文（学習画面の例文と同じ調子）。sentenceReading に読み、audioText に例文そのもの（音声合成に使う）。
+・correctValue は「その文脈での正しい中国語の意味」。options の value も中国語。
+・options は**正解 1 件 ＋ 誤答 4〜6 件（合計 5〜7 件）**（選択肢のプール。学習画面にはこのうち 4 件だけを出す）。value はすべて異なり、correctValue と一致する value は 1 件だけ。
+・誤答は「別の意味（MEANING_SIMILAR）」「文脈に合わない（CONTEXT_MISMATCH）」など、学習者が実際に迷うものにする。
+・explanationChinese は、なぜ誤答が違うのかまで学習者が理解できる簡体中文で書く（正解の理由だけで終わらせない）。
+・difficulty は EASY / NORMAL / HARD。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C43_USER_PROMPT','GLOBAL','以下の日本語単語データを分析し、指定JSONスキーマだけを出力してください。Markdownは禁止です。
                     取得区分: {{kind}}
                     入力:
@@ -1560,9 +1579,13 @@ INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコ�
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_REQUEST_TIMEOUT_SECONDS','GLOBAL','120') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_MAX_COMPLETION_TOKENS','GLOBAL','4000') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_TEMPERATURE','GLOBAL','0.2') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
-INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_SYSTEM_PROMPT','GLOBAL','同じ読みを持つ漢字表記の使い分けを問う四択問題を作成してください。例文は正解部分を（　）にしてください。解説は简体中文です。
-                    出力JSON: {"questionJapanese":"指示","targetHeading":"正しい表記","targetReading":"読み","sentenceJapanese":"空欄を含む例文","sentenceReading":"例文読み","audioText":"読み","correctValue":"正しい漢字表記","correctNote":"補足","explanationJapanese":"日本語解説","explanationChinese":"详细中文解说","difficulty":"EASY|NORMAL|HARD","options":[{"value":"漢字表記","reading":"同じ読み","wrongType":"HOMOPHONE|KANJI_SIMILAR|OTHER","explanationChinese":"说明"}×4]}。
-                    正解は1件だけ、実在しない不自然な漢字表記は避けてください。explanationChineseは簡体中文で使い分けを説明してください。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
+INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_SYSTEM_PROMPT','GLOBAL','同じ読みを持つ漢字表記の使い分けを問う四択問題を作成してください。出力する JSON の形は、このあとに付く「出力形式（JSON Schema）」が唯一の定義です（スキーマに無いキーを足さない・Markdown 禁止）。解説は簡体中文です。
+・sentenceJapanese は、正解の部分を（　）にした自然な例文（全角の空欄）。sentenceReading に読み、audioText に読みを入れる。
+・correctValue は（　）に入る正しい漢字表記。targetHeading も同じ表記にする。
+・options は**正解 1 件 ＋ 誤答 4〜6 件（合計 5〜7 件）**（選択肢のプール。学習画面にはこのうち 4 件だけを出す）。value は**同じ読みを持つ実在の漢字表記**にし、correctValue と一致する value は 1 件だけ。
+・実在しない不自然な漢字表記は作らない（学習者が誤って覚えるため）。
+・explanationChinese は、それぞれの漢字が**どう使い分けられるか**を簡体中文で説明する（正解の意味だけで終わらせない）。
+・difficulty は EASY / NORMAL / HARD。') ON CONFLICT ("ページ区分","設定キー") WHERE "スコープ"='GLOBAL' DO NOTHING;
 INSERT INTO public."COM_設定情報" ("ページ区分","設定キー","スコープ","設定値") VALUES ('JAPANESE_WORD_AI','BAT_C44_USER_PROMPT','GLOBAL','以下の日本語単語データを分析し、指定JSONスキーマだけを出力してください。Markdownは禁止です。
                     取得区分: {{kind}}
                     入力:

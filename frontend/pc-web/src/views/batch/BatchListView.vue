@@ -188,7 +188,12 @@ onMounted(load)
               <td>{{ TYPE_LABELS[entry.row.taskType] }}</td>
               <td>{{ entry.row.description }}</td>
               <td class="align-center">
-                <label class="switch" :title="entry.row.canToggleActive ? '有効／無効を切り替える' : '切り替えできません（呼出バッチ）'">
+                <label
+                  class="switch"
+                  :title="entry.row.canToggleActive
+                    ? '有効／無効を切り替える（無効にすると他の処理から呼び出せません）'
+                    : '切り替えできません（業務処理が未実装のバッチ）'"
+                >
                   <input
                     type="checkbox"
                     :checked="entry.row.active"

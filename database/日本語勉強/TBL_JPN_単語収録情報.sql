@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS public."JPN_単語収録情報" (
     "レベル"             VARCHAR(20)  NOT NULL,
     -- 2.0 は '01.N1~N5日本語単語' の 1 冊
     "書籍"               VARCHAR(100) NOT NULL,
+    -- 書籍マスタ（JPN_書籍情報）への参照（2026-09-13 の移行で追加。
+    -- **新規構築でも要る**のでここにも定義する。未設定は NULL）
+    "書籍ID"             BIGINT       NULL,
     -- 'Unit001' 形式の課次
     "分類"               VARCHAR(30)  NOT NULL,
     "単語SEQ"            INTEGER      NOT NULL,

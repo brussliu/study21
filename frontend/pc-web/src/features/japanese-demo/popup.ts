@@ -1,15 +1,17 @@
 /**
- * 別ウィンドウ（popup）で画面を開くための小さな道具。
+ * デモ画面（単語情報管理・詳細編集）から別ウィンドウで開くための小さな道具。
  *
- * 2.0 の `js/japanese_word.js` は「A. 勉強 詳細」を
+ * <p>2.0 の `js/japanese_word.js` は「A. 勉強 詳細」を
  * `window.open('japanese_test_a.jsp?wordId=…&view=detail', 'jpWordA_<id>', …)` で
- * 別ウィンドウに開いていた。2.1 でも同じ見え方にするため、ここにまとめる。
+ * 別ウィンドウに開いていた。2.1 でも同じ見え方にするため、ここにまとめる。</p>
  *
- * ウィンドウ名に語 ID を入れてあるので、同じ語を二重に開かない（2 つ目は既存を前に出す）。
+ * <p>ウィンドウのサイズ・位置・名前の作り方は共通の {@link openPopupWindow} が持つ
+ * （実画面の学習画面＝自動最大化も同じ道具を使う）。</p>
  */
 
-/** 開いたウィンドウを覚えておく（テストや後始末で使う）。 */
-export const openedPopups = new Map<string, Window>()
+import { openPopupWindow } from '@/features/japanese/popupWindow'
+
+export { openedPopups } from '@/features/japanese/popupWindow'
 
 export function openDemoPopup(options: {
   /** 開く URL（同一オリジン） */
@@ -19,26 +21,7 @@ export function openDemoPopup(options: {
   width?: number
   height?: number
 }): Window | null {
-  const width = options.width ?? 1180
-  const height = options.height ?? 900
-  const left = Math.max(0, Math.round((window.screen.width - width) / 2))
-  const top = Math.max(0, Math.round((window.screen.height - height) / 2))
-  const features = [
-    'popup=yes',
-    `width=${width}`,
-    `height=${height}`,
-    `left=${left}`,
-    `top=${top}`,
-    'resizable=yes',
-    'scrollbars=yes'
-  ].join(',')
-
-  const popup = window.open(options.url, options.name, features)
-  if (popup !== null) {
-    openedPopups.set(options.name, popup)
-    popup.focus()
-  }
-  return popup
+  return openPopupWindow(options)
 }
 
 /** 学習画面（A. 勉強）を別ウィンドウで開く。 */

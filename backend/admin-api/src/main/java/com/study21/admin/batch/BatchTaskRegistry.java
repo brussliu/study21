@@ -81,33 +81,43 @@ public class BatchTaskRegistry {
                 "BAT_C34_SYSTEM_PROMPT", "BAT_C34_USER_PROMPT", "BAT_C34_RETRY_LIMIT"));
 
         // ---- 日本語単語 ----
-        list.add(task("batC41", BatchTaskType.C, "日本語単語 詳細情報AI取得（A・B共通）", false,
+        // 種別 C（呼出）。単語情報管理画面の【A・B／C／D／E 取得】が
+        // POST /api/admin/batch/japanese-word-ai/run（中で BatchService#rerunStep）で呼ぶ。
+        // **有効は「いま使っているか」の目印**なので、実装済みで使っているこれらは既定で有効にする
+        // （2026-09-19 の決定。無効のままだと一覧で「止まっている」ように読めてしまう。2026-09-22 に修正）
+        list.add(task("batC41", BatchTaskType.C, "日本語単語 詳細情報AI取得（A・B共通）", true,
                 "JAPANESE_WORD_AI", "BAT_C41_AI_PROVIDER", "BAT_C41_BATCH_MAX", "BAT_C41_THREADS",
                 "BAT_C41_REQUEST_TIMEOUT_SECONDS", "BAT_C41_MAX_COMPLETION_TOKENS", "BAT_C41_TEMPERATURE",
                 "BAT_C41_SYSTEM_PROMPT", "BAT_C41_USER_PROMPT", "BAT_C41_RETRY_LIMIT"));
-        list.add(task("batC42", BatchTaskType.C, "日本語単語 C.読み問題AI取得", false,
+        list.add(task("batC42", BatchTaskType.C, "日本語単語 C.読み問題AI取得", true,
                 "JAPANESE_WORD_AI", "BAT_C42_AI_PROVIDER", "BAT_C42_BATCH_MAX", "BAT_C42_THREADS",
                 "BAT_C42_REQUEST_TIMEOUT_SECONDS", "BAT_C42_MAX_COMPLETION_TOKENS", "BAT_C42_TEMPERATURE",
                 "BAT_C42_SYSTEM_PROMPT", "BAT_C42_USER_PROMPT", "BAT_C42_RETRY_LIMIT"));
-        list.add(task("batC43", BatchTaskType.C, "日本語単語 D.文脈問題AI取得", false,
+        list.add(task("batC43", BatchTaskType.C, "日本語単語 D.文脈問題AI取得", true,
                 "JAPANESE_WORD_AI", "BAT_C43_AI_PROVIDER", "BAT_C43_BATCH_MAX", "BAT_C43_THREADS",
                 "BAT_C43_REQUEST_TIMEOUT_SECONDS", "BAT_C43_MAX_COMPLETION_TOKENS", "BAT_C43_TEMPERATURE",
                 "BAT_C43_SYSTEM_PROMPT", "BAT_C43_USER_PROMPT", "BAT_C43_RETRY_LIMIT"));
-        list.add(task("batC44", BatchTaskType.C, "日本語単語 E.漢字問題AI取得", false,
+        list.add(task("batC44", BatchTaskType.C, "日本語単語 E.漢字問題AI取得", true,
                 "JAPANESE_WORD_AI", "BAT_C44_AI_PROVIDER", "BAT_C44_BATCH_MAX", "BAT_C44_THREADS",
                 "BAT_C44_REQUEST_TIMEOUT_SECONDS", "BAT_C44_MAX_COMPLETION_TOKENS", "BAT_C44_TEMPERATURE",
                 "BAT_C44_SYSTEM_PROMPT", "BAT_C44_USER_PROMPT", "BAT_C44_RETRY_LIMIT"));
 
         // ---- 英作文 ----
+        // 有効／無効は BAT_バッチコントロール情報 が唯一の正（使う状態にするのは
+        // database/移行/MIG_ENG_英作文_バッチ有効_20260927.sql と、バッチ一覧の操作）。
         list.add(task("batC11", BatchTaskType.C, "英作文 画像分類・OCR・主題タイトル生成", false,
                 "ENGLISH_ESSAY", "ENGLISH_ESSAY_ENABLED", "ENGLISH_ESSAY_OCR_AI_PROVIDER",
                 "ENGLISH_ESSAY_TITLE_AI_PROVIDER", "ENGLISH_ESSAY_MAX_IMAGES", "ENGLISH_ESSAY_MAX_IMAGE_MB",
                 "ENGLISH_ESSAY_OCR_MAX_IMAGE_PIXELS", "ENGLISH_ESSAY_OCR_REQUEST_TIMEOUT_SECONDS",
-                "ENGLISH_ESSAY_OCR_RETRY_LIMIT", "ENGLISH_ESSAY_OCR_PROMPT", "ENGLISH_ESSAY_OCR_USER_PROMPT",
-                "ENGLISH_ESSAY_TITLE_PROMPT", "ENGLISH_ESSAY_TITLE_USER_PROMPT"));
+                "ENGLISH_ESSAY_OCR_RETRY_LIMIT", "ENGLISH_ESSAY_OCR_MAX_COMPLETION_TOKENS",
+                "ENGLISH_ESSAY_OCR_TEMPERATURE", "ENGLISH_ESSAY_OCR_PROMPT",
+                "ENGLISH_ESSAY_OCR_USER_PROMPT", "ENGLISH_ESSAY_TITLE_PROMPT",
+                "ENGLISH_ESSAY_TITLE_USER_PROMPT"));
         list.add(task("batC12", BatchTaskType.C, "英作文 英検基準AI添削", false,
                 "ENGLISH_ESSAY", "ENGLISH_ESSAY_ENABLED", "ENGLISH_ESSAY_GRADING_AI_PROVIDER",
-                "ENGLISH_ESSAY_GRADING_REQUEST_TIMEOUT_SECONDS", "ENGLISH_ESSAY_GRADING_RETRY_LIMIT",
+                "ENGLISH_ESSAY_GRADING_REQUEST_TIMEOUT_SECONDS",
+                "ENGLISH_ESSAY_GRADING_MAX_COMPLETION_TOKENS", "ENGLISH_ESSAY_GRADING_TEMPERATURE",
+                "ENGLISH_ESSAY_GRADING_RETRY_LIMIT",
                 "ENGLISH_ESSAY_GRADING_PROMPT", "ENGLISH_ESSAY_GRADING_USER_PROMPT"));
 
         // ---- 英語穴埋め ----
@@ -192,9 +202,10 @@ public class BatchTaskRegistry {
         // AI 画図助手もバッチ（batC52）として実行する（依頼 → その場で即時実行）。
         // 種別 C（呼出）＝他の処理（流水線・授業ノートなど）が工程として呼ぶ。画面からは起動しない
         // （`BatchTaskDefinition#canManualRerun()`。起動時に AI を呼ばないので S にもしない）。
-        // **種別 C の有効は「いま使っているか」の目印**（切り替えはできない＝`canToggleActive()` は false。
-        // 実行の可否にも影響しない）。使っている C は既定で有効にして、一覧で無効に見えないようにする
-        // （利用者の指示。2026-09-19。未実装の C は無効のまま）
+        // **種別 C の有効は「いま使っているか」の目印**であり、**無効にすると他の処理から呼べない**
+        // （`BatchService#rerunStep` が拒否する）。画面からは切り替えられる（実装済みの C だけ。
+        // `BatchServiceImpl#isToggleable`）。使っている C は既定で有効にして、一覧で無効に見えないようにする
+        // （利用者の指示。2026-09-19 / 切替の可否は 2026-09-22 に変更。未実装の C は無効のまま）
         // 必須設定は**工程クラスが宣言したもの**を使う（定義と実装が食い違わないように）
         // AI 生図の AI 生成は**モードごとに 1 バッチ**（batC51-A〜D）。連字符つきの接尾辞は
         // 既存の batC15-1〜3 と同じ扱い（バッチコードの列は VARCHAR(20) で収まる）。

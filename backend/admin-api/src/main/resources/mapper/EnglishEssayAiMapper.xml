@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.englishessay.EnglishEssayAiMapper">
+
+    <!--
+      英作文 AI 添削（batC11 = OCR・batC12 = 添削）の読み書き。
+
+      ・列名は日本語なので、必ず AS <英語名> を付ける（map-underscore-to-camel-case は効かない）
+      ・受付は「そのときの写し」を ENG_AI添削履歴情報 に QUEUED で積む（AI は呼ばない）
+      ・添削の履歴は消さない（DELETE を書かない。同じ作文を何回も添削できる）
+      ・OCR の結果は画像の行（認識テキスト・認識信頼度）と作文の行（設問文・作文本文・語数）へ書き戻す
+    -->
+
+    <!-- ===================================================== 英作文（OCR / 受付） -->
+
+    <select id="findEssay"
+            resultType="com.study21.admin.englishessay.EnglishEssayAiMapper$EssayRow">
+        SELECT
+            e."英作文ID"           AS essayId,
+            e."利用者アカウントID" AS userAccountId,
+            e."英検級"             AS level,
+            e."題"                 AS titleJa,
+            e."題_中国語"          AS titleZh,
+            e."設問文"             AS questionText,
+            e."作文本文"           AS essayText,
+            e."語数"               AS wordCount,
+            e."状態コード"         AS stateCode
+        FROM public."ENG_英作文情報" e
+        WHERE e."英作文ID" = #{essayId}
+    </select>
+
+    <select id="listEssayImages"
+            resultType="com.study21.admin.englishessay.EnglishEssayAiMapper$EssayImageRow">
+        SELECT
+            i."英作文画像ID"   AS imageId,
+            i."画像区分"       AS category,
+            i."表示順"         AS orderNo,
+            i."保存ファイル名" AS savedFileName,
+            i."相対パス"       AS relativePath,
+            i."MIMEタイプ"     AS mimeType,
+            i."ファイルサイズ" AS fileSize
+        FROM public."ENG_英作文画像情報" i
+        WHERE i."英作文ID" = #{essayId}
+        ORDER BY i."表示順", i."英作文画像ID"
+    </select>
+
+    <update id="updateImageRecognized">
+        UPDATE public."ENG_英作文画像情報"
+        SET "認識テキスト" = #{text},
+            "認識信頼度"   = #{confidence}
+        WHERE "英作文画像ID" = #{imageId}
+    </update>
+
+    <update id="updateEssayRecognized">
+        UPDATE public."ENG_英作文情報"
+        SET "設問文"       = #{questionText},
+            "作文本文"     = #{essayText},
+            "語数"         = #{wordCount},
+            "更新元コード" = 'BATCH',
+            "更新日時"     = CURRENT_TIMESTAMP
+        WHERE "英作文ID" = #{essayId}
+    </update>
+
+    <update id="updateEssayTitle">
+        UPDATE public."ENG_英作文情報"
+        SET "題"           = #{titleJa},
+            "題_中国語"    = #{titleZh},
+            "更新元コード" = 'BATCH',
+            "更新日時"     = CURRENT_TIMESTAMP
+        WHERE "英作文ID" = #{essayId}
+    </update>
+
+    <!-- ===================================================== 添削の受付 -->
+
+    <!-- 実行中の添削（QUEUED / RUNNING）。同じ作文を二重に走らせない -->
+    <select id="findActiveGrading" resultType="long">
+        SELECT g."添削ID"
+        FROM public."ENG_AI添削履歴情報" g
+        WHERE g."英作文ID" = #{essayId}
+          AND g."状態コード" IN ('QUEUED', 'RUNNING')
+        ORDER BY g."添削ID" DESC
+        LIMIT 1
+    </select>
+
+    <!-- 次に入れる回数（その作文の「今までの最大 + 1」） -->
+    <select id="nextRound" resultType="int">
+        SELECT COALESCE(MAX(g."回数"), 0) + 1
+        FROM public."ENG_AI添削履歴情報" g
+        WHERE g."英作文ID" = #{essayId}
+    </select>
+
+    <!--
+      受付: QUEUED で 1 行作る（AI は呼ばない）。
+      級・題・設問・本文・語数は**そのときの写し**（あとで作文を直してもレポートは変わらない）。
+      採番された 添削ID が grading.gradingId に入る。
+    -->
+    <insert id="insertGrading" useGeneratedKeys="true" keyProperty="gradingId" keyColumn="添削ID"
+            parameterType="com.study21.admin.englishessay.EnglishEssayAiMapper$GradingRow">
+        INSERT INTO public."ENG_AI添削履歴情報" (
+            "英作文ID", "回数", "状態コード",
+            "英検級", "題_日本語", "題_中国語", "設問文", "作文本文", "語数",
+            "登録者アカウントID"
+        ) VALUES (
+            #{essayId}, #{round}, 'QUEUED',
+            #{level}, #{titleJa}, #{titleZh}, #{questionText}, #{essayText}, #{wordCount},
+            #{userAccountId}
+        )
+    </insert>
+
+    <!-- ===================================================== 働き手（取り出しと結果） -->
+
+    <!--
+      実行する 1 件。FOR UPDATE SKIP LOCKED で二重処理を防ぐ（AI を二重に呼ばない）。
+      部分索引 idx_eng_essay_grading_active が効く形。FAILED は拾わない（利用者がやり直す）。
+      「落ちたままの RUNNING」は 開始日時（無ければ 登録日時）が古いもの。
+    -->
+    <select id="findClaimableGradingId" resultType="long">
+        SELECT g."添削ID"
+        FROM public."ENG_AI添削履歴情報" g
+        WHERE g."状態コード" = 'QUEUED'
+           OR (g."状態コード" = 'RUNNING'
+               AND COALESCE(g."開始日時", g."登録日時")
+                   &lt; CURRENT_TIMESTAMP - (#{staleMinutes} * INTERVAL '1 minute'))
+        ORDER BY g."添削ID" ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <!--
+      確保の確定（状態を条件にした更新）。
+      開始日時は**今回の試行の時刻**に入れ直す（この表に 更新日時 が無いので、
+      ここで入れ直さないと「落ちたままの RUNNING」を他の働き手がすぐ拾い直して二重に AI を呼ぶ）。
+    -->
+    <update id="markGradingClaimed">
+        UPDATE public."ENG_AI添削履歴情報"
+        SET "状態コード" = 'RUNNING',
+            "開始日時"   = CURRENT_TIMESTAMP
+        WHERE "添削ID" = #{gradingId}
+          AND "状態コード" IN
+        <foreach item="from" collection="fromStatuses" open="(" separator="," close=")">
+            #{from}
+        </foreach>
+    </update>
+
+    <select id="findGrading"
+            resultType="com.study21.admin.englishessay.EnglishEssayAiMapper$GradingRow">
+        SELECT
+            g."添削ID"    AS gradingId,
+            g."英作文ID"  AS essayId,
+            g."回数"      AS round,
+            g."状態コード" AS statusCode,
+            g."英検級"    AS level,
+            g."題_日本語" AS titleJa,
+            g."題_中国語" AS titleZh,
+            g."設問文"    AS questionText,
+            g."作文本文"  AS essayText,
+            g."語数"      AS wordCount,
+            g."登録者アカウントID" AS userAccountId
+        FROM public."ENG_AI添削履歴情報" g
+        WHERE g."添削ID" = #{gradingId}
+    </select>
+
+    <update id="markGradingSucceeded">
+        UPDATE public."ENG_AI添削履歴情報"
+        SET "状態コード"   = 'SUCCEEDED',
+            "総合得点"     = #{score},
+            "満点"         = #{maxScore},
+            "添削結果JSON" = CAST(#{resultJson} AS jsonb),
+            "AI呼出履歴ID" = #{callLogId},
+            "失敗理由"     = NULL,
+            "終了日時"     = CURRENT_TIMESTAMP
+        WHERE "添削ID" = #{gradingId}
+    </update>
+
+    <update id="markGradingFailed">
+        UPDATE public."ENG_AI添削履歴情報"
+        SET "状態コード" = 'FAILED',
+            "失敗理由"   = #{reason},
+            "終了日時"   = CURRENT_TIMESTAMP
+        WHERE "添削ID" = #{gradingId}
+    </update>
+
+    <select id="findGradingStatus"
+            resultType="com.study21.admin.englishessay.EnglishEssayAiMapper$GradingStatusRow">
+        SELECT
+            g."添削ID"    AS gradingId,
+            g."回数"      AS round,
+            g."状態コード" AS statusCode,
+            g."総合得点"  AS score,
+            g."満点"      AS maxScore,
+            g."失敗理由"  AS failureReason
+        FROM public."ENG_AI添削履歴情報" g
+        WHERE g."添削ID" = #{gradingId}
+    </select>
+
+</mapper>

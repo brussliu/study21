@@ -5,9 +5,11 @@ import AppIcon from '@/components/ui/AppIcon.vue'
 import AiDataSchemaPanel from '@/features/system-settings/AiDataSchemaPanel.vue'
 import { loadSettingFields, saveSettingFields } from '@/api/system-settings'
 import {
+  AI_TAB_DATA,
   AI_TAB_USER,
   type AiFieldLike,
   aiTabsOf,
+  aiTabsWithData,
   normalizeAiFields
 } from '@/features/system-settings/aiSettingsLayout'
 import { modelSlotOptions, withCurrentModelSlot } from '@/features/system-settings/modelSlots'
@@ -501,7 +503,7 @@ const ASSIST_FIELDS: GmField[] = [
 ]
 
 /** Data TAB（AI 出力 DTO の構造を見るタブ。項目を持たないので専用に足す）。 */
-const DATA_TAB = 'Data'
+const DATA_TAB = AI_TAB_DATA
 
 /**
  * モード別カードの項目（7 項目 × 4 モード。キーは `geometryAi<モード><項目>`）。
@@ -593,13 +595,12 @@ const VERIFY_RANGE_FIELDS: GmField[] = [
 /**
  * TAB の並びを作る。Data はプロンプトの後ろ・その他の前に置く
  * （基本設定 | System Prompt | User Prompt | Data | その他）。
+ *
+ * <p>並びの規則は設定ページ共通（`aiSettingsLayout.ts` の `aiTabsWithData`）。図形管理だけ別の
+ * 決め方をすると、同じ「Data タブ」が画面ごとに違う位置へ出るので、必ず共通の関数を通す。</p>
  */
 function tabsOfCard(tabs: readonly string[], dataTask?: string): string[] {
-  if (!dataTask) {
-    return [...tabs]
-  }
-  const withoutOther = tabs.filter((tab) => tab !== 'その他')
-  return [...withoutOther, DATA_TAB, ...(tabs.includes('その他') ? ['その他'] : [])]
+  return aiTabsWithData(tabs, Boolean(dataTask))
 }
 
 /**

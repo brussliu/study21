@@ -59,6 +59,13 @@ study21:
     # 授業録音の音声の置き場。user-api が書いた音声を、ここのバッチ（batR02 の掃除）が読んで消す。
     # 配備では両サービスに**同じボリューム**を割り当てる（geometry-ai と同じ考え方）。
     storage-root: "${STUDY21_CLASSROOM_STORAGE_ROOT:${user.dir}/data/classroom}"
+  english-essay:
+    # 英作文の設問・答案の画像の置き場。user-api が保存した画像を、ここのバッチ（batC11 の OCR）が読む。
+    # DB（ENG_英作文画像情報）には 相対パス と 保存ファイル名 だけを持ち、実体はこの下に置く。
+    # 配備では両サービスに**同じボリューム**を割り当てる（geometry-ai / classroom と同じ考え方）。
+    # **根は「english-essay/ の親」**（相対パスが 'english-essay/…' で始まるため。
+    # 根を english-essay 自身にすると 1 段深く探して「実体がありません」になる）。
+    storage-root: "${STUDY21_ENGLISH_ESSAY_STORAGE_ROOT:${user.dir}/data}"
   classroom-ai:
     # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
     stub: "${STUDY21_CLASSROOM_AI_STUB:false}"

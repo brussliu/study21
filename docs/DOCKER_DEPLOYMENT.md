@@ -161,11 +161,19 @@ docker compose restart web
 `tools/deploy-to-nas.sh`）が必要。設定を変更したら `tmp/tools/verify-nginx-conf.sh` で
 構文と「パス・クエリ文字列がそのまま転送されるか」を検証できる。
 
+`/api/admin/` には **`proxy_read_timeout 60s` を明示**している（2026-09-27）。AI 取得
+（日本語単語の batC41〜44、AI 生図）は**同期**で走り、AI の完了まで応答が返らないため、
+既定値に暗黙で依存させない。この 60 秒は**フロントの HTTP 待ち時間**（`frontend/pc-web/src/api/japanese.ts`
+の `AI_RUN_TIMEOUT_MS = 60_000`）と同じ値にしてある。**片方を変えたらもう片方も揃える**
+（片方だけ長くしても、短いほうで切れる）。`/api/user/` は SSE と大きい PDF のため `1h` のまま。
+
 ## 7. 更新与回滚
 
 - 更新（一键）：在 NAS 上运行工作区的 `tools/deploy-to-nas.sh`（配置在 `setting/deploy.env`）。它会读取配置 → 增量复制源码到 `<发布位置>/webapps` → 按配置渲染 `docker-compose.yml` → `docker compose up -d --build`。默认重建 3 个服务（`web`＝pc-web 与 mobile-web 的前端镜像、`admin-api`・`user-api`＝后端 JAR 镜像），可只指定某一个（`tools/deploy-to-nas.sh web`）；`--dry-run` 只预览复制内容。
 - 不用构建缓存（想彻底重编前端与后端时）：`tools/deploy-to-nas.sh --no-cache`。`docker compose up` 没有 `--no-cache` 选项，所以脚本分两步执行 `docker compose build --no-cache <服务>` → `docker compose up -d <服务>`（基础镜像不会重新拉取，只丢弃构建缓存）。`setting/deploy.env` 里写 `STUDY21_NO_CACHE=1` 也可以让它成为默认。なお、各 Dockerfile は「源码全部 COPY → 依赖安装 → 编译」の順なので、通常の `--build` でも変更したソースは必ず再コンパイルされる（缓存が効くのは無変更のときだけ）。
 - 更新（手动）：拉取/上传新代码后，`docker compose up -d --build`（会重新编译并替换容器）。
+- **必须开镜像同步（`setting/deploy.env` 的 `STUDY21_DELETE=1`）**：前端 Dockerfile 是 `COPY frontend/pc-web ./pc-web`（整目录），所以发布目录里残留的旧源码会被一起编译。关掉镜像同步（增量复制）时，**源码里已删除的文件会留在发布目录，导致 Docker 构建报「源码里早就不存在的旧文件的类型/编译错误」**（2026-09-26 实际发生：`JapaneseWordStudyDialog.vue` 引用了已删除的 store 成员，`vue-tsc` 报 TS2339，`web` 构建失败；同时残留的 4 个旧解析器和 1 个旧 Entity 也会拖垮后端构建）。`tmp/`・`logs/`・`data/`・`.env` 等在排除列表里，不会被误删。
+- 注意：`STUDY21_BACKUP=1` 只备份**被覆盖**的文件；被镜像同步**删除**的文件不备份，需要留底就先手动退避。
 - 後端だけを更新したときは、前端も `docker compose restart web` しておくと確実
   （上流の再解決は nginx.conf 側で対応済みだが、古いイメージは起動時の解決結果を
   持ち続けるため。詳細は「6.1 ログイン画面が 502 Bad Gateway になるとき」）。

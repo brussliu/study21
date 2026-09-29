@@ -300,6 +300,12 @@ INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タ�
 VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_RETRY_LIMIT','INTEGER','1','0..5','英作文：batC12 AIエラーまたはJSON構造検証エラー時の作文単位の最大再実行回数（0～5）')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_MAX_COMPLETION_TOKENS','INTEGER','1','1024..65536','英作文：添削：最大出力Token数（1024〜65536）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_GRADING_TEMPERATURE','ENUM','1','0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0','英作文：添削：Temperature（0.0〜2.0）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_MAX_IMAGES','INTEGER','1','1..20','英作文：1回にアップロードできる画像枚数')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
@@ -313,6 +319,12 @@ VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_REQUEST_TIMEOUT_SECONDS','INTEGER','1
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_RETRY_LIMIT','INTEGER','1','0..5','英作文：batC11 通信またはJSON構造検証エラー時の画像単位の最大再実行回数（0～5）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_MAX_COMPLETION_TOKENS','INTEGER','1','1024..65536','英作文：OCR：最大出力Token数（1024〜65536）')
+ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
+INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
+VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_TEMPERATURE','ENUM','1','0.0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,1.0,1.1,1.2,1.3,1.4,1.5,1.6,1.7,1.8,1.9,2.0','英作文：OCR：Temperature（0.0〜2.0）')
 ON CONFLICT ("ページ区分","設定キー") DO NOTHING;
 INSERT INTO public."COM_設定項目" ("ページ区分","設定キー","値タイプ","必須フラグ","有効値","説明")
 VALUES ('ENGLISH_ESSAY','ENGLISH_ESSAY_OCR_PROMPT','TEXT','1',NULL,'英作文：画像分類・OCR System Prompt')

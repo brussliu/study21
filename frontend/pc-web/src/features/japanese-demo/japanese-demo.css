@@ -42,6 +42,221 @@
   overflow-y: auto;
 }
 
+/* ---------- 新規登録の並び（書籍と Unit → 単語 → オプション → 登録する内容） ----------
+   ・上から順に 1 列で積む（DOM の順のまま。読み上げの順も変えない）
+   ・単語の表は幅いっぱいを使う
+   ・オプションは表の下に置き、選ぶものだけを 1 行に並べる
+   ・ダイアログの高さに収める（ページに縦スクロールを出さない） */
+
+/* ダイアログの大きさは「画面の高さ − 余白」まで。中身で押し広げさせない。 */
+.jp-demo-new-overlay {
+  overflow: hidden;
+}
+
+.jp-demo-new-overlay .dialog--wide {
+  height: min(100%, 60rem);
+}
+
+.jp-demo-register {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  align-items: stretch;
+}
+
+/* ダイアログの高さを画面内に収める。
+   本文は「単語」だけが伸び縮みし、他の欄は自然の高さのまま。
+   画面の高さいっぱいまで使う（72vh で切ると、入るはずの行が入らない）。
+   入りきらない高さのときは、欄どうしを重ねずに本文を縦スクロールさせる。 */
+.jp-demo-register.dialog__body {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+/* 単語以外の欄は縮めない（伸びるのは表のところだけ） */
+.jp-demo-register > * {
+  flex: 0 0 auto;
+}
+
+/*
+ * 「単語」の欄だけが伸び縮みする（それ以外は縮めない）。
+ * `min-height: 0` が無いと flex の最小サイズ（中身の高さ）で縮まず、
+ * 中の表が枠を突き抜けて**下の「オプション」に重なる**。
+ * どうしても入らない高さのときは、本文（.jp-demo-dialog-body）が縦にスクロールする。
+ */
+.jp-demo-register [data-demo-step="2"] {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+/* 表の枠は、最大 10 行ぶんの高さで固定する。
+   伸び縮みさせると、画面が低いときに枠が潰れて中の表が下の欄に重なる
+   （重なった部分では、マウスが当たるのは表ではなく下の欄になる）。 */
+.jp-demo-register .jp-sheet-scroll {
+  height: 24rem;
+  max-height: 24rem;
+  overflow: auto;
+}
+
+.jp-demo-register__aside {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.jp-demo-register__summary,
+.jp-demo-register__units {
+  min-width: 0;
+}
+
+/* ダイアログの中は詰めて出す（見るものが多く、余白で背が高くなるのを避ける） */
+.jp-demo-register .jp-demo-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* ---------- 書籍（プルダウンは書籍名が入る幅を取る） ---------- */
+
+.jp-demo-register__book {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, max-content));
+  align-items: end;
+  gap: var(--sp-3) var(--sp-5);
+}
+
+.jp-demo-register__book [data-demo-book-select] {
+  min-width: 22rem;
+}
+
+.jp-demo-register__book [data-demo-unit-size] {
+  min-width: 9rem;
+}
+
+/* 新しい書籍の名前。新しい書籍のときだけ使うが、枠は常に確保する */
+[data-demo-book-name-field] [data-demo-book-name] {
+  min-width: 18rem;
+  max-width: 30rem;
+}
+
+/*
+ * 既存の書籍のときは、名前の欄を**枠だけ残して隠す**。
+ * 枠ごと消すと右の「1 Unit あたりの単語数」が左へ寄り、
+ * 新規と既存で位置が食い違う（3 つは同じ行に並べたままにする）。
+ */
+[data-demo-book-name-field].is-placeholder {
+  visibility: hidden;
+}
+
+/* 単語の見出しと「行追加」（TODO の新規＝子タスクと同じ組み方） */
+.jp-demo-register__wordhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+/* ---------- オプション（登録開始 Unit と重複判定の範囲を左右に並べる） ---------- */
+
+.jp-demo-options__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
+  gap: var(--sp-3) var(--sp-5);
+}
+
+.jp-demo-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-demo-options__legend {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+}
+
+/* 選ぶものは 1 列に積む（2 つを上下に並べる） */
+.jp-demo-options__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+/* 選ぶもの 1 つ（ラジオ＋短い見出し）。枠は付けず、選択中だけ面で示す */
+.jp-demo-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-normal);
+  cursor: pointer;
+}
+
+.jp-demo-option:hover {
+  border-color: var(--color-primary-strong);
+}
+
+.jp-demo-option:has(input:checked) {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.jp-demo-option input {
+  flex: 0 0 auto;
+}
+
+/* 表は幅いっぱいに使う。狭い画面では横にスクロールさせる（列が潰れるのを避ける） */
+.jp-demo-register [data-demo-step="2"] {
+  overflow-x: auto;
+  padding-bottom: var(--sp-1);
+}
+
+/* ---------- 単語の表の枠（高さを決めて、行が増えたら中を縦にスクロール） ----------
+   1 行を少し詰めて、およそ 10 行が見える高さ（24rem）にしている。 */
+
+.jp-sheet-scroll {
+  max-height: 24rem;
+  overflow: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+/* 枠の中では、表自身の枠は二重に見えないように消す */
+.jp-sheet-scroll .jp-sheet {
+  border: 0;
+}
+
+/* 行はすこし詰める（10 行ぶんが入るように） */
+.jp-sheet-scroll .jp-sheet tbody td {
+  height: 1.75rem;
+}
+
+.jp-sheet-scroll .jp-sheet td[data-col] .jp-sheet__value,
+.jp-sheet-scroll .jp-sheet td[data-col] input {
+  line-height: calc(1.75rem - 2px);
+  height: calc(1.75rem - 2px);
+}
+
+/* 見出し行はスクロールしても残す（どの列か見失わない） */
+.jp-sheet-scroll .jp-sheet thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
 /* ---------- 画面の中の印（デモ用に用意していたもの。今は画面では使わない） ---------- */
 
 /* 「デモ」バッジはページ見出しの近くに必ず出す（本番と見間違えないため） */
@@ -588,58 +803,34 @@
 /* ---------- 学習画面（読みやすさ優先） ---------- */
 
 .jp-demo-study {
+  /* 学習画面内だけ、文字の各段階を 2px 大きくする。 */
+  --fs-2xs: 13px;
+  --fs-xs: 14px;
+  --fs-sm: 15px;
+  --fs-md: 16px;
+  --fs-lg: 18px;
+  --fs-xl: 20px;
+  --fs-2xl: 22px;
+  --fs-3xl: 26px;
+  --fs-4xl: 32px;
+
+  font-size: var(--fs-md);
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  max-width: 62rem;
+  height: 100dvh;
+  box-sizing: border-box;
+  padding: var(--sp-4);
+  max-width: 90rem;
   margin: 0 auto;
 }
 
-.jp-demo-study__hero {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
-  padding: var(--sp-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface-alt);
+.jp-demo-study > :not(.jp-study-card--tabs) {
+  flex-shrink: 0;
 }
 
-.jp-demo-study__word {
-  margin: 0;
-  color: var(--color-text-strong);
-  font-size: var(--fs-3xl, 2rem);
-  font-weight: var(--fw-bold);
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-
-.jp-demo-study__meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-top: var(--sp-1);
-  color: var(--color-text-subtle);
-  font-size: var(--fs-sm);
-}
-
-.jp-demo-study__core {
-  margin: 0;
-  color: var(--color-text-strong);
-  font-size: var(--fs-md);
-  font-weight: var(--fw-semibold);
-}
-
-.jp-demo-study__sound {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  margin-left: auto;
-}
-
-/* 日本語と中国語の階層（日本語＝本文、中国語＝補助） */
+/* 日本語と中国語の階層（日本語＝本文、中国語＝補助）。学習画面の詳しい組は
+   下の「学習画面（A. 勉強）」で作り直している（ここは一覧・ダイアログで使う分）。 */
 .jp-demo-ja {
   color: var(--color-text);
   font-size: var(--fs-md);
@@ -664,12 +855,6 @@
   line-height: 1.7;
 }
 
-.jp-demo-pairs {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-2);
-}
-
 .jp-demo-pair {
   display: flex;
   flex-direction: column;
@@ -679,7 +864,6 @@
   border-radius: var(--radius-sm);
   background: var(--color-surface);
 }
-
 .jp-demo-pair__head {
   display: flex;
   align-items: center;
@@ -902,6 +1086,893 @@
   font-size: var(--fs-xs);
 }
 
+/* ==========================================================================
+   学習画面（A. 勉強）— 2.0 `japanese_study.css` の A 学習の組を、2.1 のトークンで作り直す
+   ・上から「見ている語の帯 → 語 → 中国語の意味 → タブ」
+   ・日本語と中国語は、色・左の線・「日本語／中文」の札で必ず分ける
+   ・色は tokens.css の変数だけを使う（暗色テーマもそのまま追随する）
+   ========================================================================== */
+
+/* ---------- 上：何を・どこまで見ているか ---------- */
+
+.jp-study-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.jp-study-head__main {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.jp-study-kicker {
+  color: var(--color-primary);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.08em;
+}
+
+.jp-study-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-5);
+}
+
+.jp-study-meta__item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.jp-study-meta__item > span {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-study-meta__item > strong {
+  color: var(--color-text-strong);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- 語の帯 ---------- */
+
+.jp-study-summary {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.jp-study-sound {
+  width: var(--control-sm);
+  padding: 0;
+  justify-content: center;
+}
+
+.jp-study-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-5);
+  background: var(--color-surface);
+}
+
+.jp-study-hero__word {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  min-width: 0;
+}
+
+.jp-study-word {
+  margin: 0;
+  color: var(--color-primary-hover);
+  font-size: var(--fs-4xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-tight);
+  overflow-wrap: anywhere;
+}
+
+.jp-study-reading {
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-study-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+.jp-study-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-semibold);
+  white-space: nowrap;
+}
+
+.jp-study-badge--teal {
+  border-color: var(--color-primary-strong);
+  background: var(--color-surface);
+  color: var(--color-primary-hover);
+}
+
+.jp-study-badge--warn {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+}
+
+/* 一言の意味（日本語のまま。中国語の意味は下の独立した帯） */
+.jp-study-core {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--sp-3) 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  border-left: 3px solid var(--color-primary-strong);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: var(--color-surface);
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-relaxed);
+}
+
+.jp-study-core__label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+}
+
+.jp-study-hero__sound {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---------- 中国語の意味（日本語と混ぜない独立の帯） ---------- */
+
+.jp-study-primary {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-primary-soft);
+}
+
+.jp-study-primary__label {
+  flex-shrink: 0;
+  color: var(--color-primary-hover);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+}
+
+.jp-study-primary__text {
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  line-height: var(--lh-normal);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- カードと節（タブの中も同じ見た目で組む） ---------- */
+
+.jp-study-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.jp-study-card--tabs {
+  flex: 1;
+  min-height: 0;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.jp-study-card--tabs .jp-demo-tabpanel {
+  flex: 1;
+  padding: var(--sp-4);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+.jp-demo-study .jp-demo-tabs {
+  flex-shrink: 0;
+}
+
+.jp-demo-study :is(.jp-demo-tab, .jp-demo-tabpanel):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -3px;
+}
+
+.jp-demo-study .jp-study-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
+.jp-demo-study [data-demo-study-panel="practice"] .jp-study-stack {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.jp-demo-study .jp-study-stack > * {
+  min-width: 0;
+}
+
+/* 内容区分のカードを残し、内側の項目には枠を重ねない。 */
+.jp-demo-study :is([data-demo-study-panel="collocations"], [data-demo-study-panel="examples"]) .jp-study-stack {
+  gap: var(--sp-6);
+}
+
+.jp-demo-study :is([data-demo-study-panel="collocations"], [data-demo-study-panel="examples"]) .jp-study-row {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.jp-demo-study :is([data-demo-study-panel="collocations"], [data-demo-study-panel="examples"]) .jp-study-block {
+  gap: var(--sp-3);
+}
+
+.jp-demo-study :is([data-demo-study-panel="collocations"], [data-demo-study-panel="examples"]) .jp-study-block__title {
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+}
+
+.jp-demo-study :is([data-demo-study-panel="collocations"], [data-demo-study-panel="examples"]) .jp-study-row + .jp-study-row {
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.jp-study-compare-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-6);
+  min-width: 0;
+}
+
+.jp-demo-study .jp-study-compare-layout {
+  gap: var(--sp-6);
+}
+
+.jp-study-compare-column :is(.jp-study-row, .jp-demo-compare__card, .jp-study-cell) {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: var(--sp-2);
+}
+
+.jp-study-compare-column .jp-study-block {
+  gap: var(--sp-3);
+}
+
+.jp-study-compare-column .jp-study-block__title {
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  border-left: 3px solid var(--color-primary);
+  padding-left: var(--sp-2);
+}
+
+.jp-study-compare-column .jp-study-word {
+  font-size: var(--fs-xl);
+}
+
+.jp-study-compare-column :is(.jp-study-row, .jp-demo-compare__card) + :is(.jp-study-row, .jp-demo-compare__card) {
+  margin-top: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.jp-study-compare-column .jp-demo-compare {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.jp-study-compare-difference {
+  margin: 0;
+  line-height: var(--lh-relaxed);
+  color: var(--color-text);
+}
+
+.jp-study-compare-notes {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-2) var(--sp-3);
+  padding: var(--sp-3);
+  margin: var(--sp-2) 0 0;
+  background: var(--color-surface-alt);
+  border-radius: var(--radius-sm);
+}
+
+.jp-study-compare-notes dd {
+  margin: 0;
+}
+
+.jp-study-compare-column .jp-demo-fix {
+  margin: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.jp-study-compare-column .jp-study-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding: var(--sp-3);
+  background: var(--color-surface-alt);
+  border-radius: var(--radius-sm);
+}
+
+.jp-study-compare-column .jp-study-cell > [lang="ja"].jp-lang__line {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-lg);
+}
+
+.jp-study-compare-column .jp-study-list {
+  list-style: none;
+  padding: 0;
+}
+
+.jp-study-compare-column .jp-study-list li + li {
+  padding-top: var(--sp-2);
+}
+
+.jp-demo-study [data-demo-study-panel="examples"] .jp-study-row__tag,
+.jp-study-compare-column .jp-study-row__tag {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.jp-demo-study [data-demo-study-panel="examples"] .jp-demo-dialog__speaker {
+  background: transparent;
+}
+
+@media (max-width: 760px), (max-height: 520px) {
+  .jp-demo-study {
+    height: auto;
+    min-height: 100dvh;
+    padding: var(--sp-2);
+    gap: var(--sp-2);
+  }
+
+  .jp-demo-study .jp-study-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jp-demo-study .jp-study-card--tabs {
+    overflow: visible;
+  }
+
+  .jp-demo-study .jp-demo-tabs {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+
+  .jp-demo-study .jp-demo-tabpanel {
+    overflow: visible;
+  }
+}
+
+.jp-study-card__head,
+.jp-study-block__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.jp-study-card__title {
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+}
+
+.jp-study-card__hint {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+}
+
+.jp-study-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.jp-study-form__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.jp-study-form .jp-study-block__title {
+  border-left: 3px solid var(--color-primary);
+  padding-left: var(--sp-2);
+  color: var(--color-text-strong);
+  font-size: var(--fs-lg);
+  line-height: var(--lh-tight);
+}
+
+.jp-study-form__section[data-demo-study-pronunciation] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+}
+
+.jp-study-form__section[data-demo-study-pronunciation] > h3 {
+  grid-column: 1 / -1;
+}
+
+.jp-study-form__section[data-demo-study-pronunciation] > details {
+  align-self: center;
+}
+
+.jp-study-form__section[data-demo-study-pronunciation]:has(details[open]) > details {
+  grid-column: 1 / -1;
+}
+
+.jp-study-form__pronunciation {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.jp-study-form__pronunciation > strong {
+  font-size: var(--fs-3xl);
+  color: var(--color-primary-hover);
+  line-height: var(--lh-tight);
+}
+
+.jp-study-form__hint {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.jp-study-form__hint summary {
+  width: fit-content;
+  cursor: pointer;
+  color: var(--color-link);
+}
+
+.jp-study-form__hint p {
+  margin: var(--sp-2) 0 0;
+  line-height: var(--lh-relaxed);
+}
+
+.jp-study-form__table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.jp-study-form__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-md);
+  line-height: var(--lh-normal);
+}
+
+.jp-study-form__table :is(th, td) {
+  padding: 6px var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.jp-study-form__table thead {
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.jp-study-form__table tbody tr:last-child > * {
+  border-bottom: 0;
+}
+
+.jp-study-form__table tbody th {
+  width: 12%;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.jp-study-form__table tbody td:nth-child(2) {
+  width: 22%;
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-bold);
+  color: var(--color-primary-hover);
+}
+
+.jp-study-form__table th,
+.jp-study-form__table td:nth-child(2) {
+  white-space: nowrap;
+  font-weight: var(--fw-medium);
+}
+
+.jp-study-form__table td:last-child {
+  color: var(--color-text-muted);
+}
+
+.jp-study-form__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+  overflow: hidden;
+}
+
+.jp-study-form__pair > div {
+  padding: var(--sp-2) var(--sp-4);
+}
+
+.jp-study-form__pair > div + div {
+  border-left: 1px solid var(--color-border);
+}
+
+.jp-study-form__pair .jp-demo-meta {
+  display: block;
+  margin-bottom: var(--sp-1);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-study-form__pair strong {
+  font-size: var(--fs-xl);
+  color: var(--color-text-strong);
+}
+
+.jp-study-form__pair p {
+  margin: var(--sp-2) 0 0;
+  color: var(--color-text-muted);
+}
+
+@media (max-width: 640px) {
+  .jp-study-form__section[data-demo-study-pronunciation] > details {
+    grid-column: 1 / -1;
+  }
+  .jp-study-form__pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jp-study-form__pair > div + div {
+    border-left: 0;
+    border-top: 1px solid var(--color-border);
+  }
+}
+
+.jp-study-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.jp-study-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+/* 全タブの内容区分は「単語説明」と同じ一層の淡いカードに統一する。 */
+.jp-demo-study :is(.jp-study-form__section, .jp-demo-quiz) {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-study-block__title {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-bold);
+}
+
+/* ---------- 项目（見出し・日本語・中国語の 3 段） ---------- */
+
+.jp-study-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.jp-study-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-study-row--example {
+  border-left: 4px solid var(--color-primary-strong);
+}
+
+.jp-study-row__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.jp-study-row__label {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+}
+
+.jp-study-row__tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px var(--sp-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-medium);
+  white-space: nowrap;
+}
+
+/* 語義は番号の四角を左に置く */
+.jp-study-sense {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+.jp-study-sense__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.jp-study-sense__no {
+  display: inline-grid;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-bold);
+}
+
+.jp-study-list {
+  margin: 0;
+  padding-left: 1.2rem;
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-relaxed);
+}
+
+.jp-study-list li {
+  margin-bottom: var(--sp-1);
+}
+
+/* 見出しと値の対（発音・アクセントなど） */
+.jp-study-kv {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  overflow: hidden;
+}
+
+.jp-study-kv__row {
+  display: grid;
+  grid-template-columns: 8.5rem minmax(0, 1fr);
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--fs-sm);
+}
+
+.jp-study-kv__row:last-child {
+  border-bottom: 0;
+}
+
+.jp-study-kv__row > span:first-child {
+  color: var(--color-text-subtle);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-study-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: var(--sp-2);
+}
+
+.jp-study-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+/* ---------- 日本語と中国語を分ける（2.0 の言語行） ---------- */
+
+.jp-lang {
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: start;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+}
+
+.jp-lang--ja {
+  border-left: 4px solid var(--color-link);
+  background: var(--color-info-soft);
+}
+
+.jp-lang--zh {
+  border-left: 4px solid var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.jp-lang__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.4rem;
+  padding: 2px var(--sp-1);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-on-inverse);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.jp-lang--ja .jp-lang__badge {
+  background: var(--color-link);
+}
+
+.jp-lang--zh .jp-lang__badge {
+  background: var(--color-warning);
+}
+
+.jp-lang__body {
+  min-width: 0;
+  color: var(--color-text);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-relaxed);
+  overflow-wrap: anywhere;
+}
+
+/* 中国語は中国語の書体で出す（2.0 と同じ。日本語と見分けやすくする） */
+.jp-lang--zh .jp-lang__body,
+.jp-study-primary__text,
+.jp-demo-zh {
+  font-family: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+.jp-lang__line {
+  margin: 0;
+}
+
+.jp-lang__line + .jp-lang__line {
+  margin-top: var(--sp-1);
+}
+
+.jp-lang__reading {
+  margin: var(--sp-1) 0 0;
+  color: var(--color-text-subtle);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-regular);
+}
+
+/* タブは 2.0 と同じく、下線＋淡い面で選んでいることを示す */
+.jp-demo-tabs {
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface-alt);
+}
+
+.jp-demo-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-3) var(--sp-3) calc(var(--sp-3) - 3px);
+  border-bottom: 3px solid transparent;
+  font-weight: var(--fw-semibold);
+}
+
+.jp-demo-tab.is-active {
+  border-bottom-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary-hover);
+}
+
+.jp-demo-tab__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.25rem;
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  background: var(--color-surface);
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+  font-weight: var(--fw-semibold);
+}
+
+@media (max-width: 640px) {
+  .jp-lang {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jp-lang__badge {
+    width: max-content;
+  }
+
+  .jp-study-kv__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 /* ---------- 狭い画面 ---------- */
 
 @media (max-width: 1024px) {
@@ -932,10 +2003,6 @@
   .jp-demo__actions {
     margin-left: 0;
     width: 100%;
-  }
-
-  .jp-demo-study__sound {
-    margin-left: 0;
   }
 
   .jp-demo-dialog__speaker {
@@ -990,6 +2057,17 @@
   vertical-align: middle;
 }
 
+/*
+ * マウスが触れただけで色は変えない（TODO の表と同じ）。
+ * 変わるのは「選んだとき（is-selected / is-range）」と「入力中（is-editing）」だけ。
+ * どこかで行やセルに hover の色が付いても、表の中では効かせない。
+ */
+@media (hover: hover) {
+  .jp-sheet-scroll .jp-sheet tbody tr:hover td:not(.is-selected):not(.is-range):not(.is-editing) {
+    background-color: var(--color-surface);
+  }
+}
+
 /* 編集中でないセルは値をテキストで出す（クリックしただけでは入力欄を出さない） */
 .jp-sheet td[data-col] .jp-sheet__value {
   display: block;
@@ -1010,10 +2088,25 @@
   outline-offset: 2px;
 }
 
-/* 入力中のセルは白地のまま（選択の緑は残しつつ、枠で「入力中」を示す） */
+/*
+ * 入力中のセルは白地のまま、**罫線そのものを緑に替える**。
+ * 内側にも枠を足すと、セルの罫線と二重に見える（緑の線が 2 本になる）。
+ */
 .jp-sheet td.is-editing {
   background: var(--color-surface);
-  box-shadow: inset 0 0 0 2px var(--color-primary);
+  border-color: var(--color-primary);
+  box-shadow: none;
+}
+
+/* 罫線が 1px 太くなるので、その分だけ中を詰めて行の高さを変えない */
+.jp-sheet-scroll .jp-sheet td.is-editing {
+  height: calc(1.75rem + 2px);
+}
+
+.jp-sheet-scroll .jp-sheet td.is-editing .jp-sheet__value,
+.jp-sheet-scroll .jp-sheet td.is-editing input {
+  height: calc(1.75rem - 2px);
+  line-height: calc(1.75rem - 2px);
 }
 
 /* セルの中の入力は枠を持たない（セル全体が入力欄に見えるように） */
@@ -1091,13 +2184,20 @@
   outline: none;
 }
 
-/* 選択中のセル（1 つだけ選んでいるとき） */
+/*
+ * 選択中のセル（1 つだけ選んでいるとき）。
+ * 入力中と同じく、罫線を緑に替える（内側に枠を足すと二重に見える）。
+ */
 .jp-sheet td.is-selected {
   background: var(--color-success-soft);
-  box-shadow: inset 0 0 0 2px var(--color-success);
+  border-color: var(--color-success);
+  box-shadow: none;
 }
 
-/* ドラッグで選んだ範囲 */
+/*
+ * 選んでいる範囲は、面の色と**外側の罫線の色**だけで示す。
+ * 内側に枠を足す（box-shadow の inset）と、セルの罫線と重なって二重に見える。
+ */
 .jp-sheet td.is-range {
   background: var(--color-success-soft);
 }

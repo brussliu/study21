@@ -8,12 +8,17 @@
  *
  * 見るだけの TAB（スキーマは編集できない）。表示は 2 つ:
  * 1. 項目構造（フィールド名・型・説明・必須。入れ子は開いて見る）
- * 2. JSON Schema（整形した本文。そのまま確認・コピーできる）
+ * 2. JSON Schema（整形した本文。そのまま確認・コピーできる。長いので枠の中を縦に送る）
+ *
+ * 見た目は `aiDataSchema.css`（1 か所）が持つ。素の DOM で描く側
+ * （`aiDataSchemaPanel.ts`。日本語単語AI の Data TAB）と共有するため、この部品は
+ * 自前の `<style>` を持たない（片方だけ規則が無いと、そこだけ見た目が崩れる）。
  */
 import { computed, onMounted, ref } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { loadAiResponseSchema } from '@/api/system-settings'
 import { fieldsOfSchema, flattenSchemaFields } from '@/features/system-settings/aiSchemaView'
+import '@/features/system-settings/aiDataSchema.css'
 
 const props = defineProps<{
   /** バッチコード（batC51 / batC52）。 */
@@ -129,116 +134,9 @@ onMounted(load)
 
       <section class="ai-data-schema__block" data-ai-data-json>
         <h5 class="ai-data-schema__title"><AppIcon name="code" /> JSON Schema</h5>
-        <pre class="ai-data-schema__json">{{ schemaText }}</pre>
+        <!-- 縦に送れる枠はキーボードでも送れること（tabindex）。見た目は aiDataSchema.css -->
+        <pre class="ai-data-schema__json" tabindex="0" role="region" aria-label="JSON Schema">{{ schemaText }}</pre>
       </section>
     </template>
   </div>
 </template>
-
-<style scoped>
-.ai-data-schema {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.ai-data-schema__note {
-  margin: 0;
-}
-
-.ai-data-schema__lead {
-  margin: 0;
-  color: var(--color-text-muted, #6b7280);
-  font-size: 0.9rem;
-}
-
-.ai-data-schema__state {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  color: var(--color-text-muted, #6b7280);
-}
-
-.ai-data-schema__state.is-error {
-  color: var(--color-danger, #b91c1c);
-}
-
-.ai-data-schema__title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  font-size: 0.95rem;
-}
-
-.ai-data-schema__table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-
-.ai-data-schema__table th {
-  text-align: left;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--color-border, #e5e7eb);
-  color: var(--color-text-muted, #6b7280);
-  font-weight: 600;
-}
-
-.ai-data-schema__table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--color-border-subtle, #f1f3f5);
-  vertical-align: top;
-}
-
-.ai-data-schema__name {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.ai-data-schema__indent {
-  display: inline-block;
-  flex: none;
-}
-
-.ai-data-schema__toggle {
-  width: 18px;
-  border: none;
-  background: none;
-  padding: 0;
-  cursor: pointer;
-  color: var(--color-text-muted, #6b7280);
-}
-
-.ai-data-schema__toggle-space {
-  display: inline-block;
-  width: 18px;
-}
-
-.ai-data-schema__required {
-  margin-left: 4px;
-  padding: 0 6px;
-  border-radius: 8px;
-  background: var(--color-accent-soft, #eef2ff);
-  color: var(--color-accent, #4338ca);
-  font-size: 0.75rem;
-}
-
-.ai-data-schema__description {
-  color: var(--color-text-muted, #6b7280);
-}
-
-.ai-data-schema__json {
-  margin: 0;
-  padding: 12px;
-  max-height: 420px;
-  overflow: auto;
-  border-radius: 8px;
-  background: var(--color-surface-muted, #f8f9fa);
-  font-size: 0.85rem;
-  line-height: 1.5;
-}
-</style>

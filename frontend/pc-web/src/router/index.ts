@@ -1,3 +1,5 @@
+import { englishStudyRoutes } from '@/features/english-study/routes'
+import { practiceDemoRoutes } from '@/features/english-practice-demo/routes'
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
@@ -60,6 +62,12 @@ function classroomRoutes(area: AppArea): RouteRecordRaw[] {
 }
 
 export const routes: RouteRecordRaw[] = [
+  ...(['admin', 'student', 'parent'] as const).map(area => ({
+    path: `/${area}/japanese-test/run`,
+    name: `${area}-japanese-test-run`,
+    component: () => import('@/views/japanese/JapaneseTestRunner.vue'),
+    meta: { title: '単語テスト', layout: 'blank' as const, requiresAuth: true }
+  })),
   { path: '/', redirect: '/login' },
   {
     path: '/login',
@@ -132,6 +140,8 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'admin' }
       },
       ...gameRoutes('admin'),
+      ...englishStudyRoutes('admin'),
+      ...practiceDemoRoutes('admin'),
       ...classroomRoutes('admin'),
       {
         path: 'site',
@@ -239,6 +249,33 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/geometry/GeometryAiView.vue'),
         meta: { title: 'AI 生図', layout: 'admin' }
       },
+      // 英語勉強（英作文AI添削）。2.0 の english_essay.jsp に合わせて一覧と詳細の 2 画面
+      {
+        path: 'english-essay',
+        name: 'admin-english-essay',
+        component: () => import('@/views/english/EssayListView.vue'),
+        meta: { title: '英作文AI添削', layout: 'admin' }
+      },
+      // 新規と編集は**モーダルではなくページ**（2.0 の `english_essay.jsp?mode=new` と同じ）。
+      // `:essayId` の詳細より先に置く（`new` を作文 ID として読ませない）
+      {
+        path: 'english-essay/new',
+        name: 'admin-english-essay-new',
+        component: () => import('@/views/english/EssayNewView.vue'),
+        meta: { title: '英作文 新規登録', layout: 'admin' }
+      },
+      {
+        path: 'english-essay/:essayId/edit',
+        name: 'admin-english-essay-edit',
+        component: () => import('@/views/english/EssayNewView.vue'),
+        meta: { title: '英作文 編集', layout: 'admin' }
+      },
+      {
+        path: 'english-essay/:essayId',
+        name: 'admin-english-essay-detail',
+        component: () => import('@/views/english/EssayDetailView.vue'),
+        meta: { title: '英作文AI添削（詳細）', layout: 'admin' }
+      },
       {
         path: ':screen',
         name: 'admin-screen',
@@ -294,6 +331,8 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('student'),
+      ...englishStudyRoutes('student'),
+      ...practiceDemoRoutes('student'),
       ...classroomRoutes('student'),
       {
         path: 'site',
@@ -368,6 +407,32 @@ export const routes: RouteRecordRaw[] = [
         name: 'student-japanese-word',
         component: () => import('@/views/japanese/JapaneseWordView.vue'),
         meta: { title: '単語情報管理', layout: 'user' }
+      },
+      // 英語勉強（英作文AI添削）
+      {
+        path: 'english-essay',
+        name: 'student-english-essay',
+        component: () => import('@/views/english/EssayListView.vue'),
+        meta: { title: '英作文AI添削', layout: 'user' }
+      },
+      // 新規と編集は**ページ**（`:essayId` の詳細より先に置く）
+      {
+        path: 'english-essay/new',
+        name: 'student-english-essay-new',
+        component: () => import('@/views/english/EssayNewView.vue'),
+        meta: { title: '英作文 新規登録', layout: 'user' }
+      },
+      {
+        path: 'english-essay/:essayId/edit',
+        name: 'student-english-essay-edit',
+        component: () => import('@/views/english/EssayNewView.vue'),
+        meta: { title: '英作文 編集', layout: 'user' }
+      },
+      {
+        path: 'english-essay/:essayId',
+        name: 'student-english-essay-detail',
+        component: () => import('@/views/english/EssayDetailView.vue'),
+        meta: { title: '英作文AI添削（詳細）', layout: 'user' }
       },
       // 単語情報管理（画面確認用。仮データだけで動き、本番 API は呼ばない）
       {
@@ -463,6 +528,8 @@ export const routes: RouteRecordRaw[] = [
         meta: { title: 'リンククリップ', layout: 'user' }
       },
       ...gameRoutes('parent'),
+      ...englishStudyRoutes('parent'),
+      ...practiceDemoRoutes('parent'),
       ...classroomRoutes('parent'),
       {
         path: 'site',
@@ -538,6 +605,20 @@ export const routes: RouteRecordRaw[] = [
         component: () => import('@/views/japanese/JapaneseWordView.vue'),
         meta: { title: '単語情報管理', layout: 'user' }
       },
+      // 英語勉強（英作文AI添削）。親は結果の閲覧のみ（提出はしない）ので、
+      // **新規・編集のルートは置かない**（利用者・画面の指示）。一覧と詳細だけを見る。
+      {
+        path: 'english-essay',
+        name: 'parent-english-essay',
+        component: () => import('@/views/english/EssayListView.vue'),
+        meta: { title: '英作文AI添削', layout: 'user' }
+      },
+      {
+        path: 'english-essay/:essayId',
+        name: 'parent-english-essay-detail',
+        component: () => import('@/views/english/EssayDetailView.vue'),
+        meta: { title: '英作文AI添削（詳細）', layout: 'user' }
+      },
       {
         path: 'japanese-test',
         name: 'parent-japanese-test',
@@ -608,6 +689,26 @@ export const routes: RouteRecordRaw[] = [
     path: '/student/japanese-demo/study',
     name: 'student-japanese-demo-study',
     component: () => import('@/views/japanese/demo/DemoWordStudyPage.vue'),
+    meta: { title: 'A. 勉強', layout: 'blank', requiresAuth: true }
+  },
+  // 実画面の学習画面（単語情報管理の【詳細】から別ウィンドウで開く。自動最大化）。
+  // エリアごとに置く（管理画面から開いたら /admin を使う＝権限で弾かれない）
+  {
+    path: '/admin/japanese-word/study',
+    name: 'admin-japanese-word-study',
+    component: () => import('@/views/japanese/JapaneseWordStudyPage.vue'),
+    meta: { title: 'A. 勉強', layout: 'blank', requiresAuth: true }
+  },
+  {
+    path: '/student/japanese-word/study',
+    name: 'student-japanese-word-study',
+    component: () => import('@/views/japanese/JapaneseWordStudyPage.vue'),
+    meta: { title: 'A. 勉強', layout: 'blank', requiresAuth: true }
+  },
+  {
+    path: '/parent/japanese-word/study',
+    name: 'parent-japanese-word-study',
+    component: () => import('@/views/japanese/JapaneseWordStudyPage.vue'),
     meta: { title: 'A. 勉強', layout: 'blank', requiresAuth: true }
   },
 

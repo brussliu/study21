@@ -5,6 +5,17 @@
    ============================================================================ */
 
 /* ============================================================================
+ * 入力の多いダイアログは幅を広く取る（Excel 風の表＋設定を並べる画面用）
+ *
+ * 設計システムの `.dialog--lg` は max-width: 960px。単語の登録のように
+ * 「表＋設定＋確認」を 1 画面に置く画面では、960px だと右の列が潰れて
+ * 文章が 1 文字ずつ折り返す。広い画面では幅を使い、狭い画面ではみ出さない。
+ * ========================================================================== */
+.dialog--wide {
+  max-width: min(1240px, 96vw);
+}
+
+/* ============================================================================
  * 複数行の入力（textarea）
  *
  * 設計システムの `.input` は **1 行入力用**で、`height: ハンドル高さ` ＋ `padding: 0 12px`
@@ -68,6 +79,13 @@ textarea.input {
   color: var(--color-warning);
 }
 
+/* AI 取得（ロボット）。主色（青緑）にして、詳細（緑）・修正（青）・削除（赤）と
+   色で見分けられるようにする（利用者の指示 2026-09-26）。 */
+.icon--ai,
+.btn .icon.icon--ai {
+  color: var(--color-primary);
+}
+
 /* アイコンボタンのホバー背景（全ページ共通）
    アイコンの色に合わせて淡い同系色を敷く（削除＝淡い赤 / 編集＝淡い青 / 参照＝淡い緑）。
    狙いは 2 つ:
@@ -95,15 +113,22 @@ textarea.input {
   background: var(--color-warning-soft);
 }
 
+/* AI 取得（青緑）。ホバー背景も淡い青緑にする。 */
+:is(.btn--icon, .doc-card__action):has(> .icon--ai):hover:not(:disabled) {
+  background: var(--color-primary-soft);
+}
+
 /* 塗りつぶしボタン（文字が白）の中では、アイコンは文字色を継承させる。
    例: btn--primary の中に目（参照）アイコンを置いても白のまま。 */
 .btn--primary .icon.icon--danger,
 .btn--primary .icon.icon--edit,
 .btn--primary .icon.icon--view,
 .btn--primary .icon.icon--reject,
+.btn--primary .icon.icon--ai,
 .btn--danger .icon.icon--danger,
 .btn--danger .icon.icon--edit,
 .btn--danger .icon.icon--view,
+.btn--danger .icon.icon--ai,
 .btn--danger .icon.icon--reject {
   color: inherit;
 }

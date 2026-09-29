@@ -41,8 +41,14 @@ public class BatchServiceImpl implements BatchService {
 
     private static final Logger log = LoggerFactory.getLogger(BatchServiceImpl.class);
 
-    /** 2.0 と同じ有効設定の備考文言。 */
+    /** 2.0 と同じ有効設定の備考文言（定時・循環・起動時のバッチ）。 */
     private static final String ACTIVE_NOTE = "バッチ管理画面の有効設定（OFF時は定時実行しない）";
+
+    /**
+     * 呼出（種別 C）の有効設定の備考文言。
+     * C は定時の実行を持たないので、OFF の意味は「他の処理から呼び出さない」になる。
+     */
+    private static final String CALL_ACTIVE_NOTE = "バッチ管理画面の有効設定（OFF時は他の処理から呼び出さない）";
 
     /** 画面から起動したときの 依頼元コード（ログイン中の管理者が特定できない場合の識別子）。 */
     private static final String OPERATOR_FALLBACK = "batch-page";
@@ -142,8 +148,41 @@ public class BatchServiceImpl implements BatchService {
     @Override
     @Transactional
     public Map<String, Object> rerunStep(String batchCode, String operator, String requestPayloadJson) {
+        // 他の処理からの呼出でも**有効設定が OFF なら実行しない**。種別 C の有効は
+        // 「いま使っているか」の目印であり、同時に「その処理を使わない」という意思表示
+        // （バッチ一覧のスイッチをそのまま効かせる。2026-09-22 の利用者指示）。
+        // 画面の【再実行】（rerun）は 2.0 と同じく無効でも実行できる（別の入口）。
+        requireActiveForCall(batchCode);
         return execute(batchCode, "C", normalize(operator), "AI 生図のパイプラインから実行しました",
                 requestPayloadJson);
+    }
+
+    /**
+     * 呼出（{@link #rerunStep}）の前提: 有効設定が ON であること。
+     *
+     * <p>定義が無い・業務処理が未実装のときは何もしない（{@link #execute} が
+     * より具体的なエラーを返すため）。</p>
+     */
+    @Override
+    public void requireCallable(String batchCode) {
+        requireActiveForCall(batchCode);
+    }
+
+    private void requireActiveForCall(String batchCode) {
+        BatchTaskDefinition task = registry.findByCode(batchCode);
+        if (task == null || !handlers.containsKey(batchCode)) {
+            return;
+        }
+        BatchControlEntity control = controlMapper.findByBatchCode(batchCode);
+        if (!isActive(task, control)) {
+            throw new ValidationException("バッチが無効に設定されています: " + batchCode
+                    + "（バッチ一覧で有効にしてください）");
+        }
+    }
+
+    /** 有効／無効の正は BAT_バッチコントロール情報（行が無ければ定義の既定値）。 */
+    private static boolean isActive(BatchTaskDefinition task, BatchControlEntity control) {
+        return control == null ? task.active() : control.isActive();
     }
 
     /**
@@ -305,8 +344,7 @@ public class BatchServiceImpl implements BatchService {
                 continue;
             }
             BatchControlEntity control = controlMapper.findByBatchCode(task.taskCode());
-            boolean active = control == null ? task.active() : control.isActive();
-            if (active) {
+            if (isActive(task, control)) {
                 codes.add(task.taskCode());
             }
         }
@@ -354,7 +392,8 @@ public class BatchServiceImpl implements BatchService {
             preflight.verify(batchCode, task.requiredSettings(), requestPayloadJson);
         }
 
-        // 2) 二重起動ガード（有効／無効は実行の可否に影響しない）
+        // 2) 二重起動ガード（有効／無効はここでは見ない。呼出は rerunStep が事前に見るし、
+        //    画面の【再実行】は無効でも実行できる＝2.0 の運用）
         if (runningGuard.putIfAbsent(batchCode, Boolean.TRUE) != null) {
             throw new ConflictException("バッチは既に実行中です: " + batchCode);
         }
@@ -575,10 +614,10 @@ public class BatchServiceImpl implements BatchService {
         row.put("taskType", task.taskType().name());
         row.put("description", task.description());
         // 有効／無効は BAT_バッチコントロール情報 を正とする（行が無ければ定義の既定値）
-        row.put("active", control == null ? task.active() : control.isActive());
+        row.put("active", isActive(task, control));
         row.put("activeVersion", control == null ? null : control.getVersion());
         row.put("lastRunAt", control == null ? null : control.getLastRunAt());
-        row.put("canToggleActive", task.canToggleActive());
+        row.put("canToggleActive", isToggleable(task));
         // 一覧の【再実行】の出し分けは 2 つのフラグで決める:
         //   canManualRerun = ボタンを出すか（種別 C は出さない）
         //   canRerun       = そのボタンを押せるか（業務処理のハンドラが未実装なら押せない）
@@ -632,9 +671,11 @@ public class BatchServiceImpl implements BatchService {
         if (task == null) {
             throw new NotFoundException("バッチタスクが見つかりません: " + batchCode);
         }
-        if (!task.canToggleActive()) {
-            // 2.0 のメッセージを引き継ぎつつ、2.1 で追加した batS を足す
-            throw new ValidationException("有効設定を変更できるのは batS / batL / batR のみです。");
+        if (!isToggleable(task)) {
+            // 2.0 のメッセージ（batL / batR のみ）を引き継ぎつつ、2.1 で増えた batS と
+            // 実装済みの呼出（種別 C）を足す
+            throw new ValidationException(
+                    "有効設定を変更できるのは batS / batL / batR と、実装済みの呼出（種別 C）のバッチだけです。");
         }
         ensureControls();
         BatchControlEntity control = controlMapper.findByBatchCode(batchCode);
@@ -659,16 +700,33 @@ public class BatchServiceImpl implements BatchService {
         return result;
     }
 
+    /**
+     * 画面から有効／無効を切り替えられるか。
+     *
+     * <p>種別 S / L / R は定義だけで決まる（{@link BatchTaskDefinition#canToggleActive()}）。
+     * 種別 C（呼出）の「有効」は<b>いま使っているかの目印</b>であり、**無効にすると他の処理から
+     * 呼び出せなくなる**（{@link #requireActiveForCall}）。切り替えられるのは<b>業務処理が
+     * 実装済み（ハンドラがある）C だけ</b>で、未実装の C は動かしようがないので置灰のままにする。</p>
+     */
+    private boolean isToggleable(BatchTaskDefinition task) {
+        return task.canToggleActive() || handlers.containsKey(task.taskCode());
+    }
+
+    /** コントロール情報の行に残す備考（OFF の意味が種別で違う）。 */
+    private static String noteOf(BatchTaskDefinition task) {
+        return task.taskType() == BatchTaskType.C ? CALL_ACTIVE_NOTE : ACTIVE_NOTE;
+    }
+
     /** 定義にある（切り替え可能な）バッチの行を BAT_バッチコントロール情報 に用意する。 */
     private void ensureControls() {
         for (BatchTaskDefinition task : registry.findAll()) {
-            if (!task.canToggleActive()) {
+            if (!isToggleable(task)) {
                 continue;
             }
             BatchControlEntity entity = new BatchControlEntity();
             entity.setBatchCode(task.taskCode());
             entity.setStatus(task.active() ? "1" : "0");
-            entity.setNote(ACTIVE_NOTE);
+            entity.setNote(noteOf(task));
             entity.setCreatedByCode("SYSTEM");
             entity.setUpdatedByCode("SYSTEM");
             controlMapper.insertIfAbsent(entity);

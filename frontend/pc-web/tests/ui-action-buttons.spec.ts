@@ -90,7 +90,7 @@ describe('操作ボタンの見た目（ソース側の番人）', () => {
     { view: 'views/batch/BatchHistoryView.vue', title: '実行履歴' },
     { view: 'views/batch/BatchListView.vue', title: 'バッチ一覧（' },
     { view: 'views/document/DocumentListView.vue', title: '資料一覧' },
-    { view: 'views/japanese/JapaneseTestView.vue', title: 'テストの履歴' },
+    { view: 'views/japanese/JapaneseTestView.vue', title: 'テスト情報一覧' },
     { view: 'views/japanese/JapaneseWordStatusView.vue', title: '語別の学習状況' },
     { view: 'views/japanese/JapaneseWordStatusView.vue', title: '技能別の習得' },
     { view: 'views/linkclip/LinkClipView.vue', title: '保存リンク一覧' },

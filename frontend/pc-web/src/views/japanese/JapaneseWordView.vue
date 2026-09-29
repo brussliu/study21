@@ -1,26 +1,41 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
-import { ApiError, formatIsoDateTime, useToast } from '@study21/web-shared'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ApiError, useToast } from '@study21/web-shared'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import { paginationItems } from '@/features/pagination/pagination'
+import JapaneseWordEditDialog from './JapaneseWordEditDialog.vue'
+import DemoWordNewView from './demo/DemoWordNewView.vue'
+import { useJpnRegisterStore } from '@/features/japanese-word/registerStore'
+import { openJpnWordStudyPopup } from '@/features/japanese-word/studyPopup'
+import { detailCountChips } from '@/features/japanese-word/detailCounts'
 import {
-  QUESTION_TYPE_LABELS,
-  RELATED_TYPE_LABELS,
-  LEARN_STATE_BADGES,
-  LEARN_STATE_LABELS,
-  createJpnWord,
+  aiStateBadgeClass,
+  aiStateLabelOf,
+  aiStateOf,
+  isAiStateDone,
+  type JpnAiStateKey
+} from '@/features/japanese-word/aiStateLabel'
+import JpnAiHistoryDialog from '@/features/japanese-word/JpnAiHistoryDialog.vue'
+import JpnAiFetchDialog from '@/features/japanese-word/JpnAiFetchDialog.vue'
+import { JPN_ACQUIRE_ACTIONS, acquireActionOf } from '@/features/japanese-word/acquireActions'
+import { youdaoWordUrl } from '@/features/japanese-word/youdao'
+import { acquirePlan, type JpnAcquirePlan } from '@/features/japanese-word/acquirePlan'
+import type { DemoBook, DemoBookUnit } from '@/features/japanese-demo/types'
+import {
   deleteJpnWord,
-  fetchJpnWord,
+  fetchJpnAiLimits,
+  fetchJpnAiProgress,
+  fetchJpnAiTargets,
+  runJpnWordAi,
   searchJpnWords,
-  updateJpnWord,
-  type JpnCollection,
+  type JpnAiKind,
+  type JpnAiRunLimits,
+  type JpnAiTargets,
   type JpnWord,
-  type JpnWordDetail,
-  type JpnWordDetailResult,
-  type JpnWordQuestion,
-  type JpnWordSave,
-  type LearnState
+  type JpnWordFilters
 } from '@/api/japanese'
+import { fetchBatchTasks, type BatchTaskRow } from '@/api/batch'
+import { jpnAiBatchBadgeOf } from '@/features/japanese-word/aiBatchState'
 import '@/features/japanese/japanese.css'
 
 /**
@@ -38,32 +53,31 @@ import '@/features/japanese/japanese.css'
  * ・単語の詳細（収録・基本情報・語義・例文・発音・コロケーション・関連語・使用注意・問題を
  *   タブで切り替える。2.0 の詳細の項目をすべて出す）
  *
- * 右上の A〜E 取得（詳細情報・読み問題・文脈問題・漢字問題）は、**取得用の API がまだ無い**
- * ため無効のボタンとして置く（押せない理由は title に出す）。
+ * 右上の A〜E 取得（詳細情報・読み問題・文脈問題・漢字問題）は、押すと**取得方法の窓**を出す
+ * （取得済みをスキップ／すべて再取得。利用者の指示 2026-09-26。参照は 2.0 の英語学習の
+ * 単語情報管理 `word.jsp`）。対象は**検索条件に一致する語**（ページは問わない。サーバーが選ぶ）。上限は設定ページの「1 回の最大単語数」。
+ * **受付だけして実行はバックエンドの働き手に任せる**（2026-09-27 に非同期へ変更。
+ * 画面は「取得中」が消えるまで一覧をときどき見に行き、落ち着いたら結果を知らせる）。
  *
  * 一覧 API が持っていない情報は、画面側で次のように補っている。
  * ・書籍・分類の選択肢 … 選択肢一覧を返す API が無いので、読み込んだ単語の値から作る
  * ・品詞の選択肢 … `品詞` は `[名・他サ]` のような組み合わせのラベルで 65 種類あるため、
  *   代表の区分だけを並べる（絞り込みは部分一致なので「名」「サ」で複合ラベルにも当たる）
- * ・分類（To）… API は `category` を 1 つしか受け取らないため、送るのは From だけ
- * ・中国語訳・取得状態（A・B／C／D／E）… 一覧 API に項目が無いので「—」「未取得」を出す
+ * ・分類（From ～ To）… 一覧 API が範囲（`categoryFrom` / `categoryTo`）で受ける
  */
 
 const toast = useToast()
 
-/** A〜E の取得ボタン（取得用の API がまだ無いため、押せないボタンとして置く）。 */
-const ACQUIRE_ACTIONS: { key: string; short: string; label: string; icon: string }[] = [
-  { key: 'AB', short: 'A・B', label: '詳細情報取得（A・B）', icon: 'info' },
-  { key: 'C', short: 'C', label: '読み問題取得（C）', icon: 'book-open' },
-  { key: 'D', short: 'D', label: '文脈問題取得（D）', icon: 'note' },
-  { key: 'E', short: 'E', label: '漢字問題取得（E）', icon: 'pen' }
-]
-/** 取得ボタンが押せない理由（取得用の API が無い）。 */
-const ACQUIRE_UNAVAILABLE_TITLE = '取得用の API はまだありません。'
-/** 取得状態の列が「未取得」なのは、一覧 API が取得状態を返さないため。 */
-const ACQUIRE_COLUMN_TITLE = '取得状態は一覧 API が返さないため「未取得」を表示しています。'
-/** 分類（To）が絞り込みに使われない理由。 */
-const CATEGORY_TO_TITLE = '分類（To）は API が未対応のため、絞り込みには使われません（送信するのは From だけです）。'
+/** AI 取得の種類（詳細情報（A・B）／読み問題（C）／文脈問題（D）／漢字問題（E））。
+    ボタンは 1 つで、この並びを窓の中で選ばせる（定義は features/japanese-word/acquireActions.ts） */
+const ACQUIRE_ACTIONS = JPN_ACQUIRE_ACTIONS
+/** 取得中の区分（受付が終わるまで二重に押せないようにする）。 */
+const acquireRunning = ref<JpnAiKind | null>(null)
+/** 対象（検索条件に一致する語）をサーバーから取っている最中か（二重に押せないようにする）。 */
+const plansLoading = ref(false)
+/** 取得状態の列の説明（状態は一覧 API が 4 区画にまとめて返す）。 */
+const ACQUIRE_COLUMN_TITLE =
+  '取得状態（A・B，C，D，E）。一度でも成功した内容は「取得済」、失敗は「失敗」、まだ実行していない内容は「未取得」です。'
 
 /* ---------- 検索条件 ---------- */
 
@@ -83,9 +97,6 @@ const PART_OPTIONS = [
 ]
 
 /** 単語の状態（`stateCode`）。 */
-type WordState = 'ACTIVE' | 'INACTIVE'
-const STATE_OPTIONS: WordState[] = ['ACTIVE', 'INACTIVE']
-const STATE_LABELS: Record<WordState, string> = { ACTIVE: '有効', INACTIVE: '無効' }
 
 /** 1 ページの件数。 */
 const PAGE_SIZES = [20, 50, 100]
@@ -95,7 +106,7 @@ const filters = reactive({
   jlpt: '',
   part: '',
   book: '',
-  /** 分類の範囲（From／To）。API に渡すのは From だけ。 */
+  /** 分類の範囲（From／To）。両方 API へ送る（片方だけでもよい） */
   categoryFrom: '',
   categoryTo: ''
 })
@@ -148,48 +159,89 @@ function messageOf(cause: unknown, fallback: string): string {
   return cause instanceof ApiError ? cause.message : fallback
 }
 
-async function loadWords(): Promise<void> {
-  loading.value = true
-  error.value = ''
+/**
+ * いまの絞り込み条件（一覧と AI 取得の対象で**同じもの**を渡す）。
+ *
+ * <p>対象の選定はサーバーが行うので、条件の組み立てを 2 か所に書くと
+ * 「一覧に出ている語」と「取得の対象」が食い違う。ここ 1 か所から渡す。</p>
+ */
+function filterParams(): JpnWordFilters {
+  return {
+    keyword: filters.keyword.trim() === '' ? undefined : filters.keyword.trim(),
+    jlpt: filters.jlpt === '' ? undefined : filters.jlpt,
+    part: filters.part.trim() === '' ? undefined : filters.part.trim(),
+    book: filters.book === '' ? undefined : filters.book,
+    // 分類は範囲（From ～ To）。片方だけでも送る（空は「制限なし」）
+    categoryFrom: filters.categoryFrom === '' ? undefined : filters.categoryFrom,
+    categoryTo: filters.categoryTo === '' ? undefined : filters.categoryTo
+  }
+}
+
+/**
+ * 一覧を読む。
+ *
+ * <p><b>{@code quiet} は「画面を待たせない読み直し」</b>（AI 取得の様子見が 3 秒ごとに使う）。
+ * 静かな読み直しでは、</p>
+ * <ul>
+ *   <li>{@code loading} を立てない（立てると表が「読み込んでいます…」に差し替わり、
+ *       3 秒ごとに画面がちらつく。実際に起きた。2026-09-27）</li>
+ *   <li>行の**同一性を保って**取得状態だけを入れ替える（表を組み直さない）</li>
+ *   <li>失敗しても黙って見送る（次の周期でまた試す。利用者の操作ではないので邪魔しない）</li>
+ * </ul>
+ */
+async function loadWords(options: { quiet?: boolean } = {}): Promise<void> {
+  const quiet = options.quiet === true
+  if (!quiet) {
+    loading.value = true
+    error.value = ''
+  }
   try {
     const response = await searchJpnWords({
-      keyword: filters.keyword.trim() === '' ? undefined : filters.keyword.trim(),
-      jlpt: filters.jlpt === '' ? undefined : filters.jlpt,
-      part: filters.part.trim() === '' ? undefined : filters.part.trim(),
-      book: filters.book === '' ? undefined : filters.book,
-      // API が受け取る分類は 1 つだけなので、送るのは From（To は画面の入力だけ）
-      category: filters.categoryFrom === '' ? undefined : filters.categoryFrom,
+      ...filterParams(),
       page: page.value,
       size: size.value
     })
-    words.value = response.data.items
+    words.value = quiet ? mergeWordStates(words.value, response.data.items) : response.data.items
     totalElements.value = response.data.totalElements
     totalPages.value = Math.max(1, response.data.totalPages)
-    collectFilterOptions(response.data.items)
+    if (!quiet) {
+      collectFilterOptions(response.data.items)
+    }
   } catch (caught) {
-    error.value = messageOf(caught, '単語の一覧を取得できませんでした。')
-    words.value = []
-    totalElements.value = 0
-    totalPages.value = 1
+    if (!quiet) {
+      error.value = messageOf(caught, '単語の一覧を取得できませんでした。')
+      words.value = []
+      totalElements.value = 0
+      totalPages.value = 1
+    }
   } finally {
-    loading.value = false
+    if (!quiet) {
+      loading.value = false
+    }
   }
+}
+
+/**
+ * 静かな読み直し用に、**行の同一性を保ったまま**取得状態（と詳細の件数）だけを差し替える。
+ *
+ * <p>行のオブジェクトを作り直すと、たとえ中身が同じでも表全体が描き直されてちらつく。
+ * 同じ語 ID の行は使い回し、変わった項目だけを写す。</p>
+ */
+function mergeWordStates(current: JpnWord[], fetched: JpnWord[]): JpnWord[] {
+  const byId = new Map(current.map((row) => [row.wordId, row]))
+  return fetched.map((row) => {
+    const existing = byId.get(row.wordId)
+    if (!existing) {
+      return row
+    }
+    existing.aiState = row.aiState
+    existing.detailCounts = row.detailCounts
+    return existing
+  })
 }
 
 /** 【検索】条件を適用して 1 ページ目から読み直す。 */
 function search(): void {
-  page.value = 1
-  void loadWords()
-}
-
-/** 【リセット】条件を空にして 1 ページ目から読み直す。 */
-function reset(): void {
-  filters.keyword = ''
-  filters.jlpt = ''
-  filters.part = ''
-  filters.book = ''
-  filters.categoryFrom = ''
-  filters.categoryTo = ''
   page.value = 1
   void loadWords()
 }
@@ -231,426 +283,399 @@ async function removeWord(row: JpnWord): Promise<void> {
   }
 }
 
-/* ---------- 単語の登録・修正ダイアログ ---------- */
 
 const wordDialogOpen = ref(false)
+const createOpen = ref(false)
 const editingId = ref<number | null>(null)
-/** 修正時に「表示していた version」（楽観ロック用にそのまま送る）。 */
-const editingVersion = ref<number | null>(null)
+const registerStore = useJpnRegisterStore()
 
-const wordForm = reactive({
-  word: '',
-  reading: '',
-  jlptLevel: '',
-  partOfSpeech: '',
-  stateCode: 'ACTIVE' as WordState,
-  note: ''
-})
-
-const fieldErrors = reactive<Record<string, string>>({})
-
-function clearErrors(errors: Record<string, string>): void {
-  for (const key of Object.keys(errors)) {
-    delete errors[key]
+function knownBooks(rows: JpnWord[]): DemoBook[] {
+  const byBook = new Map<string, Map<string, number>>()
+  for (const row of rows) {
+    if (row.book === null || row.category === null) continue
+    const units = byBook.get(row.book) ?? new Map<string, number>()
+    units.set(row.category, (units.get(row.category) ?? 0) + 1)
+    byBook.set(row.book, units)
   }
+  return [...byBook.entries()].map(([name, units]) => {
+    const list: DemoBookUnit[] = [...units.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([unit, count]) => ({ name: unit, count, capacity: Math.max(count, 20) }))
+    return { id: 'book-' + name, name, unitSize: Math.max(1, ...list.map(unit => unit.count), 20), units: list, note: '' }
+  })
 }
-
-/** フォームに初期値を入れる（row が null なら新規）。 */
-function fillForm(row: JpnWord | null): void {
-  wordForm.word = row?.word ?? ''
-  wordForm.reading = row?.reading ?? ''
-  wordForm.jlptLevel = row?.jlptLevel ?? ''
-  wordForm.partOfSpeech = row?.partOfSpeech ?? ''
-  wordForm.stateCode = row?.stateCode === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE'
-  wordForm.note = row?.note ?? ''
-}
-
 function openCreate(): void {
   editingId.value = null
-  editingVersion.value = null
-  fillForm(null)
-  clearErrors(fieldErrors)
-  wordDialogOpen.value = true
+  registerStore.prepare({ books: knownBooks(words.value), knownHeadings: words.value.map(row => row.word) })
+  createOpen.value = true
 }
-
+function closeCreate(): void { createOpen.value = false }
+async function afterCreate(): Promise<void> {
+  createOpen.value = false
+  await loadWords()
+  toast.success('単語を登録しました。')
+}
 function openEdit(row: JpnWord): void {
   editingId.value = row.wordId
-  editingVersion.value = row.version
-  fillForm(row)
-  clearErrors(fieldErrors)
   wordDialogOpen.value = true
 }
-
-function closeWordDialog(): void {
-  wordDialogOpen.value = false
-  clearErrors(fieldErrors)
+/**
+ * 一覧の【詳細】（目のアイコン）は**別ウィンドウ**で学習画面を開く（自動最大化）。
+ *
+ * 2.0 の `js/japanese_word.js` が `japanese_test_a.jsp?wordId=…&view=detail` を
+ * `window.open` で開いていたのと同じ形（利用者の指示。2026-09-25）。
+ * データは開いた窓が取り直すので、一覧はここで API を呼ばない。
+ */
+function openDetail(row: JpnWord): void {
+  openJpnWordStudyPopup(row.wordId)
 }
 
-async function saveWord(): Promise<void> {
-  if (busy.value) return
-  clearErrors(fieldErrors)
+/* ---------- AI 取得の履歴（取得状態のタグから開く） ---------- */
 
-  const word = wordForm.word.trim()
-  if (word === '') {
-    fieldErrors.word = '見出し語を入力してください。'
-  }
-  if (Object.keys(fieldErrors).length > 0) {
-    toast.warning('入力内容を確認してください。')
-    return
-  }
-
-  busy.value = true
-  try {
-    const body: JpnWordSave = {
-      word,
-      reading: wordForm.reading.trim() === '' ? undefined : wordForm.reading.trim(),
-      jlptLevel: wordForm.jlptLevel === '' ? undefined : wordForm.jlptLevel,
-      partOfSpeech: wordForm.partOfSpeech.trim() === '' ? undefined : wordForm.partOfSpeech.trim(),
-      stateCode: wordForm.stateCode,
-      note: wordForm.note.trim() === '' ? undefined : wordForm.note.trim(),
-      version: editingVersion.value ?? undefined
-    }
-    const response = editingId.value === null
-      ? await createJpnWord(body)
-      : await updateJpnWord(editingId.value, body)
-    toast.success(response.data.message)
-    wordDialogOpen.value = false
-    await loadWords()
-  } catch (caught) {
-    toast.danger(messageOf(caught, '単語を保存できませんでした。'))
-  } finally {
-    busy.value = false
-  }
-}
-
-/* ---------- 単語の詳細ダイアログ ---------- */
-
-type SenseItem = NonNullable<JpnWordDetail['detail']['senses']>[number]
-type ExampleItem = NonNullable<JpnWordDetail['detail']['examples']>[number]
-type PronunciationItem = NonNullable<JpnWordDetail['detail']['pronunciations']>[number]
-type CollocationItem = NonNullable<JpnWordDetail['detail']['collocations']>[number]
-type RelatedWordItem = NonNullable<JpnWordDetail['detail']['relatedWords']>[number]
-type CautionItem = NonNullable<JpnWordDetail['detail']['cautions']>[number]
-
-/** 詳細ダイアログのタブ。2.0 の詳細（本体 ＋ 6 子テーブル）を 1 つずつ見せる。 */
-interface DetailTab {
-  /** 中身の識別子（`data-jp-detail-tab` / `data-jp-detail-panel` に使う）。 */
-  key: string
-  label: string
-  /** タブの id（中身の `aria-labelledby` から指す）。 */
-  tabId: string
-  /** 中身の id（タブの `aria-controls` から指す）。 */
-  panelId: string
-}
-
-const DETAIL_TABS: DetailTab[] = [
-  { key: 'collections', label: '収録', tabId: 'jpDetailTab-collections', panelId: 'jpDetailPanel-collections' },
-  { key: 'basic', label: '基本情報', tabId: 'jpDetailTab-basic', panelId: 'jpDetailPanel-basic' },
-  { key: 'senses', label: '語義', tabId: 'jpDetailTab-senses', panelId: 'jpDetailPanel-senses' },
-  { key: 'examples', label: '例文', tabId: 'jpDetailTab-examples', panelId: 'jpDetailPanel-examples' },
-  { key: 'pronunciations', label: '発音', tabId: 'jpDetailTab-pronunciations', panelId: 'jpDetailPanel-pronunciations' },
-  { key: 'collocations', label: 'コロケーション', tabId: 'jpDetailTab-collocations', panelId: 'jpDetailPanel-collocations' },
-  { key: 'relatedWords', label: '関連語', tabId: 'jpDetailTab-relatedWords', panelId: 'jpDetailPanel-relatedWords' },
-  { key: 'cautions', label: '使用注意', tabId: 'jpDetailTab-cautions', panelId: 'jpDetailPanel-cautions' },
-  { key: 'questions', label: '問題', tabId: 'jpDetailTab-questions', panelId: 'jpDetailPanel-questions' },
-]
+/** 履歴ダイアログを出しているか。 */
+const historyOpen = ref(false)
+/** 履歴の対象（語と区画）。 */
+const historyTarget = ref<{ wordId: number; section: JpnAiStateKey } | null>(null)
 
 /**
- * 「項目（ラベルと値）」の一覧に出せる形。
- * 画面はこの形に落としてから描くので、表示の抜け（＝項目の書き忘れ）が起きにくい。
+ * 「取得済」のタグから、その区画の履歴を開く（使う版を選べる）。
+ *
+ * 2.0 の英語学習（`word.jsp`）の「詳細情報取得履歴」と同じ入口（あちらは行の履歴ボタン、
+ * こちらは取得済のタグ）。
  */
-type DetailFieldValue = string | number | boolean | null | undefined
-
-/**
- * 値を表示用の文字列にする関数（真偽値・区分コード・日時の日本語表記）。
- * 呼ぶ側（`fieldValue`）が「値が入っている」ことを確かめてから渡すので、引数は string。
- */
-type FieldFormatter = (value: string) => string
-
-interface DetailField {
-  label: string
-  value: DetailFieldValue
-  /** 真偽値や区分コードの日本語表記（未指定ならそのまま文字にする）。 */
-  format?: FieldFormatter
+function openHistory(row: JpnWord, section: JpnAiStateKey): void {
+  if (!isAiStateDone(aiStateOf(row, section))) return
+  historyTarget.value = { wordId: row.wordId, section }
+  historyOpen.value = true
 }
 
-/** 1 つの項目を作る。 */
-function detailField(label: string, value: DetailFieldValue, format?: FieldFormatter): DetailField {
-  return { label, value, format }
+function closeHistory(): void {
+  historyOpen.value = false
+  historyTarget.value = null
 }
 
-/** 未入力の項目の表示（2.0 の画面と同じ「—」）。 */
-const EMPTY_VALUE = '—'
-
-const detailOpen = ref(false)
-const detailLoading = ref(false)
-const detailError = ref('')
-const detail = ref<JpnWordDetailResult | null>(null)
-
-/** 選択中のタブ（key）。開くたびに先頭（収録）へ戻す。 */
-const activeDetailTab = ref<string>(DETAIL_TABS[0]!.key)
-
-const detailWord = computed<JpnWord | null>(() => detail.value?.word ?? null)
-const detailCollections = computed<JpnCollection[]>(() => detail.value?.collections ?? [])
-const detailQuestions = computed<JpnWordQuestion[]>(() => detail.value?.questions ?? [])
-/** 詳細そのもの（詳細ID・内容版数・AI プロバイダなどを持つ行）。未取得なら null。 */
-const detailView = computed<JpnWordDetail | null>(() => detail.value?.detail ?? null)
-/** 詳細（語義・例文・発音・コロケーション・関連語・使用注意）本体。未取得なら null。 */
-const detailBody = computed<JpnWordDetail['detail'] | null>(() => detailView.value?.detail ?? null)
-
-const senses = computed<SenseItem[]>(() => detailBody.value?.senses ?? [])
-const examples = computed<ExampleItem[]>(() => detailBody.value?.examples ?? [])
-const pronunciations = computed<PronunciationItem[]>(() => detailBody.value?.pronunciations ?? [])
-const collocations = computed<CollocationItem[]>(() => detailBody.value?.collocations ?? [])
-const relatedWords = computed<RelatedWordItem[]>(() => detailBody.value?.relatedWords ?? [])
-const cautions = computed<CautionItem[]>(() => detailBody.value?.cautions ?? [])
-
-/* --- 2.0 の列名をそのままラベルにした項目（詳細ダイアログに全部出す） --- */
-
-/** 単語そのものの項目（母表）。詳細がまだ無くても出す。 */
-function basicWordFields(row: JpnWord): DetailField[] {
-  return [
-    detailField('見出し語', row.word),
-    detailField('読み', row.reading),
-    detailField('JLPTレベル', row.jlptLevel),
-    detailField('品詞', row.partOfSpeech),
-    detailField('状態', row.stateCode, (value) => STATE_LABELS[value as WordState] ?? String(value)),
-    detailField('備考', row.note),
-    detailField('バージョン', row.version)
-  ]
-}
-
-/** 学習状況（アカウントごと）。2.0 の 単語情報管理でも語ごとに見ていた。 */
-function basicStudyFields(row: JpnWord): DetailField[] {
-  return [
-    detailField('学習状態', row.learnState, (value) => learnStateLabel(value as LearnState)),
-    detailField('習得度', `${row.mastery}%`),
-    detailField('回答数', row.answeredCount),
-    detailField('正解数', row.correctCount),
-    detailField('お気に入り', row.favorite, yesNo),
-    detailField('習得済', row.learned, yesNo),
-    detailField('最終学習', row.lastStudiedAt, dateTimeLabel),
-    detailField('次回復習', row.nextReviewAt, dateTimeLabel)
-  ]
-}
-
-/** 詳細の取得情報（2.0 の STY_日本語単語詳細情報 本体の列のうち、メタ情報）。 */
-function basicMetaFields(view: JpnWordDetail): DetailField[] {
-  return [
-    detailField('詳細ID', view.detailId),
-    detailField('内容版数', view.contentVersion),
-    detailField('AIプロバイダ', view.aiProvider),
-    detailField('AIモデル', view.aiModel),
-    detailField('取得日時', view.fetchedAt, dateTimeLabel),
-    detailField('構造化スキーマ版', view.detail.structuredSchemaVersion),
-    detailField('手動修正済', view.detail.manuallyCorrected, yesNo)
-  ]
-}
-
-/** AI が書いた語の説明（2.0 の詳細情報 本体の列）。 */
-function basicDescriptionFields(body: JpnWordDetail['detail']): DetailField[] {
-  return [
-    detailField('詳細のJLPTレベル', body.jlptLevel),
-    detailField('詳細の品詞', body.partOfSpeech),
-    detailField('活用種類', body.conjugation),
-    detailField('自他区分', body.transitivity),
-    detailField('重要度', body.importance),
-    detailField('代表中国語意味', body.chineseMeaning),
-    detailField('日本語説明', body.descriptionJa),
-    detailField('中国語説明', body.descriptionZh)
-  ]
-}
-
-/** 収録（教材のどこに載っているか）。 */
-function collectionFields(collection: JpnCollection): DetailField[] {
-  return [
-    detailField('書籍', collection.book),
-    detailField('分類', collection.category),
-    detailField('レベル', collection.level),
-    detailField('単語SEQ', collection.wordSeq),
-    detailField('掲載見出し語', collection.listedWord),
-    detailField('掲載読み', collection.listedReading),
-    detailField('掲載品詞', collection.listedPartOfSpeech),
-    detailField('掲載中国語意味', collection.chineseMeaning)
-  ]
-}
-
-/** 語義（2.0 の STY_日本語単語詳細_語義情報）。 */
-function senseFields(sense: SenseItem): DetailField[] {
-  return [
-    detailField('意味（日本語）', sense.japanese),
-    detailField('意味（中国語）', sense.chinese),
-    detailField('使用場面', sense.context),
-    detailField('文体', sense.style),
-    detailField('補足説明（日本語）', sense.noteJapanese),
-    detailField('補足説明（中国語）', sense.noteChinese)
-  ]
-}
-
-/** 例文。 */
-function exampleFields(example: ExampleItem): DetailField[] {
-  return [
-    detailField('例文（日本語）', example.japanese),
-    detailField('例文読み', example.reading),
-    detailField('例文（中国語）', example.chinese),
-    detailField('文脈意味（日本語）', example.contextJapanese),
-    detailField('文脈意味（中国語）', example.contextChinese),
-    detailField('出典', example.source),
-    detailField('語義番号', example.senseNumber)
-  ]
-}
-
-/** 発音。 */
-function pronunciationFields(pronunciation: PronunciationItem): DetailField[] {
-  return [
-    detailField('読み', pronunciation.reading),
-    detailField('アクセント表記', pronunciation.accentNotation),
-    detailField('アクセント型', pronunciation.accentType),
-    detailField('モーラ数', pronunciation.moraCount),
-    detailField('音声URL', pronunciation.audioUrl),
-    detailField('音声プロバイダ', pronunciation.audioProvider)
-  ]
-}
-
-/** コロケーション（よく使う言い回し）。 */
-function collocationFields(collocation: CollocationItem): DetailField[] {
-  return [
-    detailField('表現', collocation.expression),
-    detailField('読み', collocation.reading),
-    detailField('中国語', collocation.chinese),
-    detailField('例文（日本語）', collocation.exampleJapanese),
-    detailField('例文（中国語）', collocation.exampleChinese)
-  ]
-}
-
-/** 関連語（類義語・対義語・間違えやすい語）。 */
-function relatedWordFields(related: RelatedWordItem): DetailField[] {
-  return [
-    detailField('見出し', related.heading),
-    detailField('読み', related.reading),
-    detailField('中国語', related.chinese),
-    detailField('違い（日本語）', related.differenceJapanese),
-    detailField('違い（中国語）', related.differenceChinese),
-    detailField('E問題の候補', related.eCandidate, yesNo)
-  ]
-}
-
-/** 使用注意。 */
-function cautionFields(caution: CautionItem): DetailField[] {
-  return [
-    detailField('注意の種類', caution.noteType),
-    detailField('注意（日本語）', caution.japanese),
-    detailField('注意（中国語）', caution.chinese),
-    detailField('誤用例', caution.wrongExample),
-    detailField('正用例', caution.correctExample)
-  ]
-}
-
-/**
- * 問題（C〜E）。
- * 2.0 の 単語情報管理 は問題の有無だけだったが、2.1 の詳細 API は語に紐づく問題を返すので、
- * 選択肢の数まで見せる（問題の文面・正解は 2.0 のテスト実施画面と同じ項目）。
- */
-function questionFields(question: JpnWordQuestion): DetailField[] {
-  return [
-    detailField('問題番号', question.questionNo),
-    detailField('問題種別', question.questionType, questionTypeLabel),
-    detailField('問題文（日本語）', question.questionText),
-    detailField('正解値', question.correctValue),
-    detailField('選択肢', `${question.choiceCount} 件`)
-  ]
-}
-
-/** タブの件数（数えられる中身を持つタブだけ。基本情報は該当なし＝バッジを付けない）。 */
-function detailTabCount(key: string): number | null {
-  switch (key) {
-    case 'collections':
-      return detailCollections.value.length
-    case 'senses':
-      return senses.value.length
-    case 'examples':
-      return examples.value.length
-    case 'pronunciations':
-      return pronunciations.value.length
-    case 'collocations':
-      return collocations.value.length
-    case 'relatedWords':
-      return relatedWords.value.length
-    case 'cautions':
-      return cautions.value.length
-    case 'questions':
-      return detailQuestions.value.length
-    default:
-      return null
-  }
-}
-
-/** 項目の値を表示用の文字列にする（null・空文字は「—」、真偽値や区分は日本語）。 */
-function fieldValue(field: DetailField): string {
-  const value = field.value
-  if (value === null || value === undefined || value === '') {
-    return EMPTY_VALUE
-  }
-  const text = field.format ? field.format(String(value)) : String(value)
-  return text === '' ? EMPTY_VALUE : text
-}
-
-/** はい／いいえ（2.0 の真偽値の列は「はい」「いいえ」で見せていた）。 */
-function yesNo(value: DetailFieldValue): string {
-  return value === true || value === 'true' ? 'はい' : 'いいえ'
-}
-
-async function openDetail(row: JpnWord): Promise<void> {
-  detailOpen.value = true
-  detailLoading.value = true
-  detailError.value = ''
-  detail.value = null
-  // 前の単語で見ていたタブを引き継がない（毎回「収録」から見せる）
-  activeDetailTab.value = DETAIL_TABS[0]!.key
-  try {
-    const response = await fetchJpnWord(row.wordId)
-    detail.value = response.data
-  } catch (caught) {
-    detailError.value = messageOf(caught, '単語の詳細を取得できませんでした。')
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-function closeDetail(): void {
-  detailOpen.value = false
-  detail.value = null
-  detailError.value = ''
-}
-
-function selectDetailTab(key: string): void {
-  activeDetailTab.value = key
-}
-
-
-/* ---------- 表示の小物 ---------- */
-
-/** 学習状態のバッジ（API の定義をそのまま使う）。 */
-function learnStateBadge(state: LearnState): string {
-  return LEARN_STATE_BADGES[state] ?? 'badge--neutral'
-}
-
-function learnStateLabel(state: LearnState): string {
-  return LEARN_STATE_LABELS[state] ?? state
-}
-
-/** 問題種別の説明（A〜E）。未知の種別はコードのまま出す。 */
-function questionTypeLabel(type: string): string {
-  return QUESTION_TYPE_LABELS[type] ?? type
-}
-
-function dateTimeLabel(iso: string | null): string {
-  return iso === null ? '—' : formatIsoDateTime(iso)
+/** 版を切り替えたら一覧を読み直す（取得状態と詳細情報件数が変わる）。 */
+async function afterHistoryChange(): Promise<void> {
+  await loadWords()
 }
 
 onMounted(() => {
   void loadWords()
+  void loadAiLimits()
+  void loadBatchStates()
 })
+
+// 受付けた取得の様子見は、画面を離れたら止める（裏で回し続けない）
+onUnmounted(() => {
+  stopAcquireWatch()
+})
+
+/**
+ * 取得の上限（設定ページの「1 回の最大単語数」）を読む。
+ *
+ * <p>読めなければ {@code aiLimitsLoaded} は false のまま＝AI 取得のボタンは無効。
+ * **画面側の既定値へは落とさない**（設定漏れのまま課金しない）。</p>
+ */
+async function loadAiLimits(): Promise<void> {
+  try {
+    const response = await fetchJpnAiLimits()
+    const data = response.data
+    if (response.success && data && typeof data === 'object') {
+      aiLimits.value = data
+      aiLimitsLoaded.value = aiLimitsReady.value
+    }
+  } catch {
+    // 設定が読めない（未設定・設定ページの値が不正など）。実行させない
+    aiLimits.value = {}
+    aiLimitsLoaded.value = false
+  }
+}
+
+/* ---------- AI 取得（batC41〜batC44） ---------- */
+
+/**
+ * AI 取得の窓に出す内容（開いているときだけ入る）。
+ *
+ * <p>押した瞬間には走らせず、まず窓を出す。窓では**どの情報を取るか**（A・B／C／D／E）と、
+ * **取得済みをどうするか**（スキップ／すべて再取得）を決める（利用者の指示 2026-09-26。
+ * 参照は 2.0 の英語学習の単語情報管理 `word.jsp` の窓）。どちらを選ぶと何語が対象になるかは、
+ * 窓を出す前に**区画ごとに**数えて渡す（AI を呼ぶ前に見せる）。</p>
+ */
+const fetchPlans = ref<Record<JpnAiStateKey, { skip: JpnAcquirePlan; all: JpnAcquirePlan }> | null>(null)
+
+/** 窓に出す「何が対象か」（一覧全体か、行の 1 語か）。 */
+const fetchTargetLabel = ref('')
+
+/**
+ * 取得区分ごとの 1 回の上限（**設定ページの「1 回の最大単語数」だけ**が上限。API から取る）。
+ *
+ * <p>画面に既定値を持たない（利用者の指示 2026-09-27「把这个限制去掉，只使用设定页面的
+ * 「1回の最大単語数」来进行限制」）。読めないときは**実行させない**（ボタンを無効にし、
+ * 理由を知らせる）。コード側の既定値へ落とすと、設定漏れに気づけないまま課金されうる。</p>
+ */
+const aiLimits = ref<JpnAiRunLimits>({})
+const aiLimitsLoaded = ref(false)
+
+/** その区画の 1 回の上限（設定値）。読めていなければ null。 */
+function limitOf(key: JpnAiStateKey): number | null {
+  const limit = aiLimits.value[acquireActionOf(key).kind]?.limit
+  return typeof limit === 'number' && limit > 0 ? limit : null
+}
+
+/**
+ * AI 取得の 4 バッチ（batC41〜batC44）の状態（検索条件の右上に出す）。
+ *
+ * <p>状態は**批次一覧と同じ入口**（`GET /api/admin/batch/tasks`）から取る。別の入口を作ると
+ * バッチ一覧の表示と食い違うため。**読めないときは何も出さない**（一覧も AI 取得も使える）。</p>
+ */
+const batchTasks = ref<BatchTaskRow[]>([])
+
+const batchBadges = computed(() => {
+  if (batchTasks.value.length === 0) {
+    return []
+  }
+  return JPN_ACQUIRE_ACTIONS.map((action) => jpnAiBatchBadgeOf(
+    action,
+    batchTasks.value.find((row) => row.taskCode === action.batchCode),
+    limitOf(action.key)
+  ))
+})
+
+/** バッチの状態を読む（失敗しても画面は壊さない＝バッジを出さないだけ）。 */
+async function loadBatchStates(): Promise<void> {
+  try {
+    const response = await fetchBatchTasks()
+    batchTasks.value = response.data?.rows ?? []
+  } catch {
+    batchTasks.value = []
+  }
+}
+
+/** 4 区画すべての上限が読めているか（読めていなければ AI 取得を実行させない）。 */
+const aiLimitsReady = computed(() => ACQUIRE_ACTIONS.every((action) => limitOf(action.key) !== null))
+
+/** 上限が読めないときの知らせ（ボタンの title と、押されたときのトーストで同じ文面を使う）。 */
+const AI_LIMIT_MISSING_MESSAGE =
+  '設定ページの「1 回の最大単語数」が読めないため、AI 取得を実行できません。設定を確認してください。'
+
+/**
+ * 対象（1 語）について 4 区画ぶんの計画を作って窓を出す（**行の【AI 取得】**）。
+ *
+ * <p>1 語なら問い合わせる必要が無いので、画面側で判定する（{@link acquirePlan}）。
+ * 右上の【AI 取得】は対象が検索条件に一致する語全体なので、サーバーが選ぶ（{@link openAcquire}）。</p>
+ */
+function openAcquireFor(rows: readonly JpnWord[], label: string): void {
+  const limits = ACQUIRE_ACTIONS.map((action) => limitOf(action.key))
+  if (limits.some((limit) => limit === null)) {
+    // 設定が読めないまま実行すると、上限が分からない（＝何語受付けるか決められない）
+    toast.danger(AI_LIMIT_MISSING_MESSAGE)
+    return
+  }
+  fetchTargetLabel.value = label
+  fetchPlans.value = Object.fromEntries(ACQUIRE_ACTIONS.map((action, index) => [
+    action.key,
+    {
+      skip: acquirePlan(rows, action.key, true, limits[index]!),
+      all: acquirePlan(rows, action.key, false, limits[index]!)
+    }
+  ])) as Record<JpnAiStateKey, { skip: JpnAcquirePlan; all: JpnAcquirePlan }>
+}
+
+/**
+ * 右上の【AI 取得】: **検索条件に一致する語**（ページは問わない）をまとめて取る。
+ *
+ * <p>対象の選定はサーバー（`/words/ai-targets`）が行う。一覧と同じ絞り込み・同じ並びなので、
+ * 「いま絞り込んで見えている語の集まり」から表示順に選ばれる（2026-09-27。以前は当ページだけ
+ * だった）。4 つの取得区分 × スキップ／すべて再取得の 8 通りをまとめて取る。
+ * **上限は設定値だけ**（読めなければ実行しない）。</p>
+ */
+async function openAcquire(): Promise<void> {
+  const limits = ACQUIRE_ACTIONS.map((action) => limitOf(action.key))
+  if (limits.some((limit) => limit === null)) {
+    toast.danger(AI_LIMIT_MISSING_MESSAGE)
+    return
+  }
+  plansLoading.value = true
+  try {
+    const targets = await Promise.all(ACQUIRE_ACTIONS.flatMap((action, index) => [
+      fetchJpnAiTargets({ ...filterParams(), kind: action.kind, skipAcquired: true, limit: limits[index]! }),
+      fetchJpnAiTargets({ ...filterParams(), kind: action.kind, skipAcquired: false, limit: limits[index]! })
+    ]))
+    const plans = {} as Record<JpnAiStateKey, { skip: JpnAcquirePlan; all: JpnAcquirePlan }>
+    ACQUIRE_ACTIONS.forEach((action, index) => {
+      const skip = targets[index * 2]!.data
+      const all = targets[index * 2 + 1]!.data
+      plans[action.key] = {
+        skip: planOf(skip, skip.candidates),
+        all: planOf(all, all.total)
+      }
+    })
+    fetchTargetLabel.value = `検索条件に一致する ${plans.AB.all.total} 語`
+    fetchPlans.value = plans
+  } catch (caught) {
+    toast.danger(messageOf(caught, 'AI 取得の対象を取得できませんでした。'))
+  } finally {
+    plansLoading.value = false
+  }
+}
+
+/** サーバーが選んだ対象を、窓が使う計画の形にする。 */
+function planOf(targets: JpnAiTargets, candidates: number): JpnAcquirePlan {
+  return {
+    wordIds: targets.wordIds,
+    total: targets.total,
+    acquired: targets.acquired,
+    targets: targets.wordIds.length,
+    skipped: Math.max(0, targets.total - candidates),
+    overLimit: targets.overLimit,
+    limit: targets.limit
+  }
+}
+
+/** 行の【AI 取得】: その 1 語だけを取る（ほかの語は対象にしない）。 */
+function openRowAcquire(row: JpnWord): void {
+  openAcquireFor([row], `この単語（${row.word}）`)
+}
+
+/** 窓を閉じる（何も実行しない）。 */
+function closeAcquire(): void {
+  fetchPlans.value = null
+}
+
+/**
+ * 窓で選んだ内容で実行する。
+ *
+ * @param section      どの情報を取るか（A・B／C／D／E）
+ * @param skipAcquired true なら取得済み・取得中を外した語だけを渡す
+ */
+async function confirmAcquire(section: JpnAiStateKey, skipAcquired: boolean): Promise<void> {
+  const plans = fetchPlans.value
+  if (plans === null) return
+  const plan = skipAcquired ? plans[section].skip : plans[section].all
+  const action = acquireActionOf(section)
+  fetchPlans.value = null
+  await acquire(action.kind, action.label, plan.wordIds, skipAcquired)
+}
+
+/**
+ * 選んだ語を AI に取らせる（**受付だけ**。実行はバックエンドの働き手）。
+ *
+ * <p>2026-09-27 に非同期へ変更: 受付の API は {@code QUEUED} を積んで**すぐ返る**ので、画面は
+ * 結果を待たない。「受付しました」を知らせたあと、{@link ACQUIRE_POLL_INTERVAL_MS} ごとに
+ * 一覧を読み直し、受付けた語の「取得中（{@code QUEUED} / {@code RUNNING}）」が消えたら
+ * 結果（成功・失敗の件数）を知らせる（{@link watchAcquired}）。</p>
+ *
+ * <p>**取得済みをスキップ**して 1 語も残らなかったときは、受付もしないでそう知らせる
+ * （積んでも新しい内容は作れないし、課金だけ増えるため）。</p>
+ */
+async function acquire(kind: JpnAiKind, label: string, wordIds: number[], skipAcquired: boolean): Promise<void> {
+  if (wordIds.length === 0) {
+    toast.info(skipAcquired
+      ? `【${label}】取得済みを除くと対象がありません（すべて取得済みです）。`
+      : `【${label}】表示中の単語がありません。先に検索してください。`)
+    return
+  }
+  acquireRunning.value = kind
+  try {
+    const response = await runJpnWordAi(kind, wordIds)
+    // 受付だけ（実行はバックエンド）。何件受付けたか・何件が実行中かを知らせる。
+    // 文面は画面の言い方（「詳細情報（A・B）」など）に合わせる（API は区分コードしか返さない）
+    const accepted = response.data?.accepted ?? wordIds.length
+    const reused = response.data?.reused ?? 0
+    toast.success(`【${label}】受付けました（受付 ${accepted} 件 / 実行中 ${reused} 件）。`
+      + 'バックグラウンドで取得します。')
+    // 受付で状態が変わる（待ち・取得中になる）ので、すぐ 1 回読み直す。
+    // **静かに**読み直す（受付の直後に表を「読み込んでいます…」へ差し替えてちらつかせない）
+    await loadWords({ quiet: true })
+    // 進み具合は受付が返した生成 ID で見る（一覧の「取得状態」は取り直しの判定に使えない）
+    watchAcquired(kind, label, response.data?.generationIds ?? [])
+  } catch (caught) {
+    toast.danger(messageOf(caught, `【${label}】の受付に失敗しました。`))
+  } finally {
+    acquireRunning.value = null
+  }
+}
+
+/* ---------- 受付けた取得の様子見（非同期なので結果は後から来る） ---------- */
+
+/** 一覧を読み直す間隔（ミリ秒）。 */
+const ACQUIRE_POLL_INTERVAL_MS = 3_000
+
+/** 様子見をやめるまでの回数（3 秒 × 600 ＝ 30 分。これ以上は実行中でも知らせない）。 */
+const ACQUIRE_POLL_MAX_TICKS = 600
+
+/** いま様子を見ている取得（受付けた行の生成 ID と、結果を知らせるための情報）。 */
+const acquireWatching = ref<{ kind: JpnAiKind; label: string; generationIds: number[] } | null>(null)
+
+/** 様子見のタイマー（1 つだけ回す）。 */
+let acquirePollTimer: number | null = null
+
+/** 様子見の回数（上限で打ち切るため）。 */
+let acquirePollTicks = 0
+
+/** 様子見を止める。 */
+function stopAcquireWatch(): void {
+  if (acquirePollTimer !== null) {
+    window.clearInterval(acquirePollTimer)
+    acquirePollTimer = null
+  }
+  acquireWatching.value = null
+  acquirePollTicks = 0
+}
+
+/**
+ * 受付けた取得の状態が落ち着くまで、進み具合を見に行く。
+ *
+ * <p>止める条件は 3 つ: 未完了（{@code pending}）が 0 になった／受付けた ID が分からない
+ * （古いサーバーなど）／回数の上限に達した。**一覧の「取得状態」では判定しない**:
+ * あの列は「一度でも成功したか」を優先するので、取り直しでは最初から「取得済」に見えてしまう
+ * （2026-09-27 のレビューで判明）。</p>
+ */
+function watchAcquired(kind: JpnAiKind, label: string, generationIds: number[]): void {
+  stopAcquireWatch()
+  acquireWatching.value = { kind, label, generationIds }
+  acquirePollTimer = window.setInterval(() => { void pollAcquired() }, ACQUIRE_POLL_INTERVAL_MS)
+}
+
+/** 1 回ぶんの様子見（進み具合を見て、終わっていれば知らせる）。 */
+async function pollAcquired(): Promise<void> {
+  const watching = acquireWatching.value
+  if (watching === null) {
+    stopAcquireWatch()
+    return
+  }
+  acquirePollTicks += 1
+  try {
+    // 進み具合（生の状態）と、画面の「取得中」表示のための一覧を取り直す。
+    // 一覧は**静かに**読み直す（loading を立てない＝表を組み直さない＝ちらつかない）
+    const [progress] = await Promise.all([
+      fetchJpnAiProgress(watching.generationIds),
+      loadWords({ quiet: true })
+    ])
+    const { pending, succeeded, failed } = progress.data
+    if (pending > 0) {
+      if (acquirePollTicks < ACQUIRE_POLL_MAX_TICKS) {
+        return
+      }
+      // 実行中のまま上限に達した（長い・滞留している）。ここで打ち切って、あとは利用者に任せる
+      toast.warning(`【${watching.label}】まだ取得中です。【再読み込み】で状態を確かめてください。`)
+      stopAcquireWatch()
+      return
+    }
+    // 落ち着いた。件数を知らせる
+    const message = `【${watching.label}】取得が終わりました（成功 ${succeeded} / 失敗 ${failed}）。`
+    if (failed > 0) {
+      toast.warning(message)
+    } else {
+      toast.success(message)
+    }
+    stopAcquireWatch()
+  } catch (caught) {
+    // 進み具合が読めない（通信断・古いサーバー）。様子見は止める（黙って回り続けない）
+    toast.danger(messageOf(caught, `【${watching.label}】の進み具合を確認できませんでした。`))
+    stopAcquireWatch()
+  }
+}
 </script>
 
 <template>
@@ -659,6 +684,19 @@ onMounted(() => {
     <div class="search-panel">
       <div class="search-panel__head">
         <h3 class="search-panel__title"><AppIcon name="search" size="sm" /> 検索条件</h3>
+        <!-- AI 取得の 4 バッチ（batC41〜batC44）の状態。批次一覧と同じ入口から取るので、
+             どのバッチが動いているか・最後は成功したかがここで分かる（利用者の指示 2026-09-27）。
+             状態が読めないときは出さない（画面は使える） -->
+        <div v-if="batchBadges.length > 0" class="jp-batch-states" data-jp-batch-states>
+          <span
+            v-for="badge in batchBadges"
+            :key="badge.batchCode"
+            class="badge jp-batch-states__item"
+            :class="`badge--${badge.tone}`"
+            :data-jp-batch-state="badge.batchCode"
+            :title="badge.title"
+          >{{ badge.short }}: {{ badge.label }}</span>
+        </div>
         <div class="jp-head-actions">
           <div class="search-panel__actions">
             <button type="button" class="btn btn--primary" data-jp-search :disabled="loading" @click="search">
@@ -667,33 +705,33 @@ onMounted(() => {
             <button type="button" class="btn btn--primary" data-jp-add @click="openCreate">
               <AppIcon name="plus" size="sm" /> 新規
             </button>
-            <button type="button" class="btn btn--secondary" data-jp-reset :disabled="loading" @click="reset">
-              <AppIcon name="rotate" size="sm" /> リセット
+            <!-- 条件をまとめて消す【リセット】は利用者の指示で外した（各項目を直接消す） -->
+            <!-- 今の条件のまま取り直す（一覧の見出しではなく、検索の操作と同じ行に置く） -->
+            <button type="button" class="btn btn--secondary" data-jp-refresh :disabled="loading" @click="loadWords()">
+              <AppIcon name="rotate" size="sm" /> 再読み込み
             </button>
           </div>
-          <!-- 右上の A〜E 取得。取得用の API がまだ無いので押せないボタンとして置く -->
-          <div class="search-panel__actions jp-head-actions__acquire" data-jp-acquire-actions>
+          <!-- 右上の AI 取得（**検索条件に一致する語**をまとめて受付ける。ページは問わない）。
+               4 つ並べると場所を取るので**ボタンは 1 つ**にし、どの情報を取るかは窓の中で選ぶ。
+               左の縦罫は置かない（区切りは余白だけ＝利用者の指示） -->
+          <div class="search-panel__actions" data-jp-acquire-actions>
             <button
-              v-for="action in ACQUIRE_ACTIONS" :key="action.key"
-              type="button" class="btn btn--secondary" :data-jp-acquire-action="action.key"
-              disabled :title="ACQUIRE_UNAVAILABLE_TITLE"
+              type="button" class="btn btn--secondary" data-jp-acquire
+              :disabled="loading || plansLoading || acquireRunning !== null || !aiLimitsReady"
+              :title="aiLimitsReady
+                ? 'AI 取得：検索条件に一致する単語の取得を受付けます（実行はバックグラウンド）。何を取るかと上限は窓で確認できます。'
+                : AI_LIMIT_MISSING_MESSAGE"
+              @click="openAcquire"
             >
-              <AppIcon :name="action.icon" size="sm" /> {{ action.label }}
+              <AppIcon name="robot" size="sm" /> AI 取得
             </button>
           </div>
         </div>
       </div>
       <div class="filters">
         <!-- 条件は 1 行にまとめる（狭い画面では折り返して縦に積む）。
-             伸びるのはキーワードだけにして、ほかの条件は内容ぶんの幅にする -->
+             キーワードもほかの条件と同じく左から順に並べ、部分一致なので幅は広げない -->
         <div class="filters__row jp-filters__row">
-          <span class="filter-item filter-item--grow jp-filters__keyword">
-            <span class="filter-item__label">キーワード：</span>
-            <input
-              v-model="filters.keyword" class="input" type="search" data-jp-filter="keyword"
-              placeholder="見出し語の一部" @keyup.enter="search"
-            >
-          </span>
           <span class="filter-item jp-filters__jlpt">
             <span class="filter-item__label">JLPT：</span>
             <select v-model="filters.jlpt" class="select" data-jp-filter="jlpt" aria-label="JLPTレベル">
@@ -729,33 +767,35 @@ onMounted(() => {
               <span class="range-input__sep" aria-hidden="true">～</span>
               <select
                 v-model="filters.categoryTo" class="select" data-jp-filter="categoryTo"
-                aria-label="分類（To）" :title="CATEGORY_TO_TITLE"
+                aria-label="分類（To）"
               >
                 <option value="">（すべて）</option>
                 <option v-for="option in categoryOptions" :key="option" :value="option">{{ option }}</option>
               </select>
             </span>
           </span>
+          <!-- キーワードはほかの条件と同じ並び（左から順）。見出し語の部分一致なので、
+               入力欄は広げない（伸ばすとほかの条件が押し出される） -->
+          <span class="filter-item jp-filters__keyword">
+            <span class="filter-item__label">キーワード：</span>
+            <input
+              v-model="filters.keyword" class="input" type="search" data-jp-filter="keyword"
+              placeholder="見出し語の一部" @keyup.enter="search"
+            >
+          </span>
         </div>
       </div>
-      <!-- 選べるのに効かない条件は、その理由を画面にも書いておく -->
-      <p class="jp-hint" data-jp-filter-note>
-        分類（To）は API が未対応のため、絞り込みに使われるのは 分類（From）だけです。
-      </p>
     </div>
 
     <!-- 単語一覧 -->
     <section class="card">
       <div class="card__header">
         <h2 class="card__title"><AppIcon name="list" size="sm" /> 単語一覧</h2>
-        <span class="cell-muted" data-jp-count>全 {{ totalElements }} 件</span>
-        <!-- 検索条件が効いているときだけ、その一覧が絞り込み結果だと分かるようにする -->
-        <span v-if="isFiltered" class="jp-hint" data-jp-filtered-count>絞り込み中</span>
-        <div class="search-panel__actions">
-          <button type="button" class="btn btn--secondary btn--sm" data-jp-refresh :disabled="loading" @click="loadWords">
-            <AppIcon name="rotate" size="sm" /> 再読み込み
-          </button>
-        </div>
+        <!-- 件数は見出しの右端。絞り込み中はその左に置く（件数が右端のまま） -->
+        <span class="jp-list-head-right">
+          <span v-if="isFiltered" class="jp-hint" data-jp-filtered-count>絞り込み中</span>
+          <span class="cell-muted" data-jp-count>全 {{ totalElements }} 件</span>
+        </span>
       </div>
 
       <p v-if="error" class="alert alert--danger">{{ error }}</p>
@@ -771,53 +811,114 @@ onMounted(() => {
               <th class="col-jp-word-id">単語ID</th>
               <th class="col-jp-book">書籍</th>
               <th class="col-jp-category">分類</th>
-              <th class="col-jp-word">単語</th>
-              <th class="col-jp-reading">読み方</th>
-              <th class="col-jp-part">品詞</th>
-              <!-- 中国語訳は幅を取って読みやすくする（ほかの列を詰めて空きを作る） -->
-              <th class="col-jp-chinese">中国語訳</th>
+              <!-- 単語・読み方・品詞を 1 行目、中国語訳を 2 行目に出す（1 列にまとめる。
+                   列を分けると中国語訳のぶんだけ横を圧迫するため。利用者の指示 2026-09-26） -->
+              <th class="col-jp-word-summary">単語・読み方・品詞・中国語訳</th>
+              <!-- 2.0 の英語学習（word.jsp）と同じ「詳細情報件数」 -->
+              <th class="col-jp-detail-counts">詳細情報件数</th>
               <th class="col-jp-acquire">取得状態（A・B，C，D，E）</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="row in words" :key="row.wordId" :data-jp-word-row="row.wordId">
-              <!-- 操作はアイコンだけ（意味は title と aria-label で伝える） -->
+              <!-- 操作はアイコンだけ（意味は title と aria-label で伝える）。
+                   田の字（2 行 × 2 列）に並べるのは**中の span**
+                   （td 自身の display を変えると表のセルでなくなり行の高さが崩れる） -->
               <td class="row-actions jp-row-actions">
-                <button
-                  type="button" class="btn btn--icon btn--sm" title="詳細" aria-label="詳細"
-                  data-jp-detail @click="openDetail(row)"
-                >
-                  <AppIcon name="eye" size="sm" class="icon--view" />
-                </button>
-                <button
-                  type="button" class="btn btn--icon btn--sm" title="修正" aria-label="修正"
-                  data-jp-edit @click="openEdit(row)"
-                >
-                  <AppIcon name="edit" size="sm" class="icon--edit" />
-                </button>
-                <button
-                  type="button" class="btn btn--icon btn--sm is-danger" :disabled="busy"
-                  title="削除" aria-label="削除"
-                  data-jp-delete @click="removeWord(row)"
-                >
-                  <AppIcon name="trash" size="sm" />
-                </button>
+                <span class="jp-row-actions__grid">
+                  <button
+                    type="button" class="btn btn--icon btn--sm" title="詳細" aria-label="詳細"
+                    data-jp-detail @click="openDetail(row)"
+                  >
+                    <AppIcon name="eye" size="sm" class="icon--view" />
+                  </button>
+                  <!-- この行の 1 語だけを AI で取得する（窓は右上の【AI 取得】と同じ）。
+                       アイコンは 2.0 の word.jsp 初級編の英語単語列に出ていたロボット。
+                       色は主色（青緑＝app.css の .icon--ai）で、詳細・修正・削除と見分ける -->
+                  <button
+                    type="button" class="btn btn--icon btn--sm"
+                    :disabled="acquireRunning !== null || !aiLimitsReady"
+                    :title="aiLimitsReady ? 'AI 取得' : AI_LIMIT_MISSING_MESSAGE"
+                    aria-label="AI 取得"
+                    data-jp-row-acquire @click="openRowAcquire(row)"
+                  >
+                    <AppIcon name="robot" size="sm" class="icon--ai" />
+                  </button>
+                  <button
+                    type="button" class="btn btn--icon btn--sm" title="修正" aria-label="修正"
+                    data-jp-edit @click="openEdit(row)"
+                  >
+                    <AppIcon name="edit" size="sm" class="icon--edit" />
+                  </button>
+                  <button
+                    type="button" class="btn btn--icon btn--sm is-danger" :disabled="busy"
+                    title="削除" aria-label="削除"
+                    data-jp-delete @click="removeWord(row)"
+                  >
+                    <AppIcon name="trash" size="sm" />
+                  </button>
+                </span>
               </td>
               <td>{{ row.jlptLevel ?? '—' }}</td>
               <td class="cell-muted">{{ row.wordId }}</td>
               <td>{{ row.book ?? '—' }}</td>
               <td>{{ row.category ?? '—' }}</td>
-              <td><span class="jp-word">{{ row.word }}</span></td>
-              <td>{{ row.reading === '' ? '—' : row.reading }}</td>
-              <td>{{ row.partOfSpeech ?? '—' }}</td>
-              <!-- 中国語訳は一覧 API が返さないため、今は「—」だけを出す -->
-              <td class="cell-muted" data-jp-chinese>—</td>
-              <!-- 取得状態（A・B／C／D／E）も一覧 API が返さないため「未取得」を出す -->
+              <!-- 1 行目: 単語（外部の辞書へのリンク）・読み方・品詞 /
+                   2 行目: 中国語訳（有効版の詳細の最初の語義の中国語。無ければ「—」）。
+                   2 行で切るのは**中の span**（td の display を変えると列幅が壊れる） -->
+              <td data-jp-word-summary>
+                <span class="jp-word-summary">
+                  <span class="jp-word-summary__main">
+                    <a
+                      class="jp-word jp-word--link" data-jp-word-link
+                      :href="youdaoWordUrl(row.word)" target="_blank" rel="noopener noreferrer"
+                      :title="`辞書で「${row.word}」を開く（別タブ）`"
+                    >{{ row.word }}</a>
+                    <span class="jp-word-summary__reading">{{ row.reading === '' ? '—' : row.reading }}</span>
+                    <span class="jp-word-summary__part">{{ row.partOfSpeech ?? '—' }}</span>
+                  </span>
+                  <span
+                    class="jp-word-summary__chinese" data-jp-chinese
+                    :title="row.chineseMeaning ?? undefined"
+                  >{{ row.chineseMeaning ?? '—' }}</span>
+                </span>
+              </td>
+              <!-- 詳細情報件数は有効版の段落の行数（0 も出す＝何が足りないかが分かる）。
+                   まだ詳細が無い語は「—」。
+                   タグを並べるのは**中の span**（td 自身の display を変えると表のセルでなくなり、
+                   行の高さが中身に合わず次の行へ食い込む。実際に起きた） -->
+              <td data-jp-detail-counts>
+                <span class="jp-detail-counts">
+                  <template v-if="row.detailCounts">
+                    <span
+                      v-for="chip in detailCountChips(row.detailCounts)" :key="chip.key"
+                      class="jp-detail-count" :data-jp-detail-count="chip.key" :title="chip.titleOf(chip.count)"
+                    >
+                      <b>{{ chip.label }}</b><em>{{ chip.count }}</em>
+                    </span>
+                  </template>
+                  <span v-else class="cell-muted">—</span>
+                </span>
+              </td>
+              <!-- 取得状態（A・B／C／D／E）。タグで出し、取得済／失敗／未取得を色で見分ける。
+                   **取得済だけ押せる**（押すとその区画の履歴を開き、使う版を選べる） -->
               <td data-jp-acquire :title="ACQUIRE_COLUMN_TITLE">
                 <span class="jp-acquire">
-                  <span v-for="action in ACQUIRE_ACTIONS" :key="action.key" class="jp-acquire__item">
-                    <span class="jp-acquire__label">{{ action.short }}</span>未取得
-                  </span>
+                  <button
+                    v-for="action in ACQUIRE_ACTIONS" :key="action.key"
+                    type="button"
+                    class="badge jp-acquire__item"
+                    :class="[
+                      aiStateBadgeClass(aiStateOf(row, action.key)),
+                      { 'is-clickable': isAiStateDone(aiStateOf(row, action.key)) }
+                    ]"
+                    :data-jp-acquire-state="action.key"
+                    :disabled="!isAiStateDone(aiStateOf(row, action.key))"
+                    :title="isAiStateDone(aiStateOf(row, action.key))
+                      ? `${action.label}の履歴を開く（使う版を選べます）`
+                      : ACQUIRE_COLUMN_TITLE"
+                    @click="openHistory(row, action.key)"
+                  >{{ action.short }} {{ aiStateLabelOf(aiStateOf(row, action.key)) }}</button>
                 </span>
               </td>
             </tr>
@@ -853,453 +954,38 @@ onMounted(() => {
       </div>
     </section>
 
-    <!-- 単語の登録・修正 -->
-    <div v-if="wordDialogOpen" class="overlay">
-      <section
-        class="dialog dialog--md" role="dialog" aria-modal="true"
-        aria-labelledby="jpWordDialogTitle" data-jp-word-dialog
-      >
-        <div class="dialog__head">
-          <h2 id="jpWordDialogTitle" class="dialog__title">
-            <AppIcon name="edit" size="sm" /> {{ editingId === null ? '単語の登録' : '単語の修正' }}
-          </h2>
-          <button type="button" class="dialog__close" aria-label="閉じる" @click="closeWordDialog">
-            <AppIcon name="x" size="sm" />
-          </button>
-        </div>
 
-        <div class="dialog__body">
-          <div class="jp-dialog-grid">
-            <div class="field">
-              <label class="field__label" for="jpWord">見出し語<span class="jp-required">必須</span></label>
-              <input
-                id="jpWord" v-model="wordForm.word" class="input" type="text" maxlength="100"
-                placeholder="例: 勉強" :class="{ 'is-invalid': fieldErrors.word !== undefined }"
-              >
-              <p v-if="fieldErrors.word" class="field__error">{{ fieldErrors.word }}</p>
-            </div>
-            <div class="field">
-              <label class="field__label" for="jpReading">読み</label>
-              <input
-                id="jpReading" v-model="wordForm.reading" class="input" type="text" maxlength="100"
-                placeholder="例: べんきょう"
-              >
-            </div>
-            <div class="field">
-              <label class="field__label" for="jpJlpt">JLPTレベル</label>
-              <select id="jpJlpt" v-model="wordForm.jlptLevel" class="select">
-                <option value="">未設定</option>
-                <option v-for="option in JLPT_OPTIONS" :key="option" :value="option">{{ option }}</option>
-              </select>
-            </div>
-            <div class="field">
-              <label class="field__label" for="jpPart">品詞</label>
-              <input
-                id="jpPart" v-model="wordForm.partOfSpeech" class="input" type="text" maxlength="50"
-                placeholder="例: 名詞"
-              >
-            </div>
-            <div class="field">
-              <label class="field__label" for="jpState">状態</label>
-              <select id="jpState" v-model="wordForm.stateCode" class="select">
-                <option v-for="option in STATE_OPTIONS" :key="option" :value="option">
-                  {{ STATE_LABELS[option] }}
-                </option>
-              </select>
-            </div>
-            <div class="field field--wide">
-              <label class="field__label" for="jpNote">備考</label>
-              <textarea id="jpNote" v-model="wordForm.note" class="textarea" rows="3" maxlength="2000"></textarea>
-            </div>
-          </div>
-          <p class="jp-hint">
-            見出し語は必須です。読み・JLPTレベル・品詞は一覧の絞り込みと詳細表示に使います。
-            状態を「無効」にすると、単語テストの出題対象から外れます。
-          </p>
-        </div>
-
-        <div class="dialog__foot">
-          <button type="button" class="btn btn--secondary" data-jp-word-cancel @click="closeWordDialog">
-            キャンセル
-          </button>
-          <button type="button" class="btn btn--primary" data-jp-word-save :disabled="busy" @click="saveWord">
-            <AppIcon name="check" size="sm" /> {{ busy ? '保存中...' : '保存' }}
-          </button>
-        </div>
-      </section>
-    </div>
-
-    <!-- 単語の詳細 -->
-    <div v-if="detailOpen" class="overlay">
-      <section
-        class="dialog dialog--lg" role="dialog" aria-modal="true"
-        aria-labelledby="jpDetailDialogTitle" data-jp-detail-dialog
-      >
-        <div class="dialog__head">
-          <h2 id="jpDetailDialogTitle" class="dialog__title">
-            <AppIcon name="eye" size="sm" /> 単語の詳細
-          </h2>
-          <button type="button" class="dialog__close" aria-label="閉じる" @click="closeDetail">
-            <AppIcon name="x" size="sm" />
-          </button>
-        </div>
-
-        <div class="dialog__body jp-detail__body">
-          <p v-if="detailError" class="alert alert--danger">{{ detailError }}</p>
-          <p v-else-if="detailLoading" class="jp-page__loading">読み込んでいます...</p>
-
-          <div v-else-if="detailWord" class="jp-detail">
-            <div class="jp-detail__head">
-              <span class="jp-detail__word">{{ detailWord.word }}</span>
-              <span class="jp-detail__reading">{{ detailWord.reading === '' ? '—' : detailWord.reading }}</span>
-              <span v-if="detailWord.jlptLevel" class="badge badge--neutral">{{ detailWord.jlptLevel }}</span>
-              <span v-if="detailWord.partOfSpeech" class="badge badge--outline">{{ detailWord.partOfSpeech }}</span>
-              <span class="badge" :class="learnStateBadge(detailWord.learnState)">
-                {{ learnStateLabel(detailWord.learnState) }}
-              </span>
-            </div>
-
-            <!-- 2.0 の詳細（本体 ＋ 6 子テーブル）と収録・問題をタブで分けて見せる。
-                 タブは 2.0 の子テーブルと同じ並び（収録 → 基本情報 → 語義 → … → 問題） -->
-            <div class="jp-detail__layout">
-              <div class="tabs jp-detail__tabs" role="tablist" aria-orientation="vertical" data-jp-detail-tabs>
-                <button
-                  v-for="tab in DETAIL_TABS" :key="tab.key" v-bind="{ id: tab.tabId }"
-                  type="button" class="tabs__tab jp-detail__tab"
-                  :class="{ 'is-active': activeDetailTab === tab.key }"
-                  :data-jp-detail-tab="tab.key" role="tab"
-                  :aria-selected="activeDetailTab === tab.key" :aria-controls="tab.panelId"
-                  @click="selectDetailTab(tab.key)"
-                >
-                  {{ tab.label }}
-                  <span
-                    v-if="detailTabCount(tab.key) !== null" class="jp-section__count"
-                    data-jp-detail-count
-                  >
-                    {{ detailTabCount(tab.key) }}
-                  </span>
-                </button>
-              </div>
-
-              <div class="jp-detail__panels">
-                <!-- 収録（教材のどこに載っているか） -->
-                <section
-                  v-show="activeDetailTab === 'collections'" id="jpDetailPanel-collections" class="jp-section"
-                  data-jp-detail-panel="collections" data-jp-detail-section="collections"
-                  role="tabpanel" aria-labelledby="jpDetailTab-collections"
-                >
-                  <h3 class="jp-section__title">
-                    収録 <span class="jp-section__count">{{ detailCollections.length }} 件</span>
-                  </h3>
-                  <template v-if="detailCollections.length > 0">
-                    <article
-                      v-for="collection in detailCollections" :key="collection.collectionId"
-                      class="jp-sense" :data-jp-collection="collection.collectionId"
-                    >
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ collection.collectionId }}</span>
-                        <span class="jp-sense__text">{{ collection.book }}</span>
-                        <span class="badge badge--outline">{{ collection.category }}</span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in collectionFields(collection)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 基本情報（母表 ＋ 学習状況 ＋ 詳細の取得情報 ＋ AI の説明） -->
-                <section
-                  v-show="activeDetailTab === 'basic'" id="jpDetailPanel-basic" class="jp-section"
-                  data-jp-detail-panel="basic"
-                  role="tabpanel" aria-labelledby="jpDetailTab-basic"
-                >
-                  <h3 class="jp-section__title">単語</h3>
-                  <dl class="jp-detail-fields">
-                    <div
-                      v-for="field in basicWordFields(detailWord)" :key="field.label"
-                      class="jp-detail-field" :data-jp-detail-field="field.label"
-                    >
-                      <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                      <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                    </div>
-                  </dl>
-
-                  <h3 class="jp-section__title">学習状況</h3>
-                  <dl class="jp-detail-fields">
-                    <div
-                      v-for="field in basicStudyFields(detailWord)" :key="field.label"
-                      class="jp-detail-field" :data-jp-detail-field="field.label"
-                    >
-                      <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                      <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                    </div>
-                  </dl>
-
-                  <template v-if="detailView">
-                    <h3 class="jp-section__title">詳細の取得情報</h3>
-                    <dl class="jp-detail-fields">
-                      <div
-                        v-for="field in basicMetaFields(detailView)" :key="field.label"
-                        class="jp-detail-field" :data-jp-detail-field="field.label"
-                      >
-                        <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                        <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                      </div>
-                    </dl>
-
-                    <!-- AI が書いた語の説明（2.0 の 詳細情報 本体の列） -->
-                    <h3 class="jp-section__title">AI 詳細</h3>
-                    <dl class="jp-detail-fields">
-                      <div
-                        v-for="field in basicDescriptionFields(detailBody ?? {})" :key="field.label"
-                        class="jp-detail-field" :data-jp-detail-field="field.label"
-                      >
-                        <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                        <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                      </div>
-                    </dl>
-                  </template>
-                  <p v-else class="jp-hint">この単語の詳細はまだ取得されていません。</p>
-                </section>
-
-                <!-- 語義 -->
-                <section
-                  v-show="activeDetailTab === 'senses'" id="jpDetailPanel-senses" class="jp-section"
-                  data-jp-detail-panel="senses" data-jp-detail-section="senses"
-                  role="tabpanel" aria-labelledby="jpDetailTab-senses"
-                >
-                  <h3 class="jp-section__title">
-                    語義 <span class="jp-section__count">{{ senses.length }} 件</span>
-                  </h3>
-                  <template v-if="senses.length > 0">
-                    <article v-for="sense in senses" :key="sense.number" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ sense.number }}</span>
-                        <span class="jp-sense__text">{{ sense.japanese ?? '—' }}</span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in senseFields(sense)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 例文 -->
-                <section
-                  v-show="activeDetailTab === 'examples'" id="jpDetailPanel-examples" class="jp-section"
-                  data-jp-detail-panel="examples" data-jp-detail-section="examples"
-                  role="tabpanel" aria-labelledby="jpDetailTab-examples"
-                >
-                  <h3 class="jp-section__title">
-                    例文 <span class="jp-section__count">{{ examples.length }} 件</span>
-                  </h3>
-                  <template v-if="examples.length > 0">
-                    <article v-for="(example, index) in examples" :key="index" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ index + 1 }}</span>
-                        <span class="jp-sense__text">{{ example.japanese ?? '—' }}</span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in exampleFields(example)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 発音 -->
-                <section
-                  v-show="activeDetailTab === 'pronunciations'" id="jpDetailPanel-pronunciations" class="jp-section"
-                  data-jp-detail-panel="pronunciations" data-jp-detail-section="pronunciations"
-                  role="tabpanel" aria-labelledby="jpDetailTab-pronunciations"
-                >
-                  <h3 class="jp-section__title">
-                    発音 <span class="jp-section__count">{{ pronunciations.length }} 件</span>
-                  </h3>
-                  <template v-if="pronunciations.length > 0">
-                    <article v-for="(pronunciation, index) in pronunciations" :key="index" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ index + 1 }}</span>
-                        <span class="jp-sense__text">{{ pronunciation.reading ?? '—' }}</span>
-                        <span v-if="pronunciation.accentNotation" class="badge badge--outline">
-                          アクセント {{ pronunciation.accentNotation }}
-                        </span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in pronunciationFields(pronunciation)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- コロケーション -->
-                <section
-                  v-show="activeDetailTab === 'collocations'" id="jpDetailPanel-collocations" class="jp-section"
-                  data-jp-detail-panel="collocations" data-jp-detail-section="collocations"
-                  role="tabpanel" aria-labelledby="jpDetailTab-collocations"
-                >
-                  <h3 class="jp-section__title">
-                    コロケーション <span class="jp-section__count">{{ collocations.length }} 件</span>
-                  </h3>
-                  <template v-if="collocations.length > 0">
-                    <article v-for="(collocation, index) in collocations" :key="index" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ index + 1 }}</span>
-                        <span class="jp-sense__text">{{ collocation.expression ?? '—' }}</span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in collocationFields(collocation)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 関連語 -->
-                <section
-                  v-show="activeDetailTab === 'relatedWords'" id="jpDetailPanel-relatedWords" class="jp-section"
-                  data-jp-detail-panel="relatedWords" data-jp-detail-section="relatedWords"
-                  role="tabpanel" aria-labelledby="jpDetailTab-relatedWords"
-                >
-                  <h3 class="jp-section__title">
-                    関連語 <span class="jp-section__count">{{ relatedWords.length }} 件</span>
-                  </h3>
-                  <template v-if="relatedWords.length > 0">
-                    <article v-for="(related, index) in relatedWords" :key="index" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ index + 1 }}</span>
-                        <span class="jp-sense__text">{{ related.heading ?? '—' }}</span>
-                        <span v-if="related.relationType" class="badge badge--outline">
-                          {{ RELATED_TYPE_LABELS[related.relationType] ?? related.relationType }}
-                        </span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in relatedWordFields(related)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 使用注意 -->
-                <section
-                  v-show="activeDetailTab === 'cautions'" id="jpDetailPanel-cautions" class="jp-section"
-                  data-jp-detail-panel="cautions" data-jp-detail-section="cautions"
-                  role="tabpanel" aria-labelledby="jpDetailTab-cautions"
-                >
-                  <h3 class="jp-section__title">
-                    使用注意 <span class="jp-section__count">{{ cautions.length }} 件</span>
-                  </h3>
-                  <template v-if="cautions.length > 0">
-                    <article v-for="(caution, index) in cautions" :key="index" class="jp-sense">
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ index + 1 }}</span>
-                        <span v-if="caution.noteType" class="badge badge--warning">{{ caution.noteType }}</span>
-                        <span class="jp-sense__text">{{ caution.japanese ?? '—' }}</span>
-                      </div>
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in cautionFields(caution)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-
-                <!-- 問題（C〜E。2.0 は有無だけだったが、2.1 は 1 問ずつ見せる） -->
-                <section
-                  v-show="activeDetailTab === 'questions'" id="jpDetailPanel-questions" class="jp-section"
-                  data-jp-detail-panel="questions" data-jp-detail-section="questions"
-                  role="tabpanel" aria-labelledby="jpDetailTab-questions"
-                >
-                  <h3 class="jp-section__title">
-                    問題 <span class="jp-section__count">{{ detailQuestions.length }} 件</span>
-                  </h3>
-                  <template v-if="detailQuestions.length > 0">
-                    <article
-                      v-for="question in detailQuestions" :key="question.questionId"
-                      class="jp-sense" :data-jp-question="question.questionId"
-                    >
-                      <div class="jp-sense__head">
-                        <span class="jp-sense__number">{{ question.questionNo }}</span>
-                        <span class="badge badge--neutral">{{ questionTypeLabel(question.questionType) }}</span>
-                        <span class="jp-sense__text">{{ question.questionText ?? '—' }}</span>
-                      </div>
-                      <!-- 見出しに出した問題番号・種別・問題文は、項目一覧では繰り返さない -->
-                      <dl class="jp-detail-fields">
-                        <div
-                          v-for="field in questionFields(question)" :key="field.label"
-                          class="jp-detail-field" :data-jp-detail-field="field.label"
-                        >
-                          <dt class="jp-detail-field__label">{{ field.label }}</dt>
-                          <dd class="jp-detail-field__value">{{ fieldValue(field) }}</dd>
-                        </div>
-                      </dl>
-                    </article>
-                  </template>
-                  <p v-else class="jp-hint">まだ登録されていません。</p>
-                </section>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="dialog__foot">
-          <button type="button" class="btn btn--secondary" data-jp-detail-close @click="closeDetail">閉じる</button>
-        </div>
-      </section>
-    </div>
+    <JapaneseWordEditDialog
+      v-if="wordDialogOpen && editingId !== null" :word-id="editingId"
+      @close="wordDialogOpen = false" @saved="loadWords"
+    />
+    <DemoWordNewView v-if="createOpen" :store="registerStore" data-jp-create @close="closeCreate" @saved="afterCreate" />
+    <!-- AI 取得の履歴（取得状態の「取得済」タグから開く） -->
+    <JpnAiHistoryDialog
+      v-if="historyTarget !== null"
+      :visible="historyOpen"
+      :word-id="historyTarget.wordId"
+      :section="historyTarget.section"
+      data-jp-history
+      @close="closeHistory"
+      @activated="afterHistoryChange"
+    />
+    <!-- AI 取得の窓（右上の 1 つの取得ボタンを押すと出る。
+         どの情報を取るかと、取得済みをどうするかをここで選ぶ） -->
+    <JpnAiFetchDialog
+      v-if="fetchPlans !== null"
+      :visible="true"
+      :target-label="fetchTargetLabel"
+      :plans="fetchPlans"
+      @choose="confirmAcquire"
+      @close="closeAcquire"
+    />
   </div>
 </template>
 
 <style scoped>
-/* 検索条件の見出し行は、絞り込みの操作（検索・新規・リセット）と
-   A〜E の取得ボタンを 1 行にまとめる（間は縦罫で区切る） */
+/* 検索条件の見出し行は、絞り込みの操作（検索・新規・再読み込み）と
+   AI 取得のボタンを 1 行にまとめる（区切りは余白だけ。縦罫は置かない＝利用者の指示） */
 .jp-head-actions {
   display: flex;
   align-items: center;
@@ -1307,9 +993,13 @@ onMounted(() => {
   gap: var(--sp-3);
 }
 
-.jp-head-actions__acquire {
-  padding-left: var(--sp-3);
-  border-left: 1px solid var(--color-border);
+/* 一覧の見出しは右端に件数を出す（絞り込み中はその左）。
+   .card__header は space-between なので、まとまりを 1 つにして右へ寄せる */
+.jp-list-head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
 }
 
 /* 操作列のアイコンボタンは折り返さない（5 つ並ぶ） */

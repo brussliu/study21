@@ -1,12 +1,18 @@
 package com.study21.admin.batch;
 
+import com.study21.common.core.exception.ValidationException;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 実 DB（PostgreSQL）に対する バッチ実行履歴 / バッチコントロール の検証。
@@ -129,5 +135,64 @@ class BatchHistoryRepositoryTest {
 
         // 起動時に実行されるのは batS01 だけ
         assertThat(batchService.startupTargets()).containsExactly("batS01");
+    }
+
+    @Test
+    @DisplayName("種別 C（呼出）も一覧から有効／無効を切り替えられる（行が用意され、保存される）")
+    void callBatchControlCanBeToggled() {
+        // 一覧を引くと、実装済みの C（日本語単語の AI 取得）にも行が用意される
+        Map<String, Object> row = rowOf("batC41");
+        assertThat(row).as("batC41 は画面から切り替えられる").containsEntry("canToggleActive", true);
+
+        BatchControlEntity prepared = controlMapper.findByBatchCode("batC41");
+        assertThat(prepared).as("batC41 の行").isNotNull();
+        // OFF の意味が種別で違うので備考も C 用になっている
+        assertThat(prepared.getNote())
+                .isEqualTo("バッチ管理画面の有効設定（OFF時は他の処理から呼び出さない）");
+
+        // 画面から無効にする（保存され、バージョンが進む）
+        batchService.updateActive("batC41", false, "admin");
+        BatchControlEntity off = controlMapper.findByBatchCode("batC41");
+        assertThat(off.getStatus()).isEqualTo("0");
+        assertThat(off.getVersion()).isEqualTo(prepared.getVersion() + 1);
+
+        // 戻せる（有効に戻すと一覧も有効になる）
+        batchService.updateActive("batC41", true, "admin");
+        assertThat(controlMapper.findByBatchCode("batC41").getStatus()).isEqualTo("1");
+        assertThat(rowOf("batC41")).containsEntry("active", true);
+    }
+
+    @Test
+    @DisplayName("無効にした種別 C は呼出を拒否する（AI を呼ばず、実行履歴も残さない）")
+    void disabledCallBatchRefusesTheCall() {
+        // コントロール情報で無効にする（行が無ければ作る。既にあれば状態だけ落とす）
+        BatchControlEntity entity = new BatchControlEntity();
+        entity.setBatchCode("batC41");
+        entity.setStatus("0");
+        entity.setNote("E2E: 無効の検証");
+        entity.setCreatedByCode("SYSTEM");
+        entity.setUpdatedByCode("SYSTEM");
+        controlMapper.insertIfAbsent(entity);
+        BatchControlEntity saved = controlMapper.findByBatchCode("batC41");
+        controlMapper.updateStatus("batC41", "0", saved.getVersion(), null, "e2e");
+        assertThat(controlMapper.findByBatchCode("batC41").getStatus()).isEqualTo("0");
+
+        // 呼出の入口（日本語単語の画面が使う rerunStep）が拒否する。
+        // ここで拒否されるので、AI は呼ばれず実行履歴も残らない
+        assertThatThrownBy(() -> batchService.rerunStep("batC41", "batch-page",
+                "{\"kind\":\"DETAIL\",\"wordIds\":[]}"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("バッチが無効に設定されています")
+                .hasMessageContaining("batC41");
+    }
+
+    /** 一覧 API の行（画面が受け取る形）を 1 件引く。 */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> rowOf(String batchCode) {
+        List<Map<String, Object>> rows = (List<Map<String, Object>>) batchService.listTasks().get("rows");
+        return rows.stream()
+                .filter(row -> batchCode.equals(row.get("taskCode")))
+                .findFirst()
+                .orElseThrow(() -> new AssertionError("一覧に行がありません: " + batchCode));
     }
 }

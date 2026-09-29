@@ -43,7 +43,14 @@ public record BatchTaskDefinition(
         return taskType != BatchTaskType.C;
     }
 
-    /** 画面から有効／無効を切り替えられるか（定時・循環・システム起動のバッチ）。 */
+    /**
+     * 種別だけで決まる「切り替え可能か」（定時・循環・システム起動のバッチ）。
+     *
+     * <p>種別 C（呼出）は定義だけでは false。ただし<b>業務処理が実装済み（ハンドラがある）C は
+     * 切り替えられる</b>（利用者の指示。{@code BatchServiceImpl#isToggleable} がハンドラの有無で
+     * 追加判定する）。C の有効は「いま使っているか」の目印で、OFF にすると他の処理から
+     * 呼び出せなくなる。</p>
+     */
     public boolean canToggleActive() {
         return taskType == BatchTaskType.S || taskType == BatchTaskType.L || taskType == BatchTaskType.R;
     }

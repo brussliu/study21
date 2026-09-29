@@ -140,7 +140,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-toshokan-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・同僚', note: '会話でも文章でも同じように使えます。', senseNumber: null },
         { id: 'w-toshokan-use-2', register: '書き言葉', politeness: '丁寧', audience: '学校の案内・掲示', note: '「図書館を利用する」のように動詞と組み合わせると、案内文らしい硬い表現になります。', senseNumber: 2 }
       ],
-      memoryHint: { hint: '「図書館＝テスト前にこもる静かな場所」と場面ごと覚える。', basis: '場面の連想（テスト前に通う場所）と、「館」という大きな建物の字の形を結びつけた覚え方。' },
+      memoryHint: { hint: '「図書館＝テスト前にこもる静かな場所」と場面ごと覚える。', basis: '把考前去图书馆学习的场景，与「館」字所代表的大型建筑联系起来记忆。' },
       practices: [
         { id: 'w-toshokan-pr-1', kind: 'PARTICLE', question: '図書館（　）勉強します。', questionChinese: '选择正确的助词填空。', choices: ['に', 'で', 'を', 'へ'], answer: 'で', explanation: '「勉強する」という動作をする場所なので「で」を使います。「に」「へ」は行き先に使うので、ここでは合いません。', freeWriting: false, demoFeedback: null },
         { id: 'w-toshokan-pr-2', kind: 'SCENE', question: '友だちに「週末はどこで勉強するの？」と聞かれて、市の図書館で勉強すると答えたい。いちばん自然なのはどれですか。', questionChinese: '朋友问“周末在哪儿学习？”，你想回答“打算在市图书馆学习”。哪个最自然？', choices: [ '市の図書館で勉強するつもり。', '市の図書館に勉強するつもり。', '市の図書館へ勉強しますつもり。' ], answer: '市の図書館で勉強するつもり。', explanation: '「場所＋で＋動作」の形にします。「に」「へ」は行き先に使うので、動作の場所には合いません。', freeWriting: false, demoFeedback: null },
@@ -239,7 +239,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-soudan-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・家族', note: '「ちょっと相談があるんだけど」は、話を切り出すときの決まり文句です。', senseNumber: 1 }
       ],
-      memoryHint: { hint: '「相」＝向かい合う、「談」＝話す。向かい合って話す場面を思い出す。', basis: '漢字の形のイメージ（向かい合って話す）と、学生課の窓口で相談している場面の連想。' },
+      memoryHint: { hint: '「相」＝向かい合う、「談」＝話す。向かい合って話す場面を思い出す。', basis: '结合面对面交谈的汉字形象，联想在学生事务窗口向工作人员咨询的场景。' },
       practices: [
         { id: 'w-soudan-pr-1', kind: 'PARTICLE', question: '進路のことは、両親（　）相談して決めました。', questionChinese: '选择正确的助词填空。', choices: ['に', 'を', 'が', 'へ'], answer: 'に', explanation: '相談する相手は「に」で示します。「と」も使えますが、この文は両親の意見を聞いて決めたので「に」が合います。', freeWriting: false, demoFeedback: null },
         { id: 'w-soudan-pr-2', kind: 'SYNONYM', question: '授業の取り方について、先生と（　）たいです。いちばん自然なのはどれですか。', questionChinese: '想跟老师商量选课的事，哪个词最自然？', choices: ['相談し', '話し合い', '討論し'], answer: '相談し', explanation: '自分の判断を助けてもらう場面なので「相談する」が自然です。「話し合う」は対等な関係、「討論する」は意見が対立する場面で使います。', freeWriting: false, demoFeedback: null }
@@ -321,7 +321,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-shukudai-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・先生', note: '「宿題を出す」は「提出する」の意味です。「出す」だけで通じます。', senseNumber: 1 }
       ],
-      memoryHint: { hint: '「宿」＝家に持ち帰る、「題」＝問題。家に持って帰る問題、と覚える。', basis: '漢字の字面のイメージ（家に持ち帰る問題）と、放課後に宿題をやる場面の連想。' },
+      memoryHint: { hint: '「宿」＝家に持ち帰る、「題」＝問題。家に持って帰る問題、と覚える。', basis: '把汉字联想成“带回家做的题目”，再联系放学后写作业的场景来记忆。' },
       practices: [
         { id: 'w-shukudai-pr-1', kind: 'PARTICLE', question: '宿題（　）明日までに出してください。', questionChinese: '选择正确的助词填空。', choices: ['を', 'が', 'に', 'で'], answer: 'を', explanation: '「出す」の対象なので「を」を使います。期限は「までに」で示します。', freeWriting: false, demoFeedback: null },
         { id: 'w-shukudai-pr-2', kind: 'SCENE', question: '先生に「宿題はもう出しましたか」と聞かれて、まだだと伝えたい。いちばん自然なのはどれですか。', questionChinese: '老师问“作业交了吗？”，你想说还没交。哪个最自然？', choices: [ 'すみません、まだやっていません。', 'すみません、宿題がしませんでした。', 'すみません、宿題を忘れましたです。' ], answer: 'すみません、まだやっていません。', explanation: 'まだ終わっていないことは「まだ〜ていません」で表します。「忘れましたです」のように「です」を重ねる形は誤りです。', freeWriting: false, demoFeedback: null }
@@ -406,7 +406,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-benkyou-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・同僚', note: '名詞として単独でも使えます（例：「勉強が足りない」）。', senseNumber: null },
         { id: 'w-benkyou-use-2', register: '話し言葉', politeness: '普通', audience: '先生・目上の人', note: '「いい勉強になりました」は、教えてもらったことへのお礼としても使えます。', senseNumber: 2 }
       ],
-      memoryHint: { hint: '「べんきょう」と聞いたら「学习」。「勉强」と訳さない。', basis: '中国語との意味の対応を一文で言い切って覚える（漢字の字面ではなく、意味の対応の連想）。' },
+      memoryHint: { hint: '「べんきょう」と聞いたら「学习」。「勉强」と訳さない。', basis: '用一句话记住日语和中文的意思对应关系：日语「勉強」是“学习”，不是中文的“勉强”。' },
       practices: [
         { id: 'w-benkyou-pr-1', kind: 'PARTICLE', question: '毎日、日本語（　）勉強しています。', questionChinese: '选择正确的助词填空。', choices: ['を', 'が', 'に', 'で'], answer: 'を', explanation: '「勉強する」の対象は「を」で示します。学ぶ科目が目的語になります。', freeWriting: false, demoFeedback: null },
         { id: 'w-benkyou-pr-2', kind: 'SYNONYM', question: '妹はピアノを（　）います。いちばん自然なのはどれですか。', questionChinese: '“我妹妹在学钢琴”，哪个词最自然？', choices: ['習って', '勉強して', '学んで'], answer: '習って', explanation: '教えてくれる先生がいる場面なので「習う」が自然です。「勉強して」も誤りではありませんが、技術を教わる場面では「習う」が普通です。', freeWriting: false, demoFeedback: null },
@@ -500,7 +500,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-aku-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・家族', note: '自動詞なので「自然にそうなった」という感じが出ます。', senseNumber: 1 },
         { id: 'w-aku-use-2', register: 'どちらも', politeness: '普通', audience: '同僚・店の人', note: '同じ「開く」でも、読みによって使う対象が変わります。迷ったら「何が開くのか」を確かめましょう。', senseNumber: null }
       ],
-      memoryHint: { hint: '「あく」は「が」とセット、「あける」は「を」とセット。', basis: '助詞の組み合わせ（が／を）を呪文のように唱えて覚える覚え方。' },
+      memoryHint: { hint: '「あく」は「が」とセット、「あける」は「を」とセット。', basis: '把助词搭配反复念熟：自动词「あく」搭配「が」，他动词「あける」搭配「を」。' },
       practices: [
         { id: 'w-aku-pr-1', kind: 'PARTICLE', question: '風が強くて、窓（　）開きました。', questionChinese: '选择正确的助词填空。', choices: ['が', 'を', 'に', 'で'], answer: 'が', explanation: '「開く（あく）」は自動詞なので、開いたものは「が」で示します。「を」を使うなら「窓を開けました」のように他動詞にします。', freeWriting: false, demoFeedback: null },
         { id: 'w-aku-pr-2', kind: 'SYNONYM', question: '本を（　）ください。いちばん自然なのはどれですか。', questionChinese: '“请翻开书”，哪个说法最自然？', choices: ['開いて', 'あいて', '開けて'], answer: '開いて', explanation: '本は「ひらく」を使うので、ここでは「開いて（ひらいて）」が自然です。「あいて」は自動詞なので「本を」と組み合わせられません。「開けて」は窓やふたに使います。', freeWriting: false, demoFeedback: null },
@@ -571,7 +571,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-hiraku-use-1', register: 'どちらも', politeness: '普通', audience: '同僚・目上の人', note: '「会を開く」は改まった場面でも使える表現です。日常の窓やドアには「あく」「あける」を使うのが普通です。', senseNumber: 2 }
       ],
-      memoryHint: { hint: '「ひらく」は「広げる・始める」イメージ。', basis: '漢字の字面（「開」の中の「廾」が両手で広げる形に見えること）と、本を広げる場面の連想。' },
+      memoryHint: { hint: '「ひらく」は「広げる・始める」イメージ。', basis: '把「開」字中的「廾」想象成用双手展开的形状，再联想翻开书本的场景。' },
       practices: [
         { id: 'w-hiraku-pr-1', kind: 'PARTICLE', question: '来週、留学生向けの説明会（　）開きます。', questionChinese: '选择正确的助词填空。', choices: ['を', 'が', 'に', 'で'], answer: 'を', explanation: '「会を開く」の「開く」は他動詞なので「を」を使います。会を主語にするなら「説明会が開かれます」と受身にします。', freeWriting: false, demoFeedback: null },
         { id: 'w-hiraku-pr-2', kind: 'SYNONYM', question: '教科書の十ページを（　）ください。いちばん自然なのはどれですか。', questionChinese: '“请翻开教科书第十页”，哪个说法最自然？', choices: ['開いて', 'あいて', '開けて'], answer: '開いて', explanation: '本は「ひらく」を使います。「あいて」は自動詞なので「を」と組み合わせられません。「開けて」は窓やふたに使います。', freeWriting: false, demoFeedback: null }
@@ -668,7 +668,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-akeru-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・家族', note: '「開けておく」は「開けた状態を続ける」という意味になります。', senseNumber: 1 },
         { id: 'w-akeru-use-2', register: 'どちらも', politeness: '丁寧', audience: '職場・店', note: '許可を求めるときは「〜てもいいですか」と組み合わせるのが一般的です。', senseNumber: null }
       ],
-      memoryHint: { hint: '「あける」は自分が手を出して開ける感じ。', basis: '場面の連想（暑くて自分で窓を開ける動作）と、「あく／あける」の助詞の組み合わせ。' },
+      memoryHint: { hint: '「あける」は自分が手を出して開ける感じ。', basis: '联想天气热时自己动手开窗的场景，并一起记住「あく／あける」各自搭配的助词。' },
       practices: [
         { id: 'w-akeru-pr-1', kind: 'PARTICLE', question: '暑いので、窓（　）開けました。', questionChinese: '选择正确的助词填空。', choices: ['を', 'が', 'に', 'と'], answer: 'を', explanation: '「開ける」は他動詞なので、対象は「を」で示します。「が」を使うと自動詞「窓が開きました」の形になります。', freeWriting: false, demoFeedback: null },
         { id: 'w-akeru-pr-2', kind: 'SYNONYM', question: '（部屋が暑いので、エアコンを）いちばん自然なのはどれですか。', questionChinese: '房间里很热，想开空调，哪个说法最自然？', choices: ['エアコンをつけてください。', 'エアコンを開けてください。', 'エアコンをひらいてください。'], answer: 'エアコンをつけてください。', explanation: '电器は「つける」を使います。「開ける」「ひらく」は電器には使いません。中文的“打开”在日语里要按对象分别选择动词。', freeWriting: false, demoFeedback: null },
@@ -752,7 +752,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-narau-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・先生', note: '「習っています」の形で、続けている習い事を表すことが多いです。', senseNumber: 2 },
         { id: 'w-narau-use-2', register: 'どちらも', politeness: '丁寧', audience: '目上の人', note: '教わった相手に感謝を伝えるときは「教えていただきました」のほうが自然な場合もあります。', senseNumber: 1 }
       ],
-      memoryHint: { hint: '「習う」は「先生がいる」が合図。', basis: '場面の連想（教室で先生の手元を見ながら真似する場面）と、教える人がいるかどうか。' },
+      memoryHint: { hint: '「習う」は「先生がいる」が合図。', basis: '联想在教室里看着老师的动作模仿学习的场景，重点记住“有人教”这一特点。' },
       practices: [
         { id: 'w-narau-pr-1', kind: 'PARTICLE', question: '大学で先生（　）発音を習いました。', questionChinese: '选择正确的助词填空。', choices: ['に', 'を', 'が', 'で'], answer: 'に', explanation: '教えてくれる人は「に」、学ぶ内容は「を」で示します。「に」と「を」を両方使う文だと意識すると分かりやすいです。', freeWriting: false, demoFeedback: null },
         { id: 'w-narau-pr-2', kind: 'SYNONYM', question: '本を読んで一人で勉強しました。このことを「習う」を使って言うと、どうなりますか。', questionChinese: '“我一个人看书学习”，如果用「習う」来表达，会怎样？', choices: [ '「習う」は使えない（教えてくれる人がいないため）。', '「一人で習いました」と言える。', '「習われました」と言える。' ], answer: '「習う」は使えない（教えてくれる人がいないため）。', explanation: '「習う」は教えてくれる人がいる場合に使います。独学なら「勉強する」「学ぶ」を使います。', freeWriting: false, demoFeedback: null },
@@ -823,7 +823,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-manabu-use-1', register: '書き言葉', politeness: '普通', audience: 'レポート・発表', note: '文章では「学ぶ」、会話では「勉強する」「習う」が選ばれやすいです。', senseNumber: null }
       ],
-      memoryHint: { hint: '「学ぶ」は「経験からも学べる」と広く構える。', basis: '場面の連想（失敗したあとに振り返って次に生かす場面）と、教える人がいなくても使えるという使い分け。' },
+      memoryHint: { hint: '「学ぶ」は「経験からも学べる」と広く構える。', basis: '联想失败后反思并把经验用于下一次的场景，记住「学ぶ」也可以用于没有老师指导的学习。' },
       practices: [
         { id: 'w-manabu-pr-1', kind: 'SYNONYM', question: 'この授業では、実際の事例（　）多くを学べます。', questionChinese: '选择最自然的形式填空。', choices: ['から', 'を', 'に', 'で'], answer: 'から', explanation: '学びの来源は「から」で示します。「を」は学ぶ内容そのものにつけます（事例を学ぶ）。', freeWriting: false, demoFeedback: null },
         { id: 'w-manabu-pr-2', kind: 'SCENE', question: '友だちと軽い会話をしています。「ピアノを習っている」と同じ内容を「学ぶ」で言うと、どんな感じになりますか。', questionChinese: '在轻松的聊天里，把“在学钢琴”换成「学ぶ」会是什么感觉？', choices: [ '意味は通じるが、少し硬く聞こえる。', '意味がまったく違う。', '「学ぶ」は使えない。' ], answer: '意味は通じるが、少し硬く聞こえる。', explanation: '「学ぶ」は誤りではありませんが、軽い会話では硬く聞こえます。「習う」「やっている」のほうが自然です。', freeWriting: false, demoFeedback: null }
@@ -920,7 +920,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-soudan-suru-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・家族', note: '「ちょっと相談があるんだけど」は、話を切り出すときの決まり文句です。', senseNumber: 1 },
         { id: 'w-soudan-suru-use-2', register: '書き言葉', politeness: '丁寧', audience: '学校・会社の案内', note: '窓口の案内では「〜について相談できます」のように可能の形で書くことが多いです。', senseNumber: 2 }
       ],
-      memoryHint: { hint: '「相談する」は「相手＋に」。助詞までセットで覚える。', basis: '助詞の組み合わせ（人＋に＋相談する）と、学生課の窓口で相談している場面の連想。' },
+      memoryHint: { hint: '「相談する」は「相手＋に」。助詞までセットで覚える。', basis: '把“人＋に＋相談する”作为固定搭配记忆，并联想在学生事务窗口向工作人员咨询的场景。' },
       practices: [
         { id: 'w-soudan-suru-pr-1', kind: 'PARTICLE', question: '留学するかどうか、家族（　）相談しました。', questionChinese: '选择正确的助词填空。', choices: ['に', 'を', 'が', 'で'], answer: 'に', explanation: '相談する相手は「に」で示します。「と」も使えますが、この文は家族の意見を聞いたので「に」が合います。', freeWriting: false, demoFeedback: null },
         { id: 'w-soudan-suru-pr-2', kind: 'SCENE', question: '先生の研究室を訪ねて、進路の相談をしたい。最初の一言として、いちばん自然なのはどれですか。', questionChinese: '你去老师的研究室，想谈今后的出路，第一句话哪句最自然？', choices: [ 'お時間ありますか。進路について相談したいんですが。', '相談します。今いいですか。', '相談してもいいですか。今から。' ], answer: 'お時間ありますか。進路について相談したいんですが。', explanation: '相手の時間を確かめてから、内容を「〜たいんですが」でやわらかく伝えるのが自然です。', freeWriting: false, demoFeedback: null },
@@ -1027,7 +1027,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-isogashii-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・同僚', note: '「ちょっと忙しくて」は、断りの前置きとしてよく使います。', senseNumber: 1 },
         { id: 'w-isogashii-use-2', register: '書き言葉', politeness: '丁寧', audience: 'メール・挨拶文', note: '「ご多忙のところ恐れ入りますが」のように、目上の人には別の言い方を使います。', senseNumber: null }
       ],
-      memoryHint: { hint: '「いそがしい」は「心が忙しい」と覚える。', basis: '漢字の字面（「忙」に「心」が入っていること）と、締め切りが重なって落ち着かない場面の連想。' },
+      memoryHint: { hint: '「いそがしい」は「心が忙しい」と覚える。', basis: '注意「忙」字中有表示“心”的偏旁，联想多个截止日期挤在一起、心里静不下来的场景。' },
       practices: [
         { id: 'w-isogashii-pr-1', kind: 'PARTICLE', question: '今週は仕事（　）忙しいです。', questionChinese: '选择正确的助词填空。', choices: ['で', 'に', 'を', 'が'], answer: 'で', explanation: '原因や理由を表す「で」を使います。「仕事で忙しい」は決まった言い方です。', freeWriting: false, demoFeedback: null },
         { id: 'w-isogashii-pr-2', kind: 'SYNONYM', question: '（目上の人について）田中先生は今週はご（　）のようです。', questionChinese: '谈到长辈时，用哪个词最合适？', choices: ['多忙', '忙しい', '暇'], answer: '多忙', explanation: '目上の人の状態を改まって言うときは「多忙」を使うことが多いです。自分には「忙しい」を使います。', freeWriting: false, demoFeedback: null },
@@ -1102,7 +1102,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-yasashii-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・先生', note: '「優しい」は人物の評価なので、目上の人について直接使うときは「とても穏やかな方です」など別の言い方を選ぶこともあります。', senseNumber: 1 }
       ],
-      memoryHint: { hint: '「優」の字には「人」が入っている。人の気持ちを考える字、と覚える。', basis: '漢字の形（「優」に「亻」が入っていること）と、先生が穏やかに話す場面の連想。' },
+      memoryHint: { hint: '「優」の字には「人」が入っている。人の気持ちを考える字、と覚える。', basis: '注意「優」字中的单人旁「亻」，联想老师温和地说话、体谅他人心情的场景。' },
       practices: [
         { id: 'w-yasashii-pr-1', kind: 'PARTICLE', question: '彼はだれ（　）でも優しいです。', questionChinese: '选择正确的助词填空。', choices: ['に', 'を', 'が', 'で'], answer: 'に', explanation: '「優しい」は相手を「に」で示します。「だれにでも」で「对谁都是」的意思。', freeWriting: false, demoFeedback: null },
         { id: 'w-yasashii-pr-2', kind: 'SYNONYM', question: '（友だちが荷物を運ぶのを手伝ってくれた）「彼は（　）人です。」', questionChinese: '朋友帮你搬了行李，用哪个词更合适？', choices: ['親切な', '優しいな', '易しいな'], answer: '親切な', explanation: '実際に助けてくれた行為をほめるときは「親切」が合います。「優しいな人」は語形が誤り（い形容詞に「な」はつきません）。', freeWriting: false, demoFeedback: null }
@@ -1195,7 +1195,7 @@ export const DEMO_WORDS: DemoWord[] = [
         { id: 'w-daijoubu-use-1', register: '話し言葉', politeness: '普通', audience: '友だち・同僚', note: '「大丈夫？」だけでも通じます。目上の人には「大丈夫ですか」にします。', senseNumber: 1 },
         { id: 'w-daijoubu-use-2', register: 'どちらも', politeness: '丁寧', audience: '店・目上の人', note: '断りの「大丈夫です」は便利ですが、相手によっては「結構です」のほうがはっきり伝わることもあります。', senseNumber: 2 }
       ],
-      memoryHint: { hint: '「大丈夫」＝「OK」。男子漢の意味ではない。', basis: '中国語との意味の対応を一文で言い切って覚える（漢字の字面ではなく、意味の対応の連想）。' },
+      memoryHint: { hint: '「大丈夫」＝「OK」。男子漢の意味ではない。', basis: '用一句话记住意思的对应关系：「大丈夫」表示“没问题、不要紧”，不是中文的“男子汉”。' },
       practices: [
         { id: 'w-daijoubu-pr-1', kind: 'SCENE', question: '店で「袋はご入用ですか」と聞かれ、断りたい。いちばん自然なのはどれですか。', questionChinese: '店员问“需要袋子吗？”，你想拒绝，哪句最自然？', choices: ['大丈夫です。', 'だめです。', 'いりませんでしょう。'], answer: '大丈夫です。', explanation: 'やわらかい断りには「大丈夫です」がよく使われます。「だめです」は強い言い方、「〜でしょう」は確認の形なので、ここでは合いません。', freeWriting: false, demoFeedback: null },
         { id: 'w-daijoubu-pr-2', kind: 'SYNONYM', question: '（体調を気づかう場面で）「お体は（　）ですか。」いちばん自然なのはどれですか。', questionChinese: '关心对方身体状况时，哪个说法最自然？', choices: ['大丈夫', '問題ない', '丈夫'], answer: '大丈夫', explanation: '体調を気づかうときは「大丈夫ですか」が自然です。「問題ないですか」は事務的な確認に聞こえ、「丈夫」は“结实、耐用”という別の意味になります。', freeWriting: false, demoFeedback: null },
@@ -1270,7 +1270,7 @@ export const DEMO_WORDS: DemoWord[] = [
       usageNotes: [
         { id: 'w-taisetsu-use-1', register: 'どちらも', politeness: '普通', audience: '友だち・先生', note: '「大切にする」は、人にも物にも経験にも使える便利な形です。', senseNumber: null }
       ],
-      memoryHint: { hint: '「大切」＝「大事」。切ることとは関係ない。', basis: '中国語の「亲切」との字形の似かよりではなく、意味の対応（大切＝大事）を言い切って覚える覚え方。' },
+      memoryHint: { hint: '「大切」＝「大事」。切ることとは関係ない。', basis: '不要因为字形相近就联想到中文的“亲切”；应记住「大切」与「大事」意思相近，表示“重要、珍贵”。' },
       practices: [
         { id: 'w-taisetsu-pr-1', kind: 'PARTICLE', question: '家族（　）大切にしています。', questionChinese: '选择正确的助词填空。', choices: ['を', 'が', 'に', 'で'], answer: 'を', explanation: '「大切にする」の対象は「を」で示します。「が」を使うと「家族が大切だ」のように評価の文になります。', freeWriting: false, demoFeedback: null },
         { id: 'w-taisetsu-pr-2', kind: 'SYNONYM', question: '（改まったスピーチで）「学生の皆さん、毎日の積み重ねが（　）です。」', questionChinese: '在正式致辞中，哪个词更合适？', choices: ['大切', '大事', '親切'], answer: '大切', explanation: '「大事」も誤りではありませんが、改まった場面では「大切」のほうが落ち着いて聞こえます。「親切」は別の意味です。', freeWriting: false, demoFeedback: null }

@@ -7,6 +7,9 @@ import java.time.LocalDate;
 /** JPN_TestQuestion の 1 行（Mapper の戻り値）。 */
 public class JpnTestQuestionEntity {
 
+    private String historyJson;
+    public String getHistoryJson() { return historyJson; }
+    public void setHistoryJson(String value) { historyJson = value; }
     private Long entryId;
     private Long testId;
     private Long wordId;
@@ -28,6 +31,8 @@ public class JpnTestQuestionEntity {
     private String explanationJa;
     private String difficulty;
     private String snapshotJson;
+    /** この出題で実際に見せた選択肢（提示順。{@code 出題選択肢JSON} の文字列）。 */
+    private String choicesJson;
     private String book;
     private String category;
 
@@ -73,6 +78,8 @@ public class JpnTestQuestionEntity {
     public void setDifficulty(String difficulty) { this.difficulty = difficulty; }
     public String getSnapshotJson() { return snapshotJson; }
     public void setSnapshotJson(String snapshotJson) { this.snapshotJson = snapshotJson; }
+    public String getChoicesJson() { return choicesJson; }
+    public void setChoicesJson(String choicesJson) { this.choicesJson = choicesJson; }
     public String getBook() { return book; }
     public void setBook(String book) { this.book = book; }
     public String getCategory() { return category; }

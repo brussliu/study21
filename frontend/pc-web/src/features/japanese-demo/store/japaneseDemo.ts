@@ -603,14 +603,13 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
   /**
    * 1 Unit あたりの語数。
    *
-   * 既存の書籍は**その本から自動で決める**（教材ごとに違うため）。
-   * 新しい書籍は決められないので、入力してもらう。
+   * 既定は**その書籍から自動で決める**（教材ごとに違うため）。
+   * 画面では既存・新規どちらも同じプルダウンなので、必ず値が入っている必要がある
+   * （`resetRegister` と `chooseBook` で、その書籍の値・新規なら既定値を入れる）。
    */
   const detectedUnitSize = computed(() => detectUnitSize(registerBook.value))
   const registerUnitSize = computed(() =>
-    registerBookMode.value === 'NEW'
-      ? Math.max(1, Math.floor(registerUnitSizeInput.value ?? 20))
-      : detectedUnitSize.value
+    Math.max(1, Math.floor(registerUnitSizeInput.value ?? detectedUnitSize.value))
   )
 
   /**
@@ -727,6 +726,12 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerError.value = ''
   }
 
+  /**
+   * 新規登録フォームの初期化。
+   *
+   * 1 Unit の語数は、既定の書籍から自動で決めた値で始める
+   * （画面では既存・新規どちらもプルダウンなので、必ず値が入っている必要がある）。
+   */
   function resetRegister(): void {
     registerStep.value = 1
     pasteText.value = ''
@@ -734,7 +739,7 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     registerHeadings.value = ['']
     registerBookMode.value = 'EXISTING'
     registerBookName.value = books.value[0]?.name ?? ''
-    registerUnitSizeInput.value = null
+    registerUnitSizeInput.value = detectUnitSize(books.value[0] ?? null)
     registerPlacement.value = 'CONTINUE'
     registerDuplicateMode.value = 'BOOK'
     registerSaveState.value = 'IDLE'
@@ -917,10 +922,17 @@ export const useJapaneseDemoStore = defineStore('japaneseDemo', () => {
     closeEditor()
   }
 
+  /** その書籍から自動で決まる 1 Unit の語数（書籍を選び直したときに使う）。 */
+  function bookUnitSizeOf(name: string): number {
+    const book = books.value.find((entry) => entry.name === name) ?? null
+    return detectUnitSize(book)
+  }
+
   return {
     // 仮データ
     words,
     books,
+    bookUnitSizeOf,
     // 表示設定
     display,
     setDisplay,

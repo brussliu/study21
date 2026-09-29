@@ -57,6 +57,22 @@
   color: var(--color-text-strong);
 }
 
+/* 単語を外部の辞書（有道）へのリンクにしたとき。押せることが分かるように**常に下線**を出し、
+   本文（`.jp-word`＝濃い文字色）より目を引く主色にする（利用者の指示 2026-09-26）。
+   **文字も表の本文（--fs-sm）より 1 段大きく**する（見出し語が主役だと分かるように）。
+   `.jp-word` の色はここで上書きする（同じ強さの規則なので、あとに書いたほうが効く） */
+.jp-word--link {
+  color: var(--color-primary);
+  font-size: var(--fs-md);
+  text-decoration: underline;
+  /* 下線を字面から少し離す（日本語は字が詰まって見えるため） */
+  text-underline-offset: 2px;
+}
+
+.jp-word--link:hover {
+  color: var(--color-primary-hover);
+}
+
 .jp-word__reading {
   display: block;
   color: var(--color-text-subtle);
@@ -85,13 +101,14 @@
   gap: var(--sp-3) var(--sp-4);
 }
 
-/* 伸びるのはキーワードだけ（ほかの条件は内容ぶんの幅のまま） */
+/* キーワードはほかの条件と同じく、左から順に並べる（利用者の指示で右端へ寄せるのをやめた）。
+   見出し語の部分一致なので、横いっぱいに伸ばす必要はない */
 .jp-filters__keyword {
-  flex: 1 1 12rem;
+  flex: 0 0 auto;
 }
 
 .jp-filters__keyword .input {
-  width: 100%;
+  width: 12rem;
 }
 
 .jp-filters__jlpt .select {
@@ -130,6 +147,11 @@
     flex: 0 0 auto;
   }
 
+  /* 縦に積むときは、キーワードも行いっぱいに使う */
+  .jp-filters__row .jp-filters__keyword .input {
+    width: 100%;
+  }
+
   .jp-filters__row .select,
   .jp-filters__row .range-input .select {
     flex: 1 1 auto;
@@ -140,10 +162,18 @@
 
 /* ---------- 単語情報管理の一覧（操作はアイコンだけ） ---------- */
 
-/* 操作列は 詳細・修正・削除 の 3 つぶんの幅で足りる
-   （設計システムの .col-actions は 120px。アイコンを 2 つ外したぶん詰める） */
+/* 操作列はアイコン 2 つぶんの幅（田の字なので 2 行）。
+   タグを並べるのは**セルの中の span**。td 自身に display: grid を当てると表のセルでなくなり、
+   行の高さが中身に合わず罫線がずれる（中国語訳・詳細情報件数と同じ型。実際に起きた） */
 .jp-words-table .col-actions {
-  width: 7.5rem;
+  width: 5rem;
+  min-width: 5rem;
+}
+
+.jp-row-actions__grid {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 2px;
 }
 
 /* 中国語訳の幅を稼ぐため、意味を持たない列は詰める。
@@ -159,8 +189,9 @@
 }
 
 .jp-words-table .col-jp-book {
-  width: 11rem;
-  min-width: 11rem;
+  width: 9rem;
+  min-width: 9rem;
+  max-width: 0;
 }
 
 .jp-words-table .col-jp-category {
@@ -168,55 +199,328 @@
   min-width: 6rem;
 }
 
-/* 見出しが長いので折り返して詰める。ただし詰めすぎると
-   A・B／C／D／E の 4 つが縦に積まれて行が高くなるので、
-   2 つ並ぶ幅（タグ 2 行ぶん）で止める */
+/* 見出しが長いので、列幅は 1 行で収まる幅を確保する。
+   取得状態は**タグ**（`.badge`）を 2×2 に並べる（1 行に 4 つ並べると 395px 必要で、
+   ほかの列を押し潰す。2×2 なら 208px。実測: tmp/jpn-badges/measure.html）。
+   実測値ちょうど（15rem）ではなく 1rem 余裕を足してある（フォント差で折り返さないように）
+   幅を詰めたいときは、ここではなく中国語訳（col-jp-chinese）の min-width を調整する */
 .jp-words-table .col-jp-acquire {
-  width: 10rem;
-  min-width: 10rem;
-  white-space: normal;
+  width: 16rem;
+  min-width: 16rem;
+  white-space: nowrap;
 }
 
-/* 空いた幅は中国語訳へ回す（表の残り幅をこの列が取る） */
-.jp-words-table .col-jp-chinese {
+/* 取得状態の中身も 1 行のまま（折り返さない） */
+.jp-words-table [data-jp-acquire] {
+  white-space: nowrap;
+}
+
+/* 詳細情報件数（2.0 の英語学習 word.jsp と同じ列）。
+   段落 10 個ぶんの小さなタグを並べる。2 行に収まる幅を確保する（2.0 は 430px 使っていた） */
+.jp-words-table .col-jp-detail-counts {
+  width: 18rem;
+  min-width: 18rem;
+}
+
+/* タグを並べるのは**セルの中の span**。
+   td 自身に `display: flex` を当てると表のセルでなくなり、**行の高さが中身に合わず**、
+   2 行目のタグが次の行へ食い込む（利用者の指摘「行高不一致・串行」。中国語訳の
+   `display: -webkit-box` と同じ型の不具合。実際に起きた） */
+.jp-words-table [data-jp-detail-counts] .jp-detail-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.jp-detail-count {
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  font-size: var(--fs-2xs);
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.jp-detail-count b {
+  padding: 2px 3px;
+  font-weight: var(--fw-medium);
+}
+
+.jp-detail-count em {
+  padding: 2px 3px;
+  background: var(--color-surface);
+  font-style: normal;
+}
+
+/* 空いた幅は「単語・読み方・品詞・中国語訳」の列へ回す（表の残り幅をこの列が取る）。
+   `max-width: 0` は「中身に押し広げさせない」ための定番の書き方。
+   これが無いと、この列が中身（長い訳語）に押されて広がり、
+   そのぶん**ほかの列が押し潰されて取得状態が折り返す**（実測）。
+   幅は min-width が下限、余った幅は max-width: 0 のまま表から配分される */
+.jp-words-table .col-jp-word-summary {
   width: auto;
   min-width: 14rem;
+  max-width: 0;
+}
+
+/* 1 行目（単語・読み方・品詞）と 2 行目（中国語訳）を縦に積む。
+   flex を当てるのは**セルの中の span**（td 自身に当てると表のセルでなくなり列幅が壊れる） */
+.jp-word-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 1 行目は横に並べる（単語・読み方・品詞） */
+.jp-word-summary__main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1) var(--sp-3);
+}
+
+/* 読み方と品詞は、単語（リンク）より少し控えめにする */
+.jp-word-summary__reading,
+.jp-word-summary__part {
+  color: var(--color-text-muted);
+  font-size: var(--fs-sm);
 }
 
 /* 中国語訳は長いので折り返して見せる（列幅をはみ出さない） */
 .jp-words-table [data-jp-chinese] {
+  color: var(--color-text-muted);
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-/* 取得状態（A・B／C／D／E）。一覧 API が取得状態を返さない間は「未取得」を並べる */
-.jp-acquire {
-  display: inline-flex;
-  align-items: center;
+/* 中国語訳は 2 行までに抑える（一覧の行の高さを揃える）。
+   **必ず中の span に当てる**（td 自身に display: -webkit-box を付けると、
+   表のセルではなくなり列幅の計算が壊れて隣の列へはみ出す。実際に起きた） */
+.jp-word-summary__chinese {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* AI 取得の 4 バッチ（batC41〜batC44）の状態を、検索条件の見出しの右に並べる。
+   色は設計システムの `.badge--*`（実行中＝warning／正常終了＝success／異常終了＝danger／
+   待機中・スキップ＝info／未実行・無効＝neutral）。狭い画面では折り返す */
+.jp-batch-states {
+  display: flex;
   flex-wrap: wrap;
-  gap: var(--sp-2);
-  color: var(--color-text-subtle);
-  font-size: var(--fs-xs);
-  /* 4 つのタグで列を押し広げない（狭い列では折り返す） */
-  min-width: 0;
-}
-
-/* 折り返してよい（min-content を 1 文字ぶんまで下げて、列幅を押し広げない） */
-.jp-acquire__item {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.jp-acquire__item {
-  display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+  /* 見出しの右、操作ボタンの左に寄せる（余白で押し出す） */
+  margin-right: auto;
+}
+
+/* 中のタグは 1 行のまま（文字の途中で折らない） */
+.jp-batch-states__item {
   white-space: nowrap;
 }
 
-.jp-acquire__label {
+/* 取得状態（A・B／C／D／E）はタグを 2×2 に並べる。
+   色は設計システムの `.badge--success`（取得済）／`badge--danger`（失敗）／
+   `badge--warning`（取得中）／`badge--neutral`（未取得・中止）を使う */
+.jp-acquire {  display: grid;
+  /* 2 列。各列はタグの幅に合わせる（1 行目 A・B／C、2 行目 D／E） */
+  grid-template-columns: repeat(2, max-content);
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-xs);
+  /* タグで列を押し広げない（幅は列が決める） */
+  min-width: 0;
+}
+
+/* 中のタグも 1 行のまま（文字の途中で折らない）。余白は設計システムの .badge に任せる */
+.jp-acquire__item {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+/* タグは <button>（取得済だけ押せる）。ブラウザ既定の見た目を持ち込まない
+   （font-family は button が継承しないので、指定しないと別のフォントになる） */
+.jp-acquire__item {
+  font-family: inherit;
+}
+
+.jp-acquire__item.is-clickable {
+  cursor: pointer;
+}
+
+.jp-acquire__item.is-clickable:hover {
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+/* 押せないタグも色はそのまま（無効の見た目にしない） */
+.jp-acquire__item:disabled {
+  opacity: 1;
+}
+
+/* ---------- 取得方法の窓（右上の 4 つの取得ボタンから開く） ----------
+   2.0 の英語学習の単語情報管理（word.jsp）の「詳細情報取得方法」の窓と同じ考え方:
+   対象の件数を出し、「取得済みをスキップ」か「すべて再取得」かを選ばせる。
+   選択肢は**大きく押しやすいボタン**にする（誤操作を減らす。2.0 と同じ形）。 */
+
+.jp-fetch-overlay {
+  align-items: center;
+}
+
+/* 背景（窓の外側）は押すと閉じる。ダイアログより下に敷く */
+.jp-fetch__backdrop {
+  position: absolute;
+  inset: 0;
+}
+
+.jp-fetch {
+  position: relative;
+  /* 「取得する情報」の 4 つが 1 行に収まる幅（44rem では 3+1 に折り返していた）。
+     実寸は Chrome の実測で確認（tmp/jpn-data-tab/acquire-dialog-wide.png） */
+  width: min(100%, 56rem);
+}
+
+.jp-fetch__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* どの情報を取るか（4 つを横に並べる。狭い画面では折り返す） */
+.jp-fetch__kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.jp-fetch__legend {
+  padding: 0;
+  margin-bottom: var(--sp-1);
   color: var(--color-text-muted);
+  font-size: var(--fs-sm);
+}
+
+.jp-fetch__kind {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  cursor: pointer;
+}
+
+.jp-fetch__kind:hover {
+  border-color: var(--color-primary);
+}
+
+/* 選んでいる情報（radio の見た目は共通の規則に任せ、枠と色で示す） */
+.jp-fetch__kind.is-selected {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+  color: var(--color-primary);
   font-weight: var(--fw-medium);
+}
+
+.jp-fetch__kind-input {
+  margin: 0;
+}
+
+.jp-fetch__question {
+  margin: 0;
+  font-weight: var(--fw-medium);
+}
+
+.jp-fetch__actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-fetch__choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jp-fetch__choice:hover {
+  border-color: var(--color-primary);
+  background: var(--color-primary-soft);
+}
+
+.jp-fetch__choice strong {
+  display: block;
+  color: var(--color-text-strong);
+}
+
+.jp-fetch__choice small {
+  display: block;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+}
+
+/* スキップは控えめ、すべて再取得は注意を引く色にする（2.0 の色分けに合わせる） */
+.jp-fetch__choice--skip:hover {
+  border-color: var(--color-primary);
+}
+
+.jp-fetch__choice--reacquire:hover {
+  border-color: var(--color-warning);
+  background: var(--color-warning-soft);
+}
+
+.jp-fetch__cancel {
+  align-self: flex-end;
+}
+
+/* ---------- AI 取得の履歴（取得状態のタグから開く） ---------- */
+
+.jp-history {
+  height: min(100%, 48rem);
+}
+
+.jp-history__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  overflow-y: auto;
+}
+
+/* 問題の履歴（C1 と C2 のように内容種別ごとに分ける） */
+.jp-history__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.jp-history__group-title {
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+  color: var(--color-text-strong);
+}
+
+.jp-history__table {
+  width: 100%;
 }
 
 .jp-mastery {
@@ -758,3 +1062,191 @@
 .jp-list-head__spacer {
   margin-left: auto;
 }
+
+/* ---------- 学習画面（別ウィンドウ。自動最大化） ----------
+   単語情報管理の【詳細】から window.open で開くページ。中身は .jp-demo-study（高さ 100dvh）だけを
+   そのまま出す（利用者の指示: 画面上部の帯＝見出し・修正・閉じるは置かない。2.0 の学習画面も中身だけ）。
+   窓はブラウザの × で閉じ、修正は一覧の【修正】から行う。 */
+
+.jp-study-window {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.jp-study-window__body {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 学習画面は「窓いっぱい」で組んである（min-height: 100dvh）。
+   この画面も窓いっぱいなので、そのまま残りの高さに任せる */
+.jp-study-window__body .jp-demo-study {
+  min-height: 0;
+}
+
+/* 読み込み中・エラー・見つからないときだけ、端に張り付かないよう余白を付ける
+   （詳細が出ているときは .jp-demo-study が自分の余白を持つ） */
+.jp-study-window__body > .alert,
+.jp-study-window__body > .jp-hint {
+  margin: var(--sp-4);
+}
+
+/* ---------- 学習画面（新画面）をダイアログで開く ----------
+   編集ダイアログの「プレビュー」で使う（新画面は高さ 100dvh で組んであるので、
+   ダイアログの高さいっぱいに広げ、タブの中だけをスクロールさせる）。 */
+
+.jp-study-dialog {
+  height: min(100%, 60rem);
+}
+
+.jp-study-dialog__body {
+  padding: 0;
+  overflow: hidden;
+}
+
+.jp-study-dialog__body .jp-demo-study {
+  height: 100%;
+  min-height: 0;
+  padding: var(--sp-3) var(--sp-4);
+}
+
+/* タブの中は縦にスクロールさせる（学習画面の他の要素は固定） */
+.jp-study-dialog__body .jp-demo-study .jp-study-card--tabs {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.jp-study-dialog__body .jp-demo-study .jp-demo-tabpanel {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* ---------- 詳細の版の履歴（修正ダイアログの中） ----------
+   版は積み上げ式（AI の取得も保存も新しい版を ACTIVE にする）。
+   ここでは版ごとに「誰が作ったか・いつ取得したか・段落が何件あるか」を出し、
+   古い版に戻せるようにする。色は tokens.css の変数だけを使う。 */
+
+.jp-version-fold {
+  margin-top: var(--sp-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface-alt);
+}
+
+.jp-version-fold__summary {
+  padding: var(--sp-2) var(--sp-3);
+  color: var(--color-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+  cursor: pointer;
+}
+
+.jp-version-fold[open] .jp-version-fold__summary {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.jp-version {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.jp-version__head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.jp-version__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  margin: 0;
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-version__head > button {
+  margin-left: auto;
+}
+
+.jp-version__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-version__item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+}
+
+/* 生效中の版は、左の帯と淡い背景で分かるようにする */
+.jp-version__item.is-current {
+  border-left-color: var(--color-success);
+  background: var(--color-success-soft);
+}
+
+.jp-version__row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.jp-version__no {
+  color: var(--color-text-strong);
+  font-size: var(--fs-md);
+  font-weight: var(--fw-semibold);
+}
+
+.jp-version__origin,
+.jp-version__at,
+.jp-version__note {
+  color: var(--color-text-muted);
+  font-size: var(--fs-xs);
+}
+
+.jp-version__use {
+  margin-left: auto;
+}
+
+.jp-version__counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jp-version__counts > li {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-1);
+}
+
+.jp-version__count-label {
+  color: var(--color-text-subtle);
+  font-size: var(--fs-2xs);
+}
+
+.jp-version__count-value {
+  color: var(--color-text);
+  font-size: var(--fs-xs);
+  font-weight: var(--fw-medium);
+}
+

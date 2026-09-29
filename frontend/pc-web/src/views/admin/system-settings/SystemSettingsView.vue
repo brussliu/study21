@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onBeforeUnmount, onMounted } from 'vue'
 import AppIcon from '@/components/ui/AppIcon.vue'
 import GeometryAiSettingsSection from '@/views/admin/system-settings/GeometryAiSettingsSection.vue'
 import ClassroomAiSettingsSection from '@/views/admin/system-settings/ClassroomAiSettingsSection.vue'
 import BatchSchedulePanel from '@/features/batch/BatchSchedulePanel.vue'
+import { cancelAiDataSchemaRender } from '@/features/system-settings/aiDataSchemaPanel'
 import '@/features/system-settings/system-settings.css'
 import '@/features/system-settings/study2SettingRuntime'
 
@@ -26,6 +27,12 @@ declare global {
 
 onMounted(() => {
   window.__study21SystemSettings?.mount()
+})
+
+// Data TAB の中身は素の DOM で描くので、Vue の片付けでは消えない。
+// 再試行のタイマーが残ると、画面を離れた後に動いて落ちるので止める
+onBeforeUnmount(() => {
+  cancelAiDataSchemaRender()
 })
 </script>
 

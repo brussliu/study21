@@ -1,0 +1,967 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.admin.japanesewordai.JapaneseWordAiMapper">
+
+    <!--
+      日本語単語 AI 取得（batC41〜batC44）の読み書き。
+
+      ・対象の選定は SQL に任せる（除外条件を 1 か所にまとめる）
+      ・詳細は**新しい版を作る**（1 語 1 行の UPSERT はやめた。上書きせず版を積み上げる。
+        内容版数は「その語の最大 + 1」）
+      ・問題は「同じ語・同じ種別の ACTIVE を ARCHIVED にしてから入れる」
+        （JPN_テスト出題情報.問題ID が参照しているので、消さずに残す）
+      ・AI 生成履歴は 1 語 × 1 内容種別で 1 行（uq は無いので、実行中の行を探して使い回す）
+    -->
+
+    <resultMap id="AiCallTargetMap" type="com.study21.admin.japanesewordai.JapaneseWordAiMapper$AiCallTarget">
+        <id property="wordId" column="wordId"/>
+        <result property="heading" column="heading"/>
+        <result property="reading" column="reading"/>
+        <result property="partOfSpeech" column="partOfSpeech"/>
+        <result property="jlptLevel" column="jlptLevel"/>
+        <result property="stateCode" column="stateCode"/>
+    </resultMap>
+
+    <resultMap id="CollectionMap" type="com.study21.admin.japanesewordai.JapaneseWordAiMapper$CollectionRow">
+        <result property="book" column="book"/>
+        <result property="category" column="category"/>
+        <result property="wordSeq" column="wordSeq"/>
+        <result property="partOfSpeech" column="partOfSpeech"/>
+        <result property="chineseMeaning" column="chineseMeaning"/>
+    </resultMap>
+
+    <!--
+      対象の語。引数の wordIds が空なら「まだ成功していない語」を古い順に limit 件、
+      指定があればその語だけを返す（画面から選んだ語）。
+    -->
+    <select id="findTargets" resultMap="AiCallTargetMap">
+        SELECT
+            w."単語ID"       AS wordId,
+            w."見出し語"     AS heading,
+            w."読み"         AS reading,
+            w."品詞"         AS partOfSpeech,
+            w."JLPTレベル"   AS jlptLevel,
+            w."状態コード"   AS stateCode
+        FROM public."JPN_単語情報" w
+        WHERE w."状態コード" = 'ACTIVE'
+          AND NOT EXISTS (
+              SELECT 1 FROM public."JPN_AI生成履歴情報" a
+              WHERE a."単語ID" = w."単語ID"
+                AND a."内容種別コード" = #{contentType}
+                AND a."状態コード" = 'SUCCEEDED'
+          )
+        <if test="wordIds != null and wordIds.size() > 0">
+            AND w."単語ID" IN
+            <foreach collection="wordIds" item="id" open="(" separator="," close=")">
+                #{id}
+            </foreach>
+        </if>
+        ORDER BY w."単語ID"
+        LIMIT #{limit}
+    </select>
+
+    <!-- 1 語の収録（AI に渡す入力。無ければ空） -->
+    <select id="listCollections" resultMap="CollectionMap">
+        SELECT
+            c."書籍"                 AS book,
+            c."分類"                 AS category,
+            c."単語SEQ"              AS wordSeq,
+            c."掲載品詞"             AS partOfSpeech,
+            c."掲載中国語意味"       AS chineseMeaning
+        FROM public."JPN_単語収録情報" c
+        WHERE c."単語ID" = #{wordId}
+          AND c."状態コード" = 'ACTIVE'
+        ORDER BY c."書籍", c."分類", c."単語SEQ"
+    </select>
+
+    <!-- ==================================================================
+         既存の詳細（**有効版**）を AI に渡すために読む。
+         user-api の JpnWordDetailMapper.xml と同じ列・同じ並び（画面が読む形と
+         AI に渡す形を食い違わせない）。組み立ては common-core の
+         JpnWordDetailAssembler（純関数）が行い、キーは 詳細JSON と同じになる。
+         ================================================================== -->
+
+    <resultMap id="DetailHeaderMap" type="com.study21.common.core.japanese.JpnWordDetailEntity">
+        <id     property="detailId"           column="詳細ID"/>
+        <result property="wordId"             column="単語ID"/>
+        <result property="contentVersion"     column="内容版数"/>
+        <result property="stateCode"          column="状態コード"/>
+        <result property="originDetailId"     column="元詳細ID"/>
+        <result property="generationId"       column="生成ID"/>
+        <result property="aiProvider"         column="AIプロバイダ"/>
+        <result property="aiModel"            column="AIモデル"/>
+        <result property="fetchedAt"          column="取得日時"/>
+        <result property="manualCorrected"    column="手修正フラグ"/>
+        <result property="note"               column="備考"/>
+        <result property="coreMeaning"        column="核心意味"/>
+        <result property="descriptionJa"      column="説明_日本語"/>
+        <result property="descriptionZh"      column="説明_中国語"/>
+        <result property="partOfSpeech"       column="品詞"/>
+        <result property="jlptLevel"          column="JLPTレベル"/>
+        <result property="conjugation"        column="活用型"/>
+        <result property="transitivity"       column="自他"/>
+        <result property="importance"         column="重要度"/>
+        <result property="memoryHint"         column="記憶ヒント"/>
+        <result property="memoryHintBasis"    column="記憶ヒント根拠"/>
+        <result property="pronunciationJson"  column="発音JSON"/>
+        <result property="conjugationsJson"   column="活用形JSON"/>
+        <result property="transitivityPairJson" column="自他対応JSON"/>
+        <result property="structuredJson"     column="元レスポンスJSON"/>
+    </resultMap>
+
+    <sql id="DetailHeaderColumns">
+        d."詳細ID", d."単語ID", d."内容版数", d."状態コード", d."元詳細ID", d."生成ID",
+        d."AIプロバイダ", d."AIモデル", d."取得日時", d."手修正フラグ", d."備考",
+        d."核心意味", d."説明_日本語", d."説明_中国語", d."品詞", d."JLPTレベル",
+        d."活用型", d."自他", d."重要度", d."記憶ヒント", d."記憶ヒント根拠",
+        d."発音JSON"::text AS "発音JSON",
+        d."活用形JSON"::text AS "活用形JSON",
+        d."自他対応JSON"::text AS "自他対応JSON",
+        d."元レスポンスJSON"::text AS "元レスポンスJSON"
+    </sql>
+
+    <resultMap id="DetailSenseMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Sense">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="japanese"         column="日本語"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="context"          column="場面"/>
+        <result property="style"            column="文体"/>
+        <result property="noteJapanese"     column="補足_日本語"/>
+        <result property="noteChinese"      column="補足_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailExampleMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Example">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="japanese"         column="例文_日本語"/>
+        <result property="reading"          column="例文読み"/>
+        <result property="chinese"          column="例文_中国語"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="source"           column="出典"/>
+        <result property="level"            column="レベル"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailPatternMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Pattern">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="pattern"          column="文型"/>
+        <result property="reading"          column="文型読み"/>
+        <result property="chinese"          column="説明_中国語"/>
+        <result property="example"          column="例文_日本語"/>
+        <result property="exampleChinese"   column="例文_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailDialogMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Dialog">
+        <id     property="dialogId"         column="会話ID"/>
+        <result property="orderNo"          column="表示順"/>
+        <result property="scene"            column="場面"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailDialogLineMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$DialogLine">
+        <id     property="dialogId"         column="会話ID"/>
+        <result property="orderNo"          column="表示順"/>
+        <result property="speaker"          column="話者"/>
+        <result property="japanese"         column="日本語"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailSynonymMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Synonym">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="heading"          column="見出し語"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="shared"           column="共通点"/>
+        <result property="difference"       column="違い"/>
+        <result property="scene"            column="場面"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailCautionMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Caution">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="kind"             column="区分"/>
+        <result property="title"            column="見出し"/>
+        <result property="wrong"            column="誤り"/>
+        <result property="correct"          column="正しい"/>
+        <result property="reason"           column="理由"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailCollocationMap"
+               type="com.study21.common.core.japanese.JpnWordDetailChildren$Collocation">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="expression"       column="表現"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="usage"            column="使い方"/>
+        <result property="exampleJapanese"  column="例文_日本語"/>
+        <result property="exampleChinese"   column="例文_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailRelatedWordMap"
+               type="com.study21.common.core.japanese.JpnWordDetailChildren$RelatedWord">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="relation"         column="関係"/>
+        <result property="heading"          column="見出し語"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailUsageNoteMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$UsageNote">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="register"         column="文体区分"/>
+        <result property="politeness"       column="丁寧さ"/>
+        <result property="audience"         column="対象"/>
+        <result property="note"             column="備考"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DetailPracticeMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Practice">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="kind"             column="種別"/>
+        <result property="question"         column="問題_日本語"/>
+        <result property="questionChinese"  column="問題_中国語"/>
+        <result property="choicesJson"      column="選択肢JSON"/>
+        <result property="freeWriting"      column="自由記述フラグ"/>
+        <result property="answer"           column="正解"/>
+        <result property="explanation"      column="解説"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <!-- AI の入力に渡す既存の詳細＝**有効版**だけ（履歴は渡さない） -->
+    <select id="findActiveDetail" resultMap="DetailHeaderMap">
+        SELECT <include refid="DetailHeaderColumns"/>
+          FROM public."JPN_単語詳細情報" d
+         WHERE d."単語ID" = #{wordId}
+           AND d."状態コード" = 'ACTIVE'
+         ORDER BY d."内容版数" DESC
+         LIMIT 1
+    </select>
+
+    <select id="listDetailSenses" resultMap="DetailSenseMap">
+        SELECT s."表示順", s."語義番号", s."日本語", s."中国語", s."場面", s."文体",
+               s."補足_日本語", s."補足_中国語", s."手修正フラグ", s."登録元コード"
+          FROM public."JPN_単語詳細_語義情報" s
+         WHERE s."詳細ID" = #{detailId}
+         ORDER BY s."表示順", s."語義ID"
+    </select>
+
+    <select id="listDetailExamples" resultMap="DetailExampleMap">
+        SELECT e."表示順", e."例文_日本語", e."例文読み", e."例文_中国語", e."語義番号",
+               e."出典", e."レベル", e."手修正フラグ", e."登録元コード"
+          FROM public."JPN_単語詳細_例文情報" e
+         WHERE e."詳細ID" = #{detailId}
+         ORDER BY e."表示順", e."例文ID"
+    </select>
+
+    <select id="listDetailPatterns" resultMap="DetailPatternMap">
+        SELECT p."表示順", p."文型", p."文型読み", p."説明_中国語", p."例文_日本語", p."例文_中国語",
+               p."手修正フラグ", p."登録元コード"
+          FROM public."JPN_単語詳細_文型情報" p
+         WHERE p."詳細ID" = #{detailId}
+         ORDER BY p."表示順", p."文型ID"
+    </select>
+
+    <select id="listDetailDialogs" resultMap="DetailDialogMap">
+        SELECT g."会話ID", g."表示順", g."場面", g."手修正フラグ", g."登録元コード"
+          FROM public."JPN_単語詳細_会話情報" g
+         WHERE g."詳細ID" = #{detailId}
+         ORDER BY g."表示順", g."会話ID"
+    </select>
+
+    <select id="listDetailDialogLines" resultMap="DetailDialogLineMap">
+        SELECT l."会話ID", l."表示順", l."話者", l."日本語", l."中国語", l."手修正フラグ", l."登録元コード"
+          FROM public."JPN_単語詳細_会話行情報" l
+          JOIN public."JPN_単語詳細_会話情報" g ON g."会話ID" = l."会話ID"
+         WHERE g."詳細ID" = #{detailId}
+         ORDER BY g."表示順", g."会話ID", l."表示順", l."会話行ID"
+    </select>
+
+    <select id="listDetailSynonyms" resultMap="DetailSynonymMap">
+        SELECT y."表示順", y."見出し語", y."読み", y."中国語", y."共通点", y."違い", y."場面",
+               y."手修正フラグ", y."登録元コード"
+          FROM public."JPN_単語詳細_類義語情報" y
+         WHERE y."詳細ID" = #{detailId}
+         ORDER BY y."表示順", y."類義語ID"
+    </select>
+
+    <select id="listDetailCautions" resultMap="DetailCautionMap">
+        SELECT c."表示順", c."区分", c."見出し", c."誤り", c."正しい", c."理由",
+               c."手修正フラグ", c."登録元コード"
+          FROM public."JPN_単語詳細_注意情報" c
+         WHERE c."詳細ID" = #{detailId}
+         ORDER BY c."表示順", c."注意ID"
+    </select>
+
+    <select id="listDetailCollocations" resultMap="DetailCollocationMap">
+        SELECT k."表示順", k."表現", k."読み", k."中国語", k."使い方", k."例文_日本語", k."例文_中国語",
+               k."手修正フラグ", k."登録元コード"
+          FROM public."JPN_単語詳細_コロケーション情報" k
+         WHERE k."詳細ID" = #{detailId}
+         ORDER BY k."表示順", k."コロケーションID"
+    </select>
+
+    <select id="listDetailRelatedWords" resultMap="DetailRelatedWordMap">
+        SELECT r."表示順", r."関係", r."見出し語", r."読み", r."中国語",
+               r."手修正フラグ", r."登録元コード"
+          FROM public."JPN_単語詳細_関連語情報" r
+         WHERE r."詳細ID" = #{detailId}
+         ORDER BY r."表示順", r."関連語ID"
+    </select>
+
+    <select id="listDetailUsageNotes" resultMap="DetailUsageNoteMap">
+        SELECT u."表示順", u."語義番号", u."文体区分", u."丁寧さ", u."対象", u."備考",
+               u."手修正フラグ", u."登録元コード"
+          FROM public."JPN_単語詳細_使用場面情報" u
+         WHERE u."詳細ID" = #{detailId}
+         ORDER BY u."表示順", u."使用場面ID"
+    </select>
+
+    <select id="listDetailPractices" resultMap="DetailPracticeMap">
+        SELECT w."表示順", w."種別", w."問題_日本語", w."問題_中国語", w."選択肢JSON"::text AS "選択肢JSON",
+               w."自由記述フラグ", w."正解", w."解説", w."手修正フラグ", w."登録元コード"
+          FROM public."JPN_単語詳細_練習情報" w
+         WHERE w."詳細ID" = #{detailId}
+         ORDER BY w."表示順", w."練習ID"
+    </select>
+
+    <!-- ==================================================================
+         詳細を「新しい版」として書く（切片3）。
+
+         ・版は積み上げる（上書きしない）。新しい版が ACTIVE、前の版は ARCHIVED
+         ・人が入れた行（登録元コード='APP' または 手修正フラグ=true）は新しい版へ複製する
+           （内容・出所・表示順 はそのまま。人工の編集を AI の取り直しで消さない）
+         ・AI の新しい行は 表示順 = #{startOrderNo} + 段落内の位置（人が入れた行の後ろ）
+         ================================================================== -->
+
+    <!-- 古い有効版を ARCHIVED にする（消さない＝履歴） -->
+    <update id="archiveActiveDetail">
+        UPDATE public."JPN_単語詳細情報"
+           SET "状態コード" = 'ARCHIVED',
+               "更新元コード" = 'BATCH',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "単語ID" = #{wordId}
+           AND "状態コード" = 'ACTIVE'
+    </update>
+
+    <!--
+      新しい版のヘッダ。内容版数は「その語の最大 + 1」を副問い合わせで数える
+      （同じ語を並行に取ってもぶつからない）。元詳細ID は「今の有効版」。
+      採番された 詳細ID が header.detailId に入る。
+
+      なぜ INSERT ... VALUES なのか: PostgreSQL のドライバは INSERT ... SELECT だと
+      getGeneratedKeys を返さない（採番した 詳細ID が取れない）。VALUES ＋ 副問い合わせなら
+      採番した ID が返る（真 DB で確認済み）。
+    -->
+    <insert id="insertDetailVersion" useGeneratedKeys="true" keyProperty="detailId"
+            keyColumn="詳細ID">
+        INSERT INTO public."JPN_単語詳細情報" (
+            "単語ID", "内容版数", "状態コード", "元詳細ID", "生成ID",
+            "AIプロバイダ", "AIモデル", "取得日時", "手修正フラグ",
+            "核心意味", "説明_日本語", "説明_中国語", "品詞", "JLPTレベル", "活用型", "自他",
+            "重要度", "記憶ヒント", "記憶ヒント根拠",
+            "発音JSON", "活用形JSON", "自他対応JSON", "元レスポンスJSON",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{wordId},
+            (SELECT COALESCE(MAX(d."内容版数"), 0) + 1
+               FROM public."JPN_単語詳細情報" d WHERE d."単語ID" = #{wordId}),
+            'ACTIVE',
+            #{originDetailId},
+            #{generationId},
+            #{aiProvider}, #{aiModel}, #{fetchedAt},
+            <choose>
+                <when test="manualCorrected != null">#{manualCorrected},</when>
+                <otherwise>false,</otherwise>
+            </choose>
+            #{coreMeaning}, #{descriptionJa}, #{descriptionZh},
+            #{partOfSpeech}, #{jlptLevel}, #{conjugation}, #{transitivity},
+            #{importance}, #{memoryHint}, #{memoryHintBasis},
+            CAST(COALESCE(#{pronunciationJson}, '{}') AS jsonb),
+            CAST(COALESCE(#{conjugationsJson}, '[]') AS jsonb),
+            <choose>
+                <when test="transitivityPairJson != null">
+                    CAST(#{transitivityPairJson} AS jsonb),
+                </when>
+                <otherwise>NULL,</otherwise>
+            </choose>
+            CAST(COALESCE(#{structuredJson}, '{}') AS jsonb),
+            NULL, 'BATCH'
+        )
+    </insert>
+
+    <!-- 人が入れた行の 表示順 の最大（AI の行をその後ろに置くため。人が入れた行が無ければ 0） -->
+    <select id="maxKeptDetailOrderNo" resultType="int">
+        SELECT COALESCE(MAX(o."表示順"), 0)::int
+          FROM (
+            SELECT "表示順" FROM public."JPN_単語詳細_語義情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_例文情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_文型情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_会話情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT l."表示順" FROM public."JPN_単語詳細_会話行情報" l
+              JOIN public."JPN_単語詳細_会話情報" g ON g."会話ID" = l."会話ID"
+             WHERE g."詳細ID" = #{detailId} AND (l."手修正フラグ" OR l."登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_類義語情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_注意情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_コロケーション情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_関連語情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_使用場面情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+            UNION ALL
+            SELECT "表示順" FROM public."JPN_単語詳細_練習情報"
+             WHERE "詳細ID" = #{detailId} AND ("手修正フラグ" OR "登録元コード" = 'APP')
+          ) o
+    </select>
+
+    <!-- 人が入れた行の複製（元の版 → 新しい版）。内容・出所・表示順 はそのまま -->
+    <insert id="copyDetailSenses">
+        INSERT INTO public."JPN_単語詳細_語義情報" (
+            "詳細ID", "表示順", "語義番号", "日本語", "中国語", "場面", "文体",
+            "補足_日本語", "補足_中国語", "手修正フラグ",
+            "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, s."表示順", s."語義番号", s."日本語", s."中国語", s."場面", s."文体",
+               s."補足_日本語", s."補足_中国語", s."手修正フラグ",
+               s."登録者アカウントID", s."登録元コード"
+          FROM public."JPN_単語詳細_語義情報" s
+         WHERE s."詳細ID" = #{sourceDetailId}
+           AND (s."手修正フラグ" OR s."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailExamples">
+        INSERT INTO public."JPN_単語詳細_例文情報" (
+            "詳細ID", "表示順", "例文_日本語", "例文読み", "例文_中国語", "語義番号", "出典", "レベル",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, e."表示順", e."例文_日本語", e."例文読み", e."例文_中国語", e."語義番号",
+               e."出典", e."レベル", e."手修正フラグ", e."登録者アカウントID", e."登録元コード"
+          FROM public."JPN_単語詳細_例文情報" e
+         WHERE e."詳細ID" = #{sourceDetailId}
+           AND (e."手修正フラグ" OR e."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailPatterns">
+        INSERT INTO public."JPN_単語詳細_文型情報" (
+            "詳細ID", "表示順", "文型", "文型読み", "説明_中国語", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, p."表示順", p."文型", p."文型読み", p."説明_中国語", p."例文_日本語",
+               p."例文_中国語", p."手修正フラグ", p."登録者アカウントID", p."登録元コード"
+          FROM public."JPN_単語詳細_文型情報" p
+         WHERE p."詳細ID" = #{sourceDetailId}
+           AND (p."手修正フラグ" OR p."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailDialogs">
+        INSERT INTO public."JPN_単語詳細_会話情報" (
+            "詳細ID", "表示順", "場面", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, g."表示順", g."場面", g."手修正フラグ",
+               g."登録者アカウントID", g."登録元コード"
+          FROM public."JPN_単語詳細_会話情報" g
+         WHERE g."詳細ID" = #{sourceDetailId}
+           AND (g."手修正フラグ" OR g."登録元コード" = 'APP')
+    </insert>
+
+    <!--
+      会話の発言は 会話ID で親にぶら下がる。新しい版の同じ 表示順 の会話へ付け替える
+      （会話の複製のあとに呼ぶこと）。
+    -->
+    <insert id="copyDetailDialogLines">
+        INSERT INTO public."JPN_単語詳細_会話行情報" (
+            "会話ID", "表示順", "話者", "日本語", "中国語", "手修正フラグ",
+            "登録者アカウントID", "登録元コード"
+        )
+        SELECT n."会話ID", l."表示順", l."話者", l."日本語", l."中国語", l."手修正フラグ",
+               l."登録者アカウントID", l."登録元コード"
+          FROM public."JPN_単語詳細_会話行情報" l
+          JOIN public."JPN_単語詳細_会話情報" o ON o."会話ID" = l."会話ID"
+          JOIN public."JPN_単語詳細_会話情報" n
+            ON n."詳細ID" = #{detailId} AND n."表示順" = o."表示順"
+         WHERE o."詳細ID" = #{sourceDetailId}
+           AND (l."手修正フラグ" OR l."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailSynonyms">
+        INSERT INTO public."JPN_単語詳細_類義語情報" (
+            "詳細ID", "表示順", "見出し語", "読み", "中国語", "共通点", "違い", "場面",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, y."表示順", y."見出し語", y."読み", y."中国語", y."共通点", y."違い", y."場面",
+               y."手修正フラグ", y."登録者アカウントID", y."登録元コード"
+          FROM public."JPN_単語詳細_類義語情報" y
+         WHERE y."詳細ID" = #{sourceDetailId}
+           AND (y."手修正フラグ" OR y."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailCautions">
+        INSERT INTO public."JPN_単語詳細_注意情報" (
+            "詳細ID", "表示順", "区分", "見出し", "誤り", "正しい", "理由",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, c."表示順", c."区分", c."見出し", c."誤り", c."正しい", c."理由",
+               c."手修正フラグ", c."登録者アカウントID", c."登録元コード"
+          FROM public."JPN_単語詳細_注意情報" c
+         WHERE c."詳細ID" = #{sourceDetailId}
+           AND (c."手修正フラグ" OR c."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailCollocations">
+        INSERT INTO public."JPN_単語詳細_コロケーション情報" (
+            "詳細ID", "表示順", "表現", "読み", "中国語", "使い方", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, k."表示順", k."表現", k."読み", k."中国語", k."使い方",
+               k."例文_日本語", k."例文_中国語", k."手修正フラグ",
+               k."登録者アカウントID", k."登録元コード"
+          FROM public."JPN_単語詳細_コロケーション情報" k
+         WHERE k."詳細ID" = #{sourceDetailId}
+           AND (k."手修正フラグ" OR k."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailRelatedWords">
+        INSERT INTO public."JPN_単語詳細_関連語情報" (
+            "詳細ID", "表示順", "関係", "見出し語", "読み", "中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, r."表示順", r."関係", r."見出し語", r."読み", r."中国語",
+               r."手修正フラグ", r."登録者アカウントID", r."登録元コード"
+          FROM public."JPN_単語詳細_関連語情報" r
+         WHERE r."詳細ID" = #{sourceDetailId}
+           AND (r."手修正フラグ" OR r."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailUsageNotes">
+        INSERT INTO public."JPN_単語詳細_使用場面情報" (
+            "詳細ID", "表示順", "語義番号", "文体区分", "丁寧さ", "対象", "備考",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, u."表示順", u."語義番号", u."文体区分", u."丁寧さ", u."対象", u."備考",
+               u."手修正フラグ", u."登録者アカウントID", u."登録元コード"
+          FROM public."JPN_単語詳細_使用場面情報" u
+         WHERE u."詳細ID" = #{sourceDetailId}
+           AND (u."手修正フラグ" OR u."登録元コード" = 'APP')
+    </insert>
+
+    <insert id="copyDetailPractices">
+        INSERT INTO public."JPN_単語詳細_練習情報" (
+            "詳細ID", "表示順", "種別", "問題_日本語", "問題_中国語", "選択肢JSON", "自由記述フラグ",
+            "正解", "解説", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{detailId}, w."表示順", w."種別", w."問題_日本語", w."問題_中国語", w."選択肢JSON",
+               w."自由記述フラグ", w."正解", w."解説", w."手修正フラグ",
+               w."登録者アカウントID", w."登録元コード"
+          FROM public."JPN_単語詳細_練習情報" w
+         WHERE w."詳細ID" = #{sourceDetailId}
+           AND (w."手修正フラグ" OR w."登録元コード" = 'APP')
+    </insert>
+
+    <!-- AI の新しい行。表示順は #{row.orderNo}（Java 側で「複製した行の最大 + 位置」を入れてある） -->
+    <insert id="insertDetailSense">
+        INSERT INTO public."JPN_単語詳細_語義情報" (
+            "詳細ID", "表示順", "語義番号", "日本語", "中国語", "場面", "文体",
+            "補足_日本語", "補足_中国語", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.senseNumber}, #{row.japanese}, #{row.chinese},
+            #{row.context}, #{row.style}, #{row.noteJapanese}, #{row.noteChinese}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailExample">
+        INSERT INTO public."JPN_単語詳細_例文情報" (
+            "詳細ID", "表示順", "例文_日本語", "例文読み", "例文_中国語", "語義番号", "出典", "レベル",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.japanese}, #{row.reading}, #{row.chinese},
+            #{row.senseNumber}, #{row.source}, #{row.level}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailPattern">
+        INSERT INTO public."JPN_単語詳細_文型情報" (
+            "詳細ID", "表示順", "文型", "文型読み", "説明_中国語", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.pattern}, #{row.reading}, #{row.chinese},
+            #{row.example}, #{row.exampleChinese}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <!--
+      会話の枠。AI の行は他の段落と同じく「複製した行の後ろ」から振る（人の会話を上書きしない）。
+      採番された 会話ID は row.dialogId に入り、そのあとの発言（insertDetailDialogLine）で使う。
+    -->
+    <insert id="insertDetailDialog" useGeneratedKeys="true" keyProperty="row.dialogId" keyColumn="会話ID">
+        INSERT INTO public."JPN_単語詳細_会話情報" (
+            "詳細ID", "表示順", "場面", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.scene}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <!-- 会話の発言（親の 会話ID は 会話の INSERT が採番した値） -->
+    <insert id="insertDetailDialogLine">
+        INSERT INTO public."JPN_単語詳細_会話行情報" (
+            "会話ID", "表示順", "話者", "日本語", "中国語", "手修正フラグ",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{row.dialogId}, #{row.orderNo}, #{row.speaker}, #{row.japanese}, #{row.chinese}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailSynonym">
+        INSERT INTO public."JPN_単語詳細_類義語情報" (
+            "詳細ID", "表示順", "見出し語", "読み", "中国語", "共通点", "違い", "場面",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.heading}, #{row.reading}, #{row.chinese},
+            #{row.shared}, #{row.difference}, #{row.scene}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailCaution">
+        INSERT INTO public."JPN_単語詳細_注意情報" (
+            "詳細ID", "表示順", "区分", "見出し", "誤り", "正しい", "理由",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.kind}, #{row.title}, #{row.wrong},
+            #{row.correct}, #{row.reason}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailCollocation">
+        INSERT INTO public."JPN_単語詳細_コロケーション情報" (
+            "詳細ID", "表示順", "表現", "読み", "中国語", "使い方", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.expression}, #{row.reading}, #{row.chinese},
+            #{row.usage}, #{row.exampleJapanese}, #{row.exampleChinese}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailRelatedWord">
+        INSERT INTO public."JPN_単語詳細_関連語情報" (
+            "詳細ID", "表示順", "関係", "見出し語", "読み", "中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.relation}, #{row.heading}, #{row.reading},
+            #{row.chinese}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailUsageNote">
+        INSERT INTO public."JPN_単語詳細_使用場面情報" (
+            "詳細ID", "表示順", "語義番号", "文体区分", "丁寧さ", "対象", "備考",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.senseNumber}, #{row.register}, #{row.politeness},
+            #{row.audience}, #{row.note}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <insert id="insertDetailPractice">
+        INSERT INTO public."JPN_単語詳細_練習情報" (
+            "詳細ID", "表示順", "種別", "問題_日本語", "問題_中国語", "選択肢JSON", "自由記述フラグ",
+            "正解", "解説", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{detailId}, #{row.orderNo}, #{row.kind}, #{row.question}, #{row.questionChinese},
+            CAST(COALESCE(#{row.choicesJson}, '[]') AS jsonb), COALESCE(#{row.freeWriting}, false),
+            #{row.answer}, #{row.explanation}, false, NULL, 'BATCH'
+        )
+    </insert>
+
+    <!--
+      まだ読みが無い語に、AI が書いた読みを入れる。
+      画面からの登録では読みを取らない（設計 §5）ので、詳細の取得時に埋める。
+      既に読みがある語は触らない（画面で入れた値を AI で上書きしない）。
+      読みキーは NOT NULL なので読みと同じ値を入れる（アプリ側の決まり）。
+      同じ見出し語・同じ読みの語が既にあるときは入れない
+      （`uq_jpn_word_key` の部分 UNIQUE に当たってエラーにしない。読みが未取得の間は
+      同じ見出し語を複数入れられるので、後から読みが決まるとぶつかりうる）。
+    -->
+    <update id="updateReadingIfBlank">
+        UPDATE public."JPN_単語情報" AS w
+        SET "読み" = #{reading},
+            "読みキー" = #{reading},
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE w."単語ID" = #{wordId}
+          AND NULLIF(BTRIM(COALESCE(w."読み", '')), '') IS NULL
+          AND NOT EXISTS (
+              SELECT 1
+                FROM public."JPN_単語情報" AS o
+               WHERE o."見出し語キー" = w."見出し語キー"
+                 AND o."読みキー" = #{reading}
+                 AND o."単語ID" != w."単語ID"
+          )
+    </update>
+
+    <!--
+      まだ JLPT レベルが無い語に、AI が書いたレベル（N1〜N5）を入れる。
+      一覧の「JLPT レベルで絞り込む」が効くようにするため（設計 §5）。
+      既にレベルがある語は触らない。値は N1〜N5 だけを渡す（列の CHECK がある）。
+    -->
+    <update id="updateJlptIfBlank">
+        UPDATE public."JPN_単語情報"
+        SET "JLPTレベル" = #{jlpt},
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "単語ID" = #{wordId}
+          AND NULLIF(BTRIM(COALESCE("JLPTレベル", '')), '') IS NULL
+    </update>
+
+    <!-- 同じ語・同じ種別の ACTIVE を ARCHIVED にする（消さない。テストの出題が参照している） -->
+    <update id="archiveQuestions">
+        UPDATE public."JPN_単語問題情報"
+        SET "状態コード" = 'ARCHIVED',
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "単語ID" = #{wordId}
+          AND "問題種別" = #{questionType}
+          AND "状態コード" = 'ACTIVE'
+    </update>
+
+    <!--
+      次に入れる問題の版（その語・その内容種別で「今までの最大 + 1」）。
+      ARCHIVED の行も数える（作り直すたびに版が上がる。問題は消さない）
+    -->
+    <select id="nextGenerationVersion" resultType="int">
+        SELECT COALESCE(MAX(g."内容版数"), 0) + 1
+          FROM public."JPN_AI生成履歴情報" g
+         WHERE g."単語ID" = #{wordId}
+           AND g."内容種別コード" = #{contentType}
+    </select>
+
+    <!-- 問題を 1 件入れる（採番した 問題ID を entity へ返す） -->
+    <insert id="insertQuestion" useGeneratedKeys="true" keyProperty="questionId"
+            keyColumn="問題ID" parameterType="com.study21.admin.japanesewordai.JapaneseWordAiMapper$QuestionRow">
+        INSERT INTO public."JPN_単語問題情報" (
+            "単語ID", "問題種別", "問題番号", "問題文_日本語", "問題文_中国語",
+            "対象表記", "対象読み", "例文_日本語", "例文読み", "音声テキスト",
+            "正解値", "正解補足", "解説_日本語", "解説_中国語",
+            "難易度", "状態コード", "内容版数", "構造化JSON",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{wordId}, #{questionType}, #{questionNo}, #{questionJa}, #{questionZh},
+            #{targetHeading}, #{targetReading}, #{exampleJa}, #{exampleReading}, #{audioText},
+            #{correctValue}, #{correctNote}, #{explanationJa}, #{explanationZh},
+            CAST(#{difficulty} AS varchar), 'ACTIVE', #{contentVersion}, CAST(#{structuredJson} AS jsonb),
+            NULL, 'BATCH'
+        )
+    </insert>
+
+    <!-- 選択肢を 1 件入れる -->
+    <insert id="insertChoice" parameterType="com.study21.admin.japanesewordai.JapaneseWordAiMapper$ChoiceRow">
+        INSERT INTO public."JPN_単語問題選択肢情報" (
+            "問題ID", "表示順", "選択肢値", "選択肢読み", "正解フラグ", "誤答区分",
+            "説明_日本語", "説明_中国語", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{questionId}, #{orderNo}, #{value}, #{reading}, #{correct}, #{wrongType},
+            #{descriptionJa}, #{descriptionZh}, NULL, 'BATCH'
+        )
+    </insert>
+
+    <!-- 生成履歴: 実行中の行を探す（同じ語・同じ種別を二重に走らせない） -->
+    <select id="findActiveGeneration" resultType="long">
+        SELECT a."生成ID"
+        FROM public."JPN_AI生成履歴情報" a
+        WHERE a."単語ID" = #{wordId}
+          AND a."内容種別コード" = #{contentType}
+          AND a."状態コード" IN ('QUEUED', 'RUNNING')
+        ORDER BY a."生成ID" DESC
+        LIMIT 1
+    </select>
+
+    <!-- 生成履歴の版（実行中の行を拾い直したときは、その版の問題を書く） -->
+    <select id="findGenerationVersion" resultType="int">
+        SELECT COALESCE(a."内容版数", 1)
+        FROM public."JPN_AI生成履歴情報" a
+        WHERE a."生成ID" = #{generationId}
+    </select>
+
+    <!--
+      生成履歴: 開始（実行中の行が無ければ作る）。
+      内容版数は「その語・その内容種別の今までの最大 + 1」＝**この取得の版**。
+      問題（C/D/E）の行にも同じ番号を入れるので、画面の履歴で版を選べる
+    -->
+    <insert id="insertGeneration" useGeneratedKeys="true" keyProperty="generationId"
+            keyColumn="生成ID" parameterType="com.study21.admin.japanesewordai.JapaneseWordAiMapper$GenerationRow">
+        INSERT INTO public."JPN_AI生成履歴情報" (
+            "単語ID", "内容種別コード", "状態コード", "AI区分", "モデル名", "内容版数",
+            "生成件数", "失敗件数", "開始日時", "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{wordId}, #{contentType}, 'RUNNING', #{aiType}, #{modelName}, #{contentVersion},
+            0, 0, CURRENT_TIMESTAMP, NULL, 'BATCH'
+        )
+    </insert>
+
+    <!-- 生成履歴: 成功（生成件数は書いた行数） -->
+    <update id="markGenerationSucceeded">
+        UPDATE public."JPN_AI生成履歴情報"
+        SET "状態コード" = 'SUCCEEDED',
+            "呼出履歴ID" = #{callLogId},
+            "生成件数" = #{generatedCount},
+            "失敗件数" = 0,
+            "処理時間ms" = #{durationMs},
+            "終了日時" = CURRENT_TIMESTAMP,
+            "エラーコード" = NULL,
+            "エラーメッセージ" = NULL,
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "生成ID" = #{generationId}
+    </update>
+
+    <!-- 生成履歴: 失敗（理由を残す） -->
+    <update id="markGenerationFailed">
+        UPDATE public."JPN_AI生成履歴情報"
+        SET "状態コード" = 'FAILED',
+            "失敗件数" = "失敗件数" + 1,
+            "エラーコード" = #{errorCode},
+            "エラーメッセージ" = #{errorMessage},
+            "処理時間ms" = #{durationMs},
+            "終了日時" = CURRENT_TIMESTAMP,
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "生成ID" = #{generationId}
+    </update>
+
+    <!--
+      待ち行列: 受付（QUEUED で積む。AI は呼ばない）。
+      登録元コードは 'APP'（画面からの受付）。実行したら働き手が 'BATCH' に変える。
+      **実行中の行が無いときだけ**入れる（同時に受付けたときに二重で積まない＝AI を二重に呼ばない。
+      部分索引 idx_jpn_ai_gen_active が効く形）。入らなかったときは 0 行になる。
+    -->
+    <insert id="insertQueuedGeneration" useGeneratedKeys="true" keyProperty="generationId"
+            keyColumn="生成ID" parameterType="com.study21.admin.japanesewordai.JapaneseWordAiMapper$GenerationRow">
+        INSERT INTO public."JPN_AI生成履歴情報" (
+            "単語ID", "内容種別コード", "状態コード", "内容版数",
+            "生成件数", "失敗件数", "登録者アカウントID", "登録元コード"
+        )
+        SELECT #{wordId}, #{contentType}, 'QUEUED', #{contentVersion},
+               0, 0, NULL, 'APP'
+        WHERE NOT EXISTS (
+            SELECT 1 FROM public."JPN_AI生成履歴情報" a
+            WHERE a."単語ID" = #{wordId}
+              AND a."内容種別コード" = #{contentType}
+              AND a."状態コード" IN ('QUEUED', 'RUNNING')
+        )
+    </insert>
+
+    <!--
+      待ち行列: 働き手が実行する 1 件。FOR UPDATE SKIP LOCKED で二重処理を防ぐ（AI を二重に呼ばない）。
+      部分索引 idx_jpn_ai_gen_active（状態コード IN ('QUEUED','RUNNING')）が効く形にしてある。
+      FAILED は拾わない（利用者のやり直しだけが再開する）。
+    -->
+    <select id="findClaimableGenerationId" resultType="long">
+        SELECT a."生成ID"
+        FROM public."JPN_AI生成履歴情報" a
+        WHERE a."状態コード" = 'QUEUED'
+           OR (a."状態コード" = 'RUNNING'
+               AND a."更新日時" &lt; CURRENT_TIMESTAMP - (#{staleMinutes} * INTERVAL '1 minute'))
+        ORDER BY a."生成ID" ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+    </select>
+
+    <!-- 待ち行列: 確保の確定（状態を条件にした更新。取った行だけを進める） -->
+    <update id="markGenerationClaimed">
+        UPDATE public."JPN_AI生成履歴情報"
+        SET "状態コード" = 'RUNNING',
+            "開始日時" = COALESCE("開始日時", CURRENT_TIMESTAMP),
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "生成ID" = #{generationId}
+          AND "状態コード" IN
+        <foreach item="from" collection="fromStatuses" open="(" separator="," close=")">
+            #{from}
+        </foreach>
+    </update>
+
+    <!-- 待ち行列: 確保した 1 件の中身（働き手が実行するのに要る最小限） -->
+    <select id="findGeneration" resultType="com.study21.admin.japanesewordai.JapaneseWordAiMapper$GenerationRow">
+        SELECT a."生成ID"       AS generationId,
+               a."単語ID"       AS wordId,
+               a."内容種別コード" AS contentType,
+               a."内容版数"     AS contentVersion,
+               a."AI区分"       AS aiType,
+               a."モデル名"     AS modelName
+        FROM public."JPN_AI生成履歴情報" a
+        WHERE a."生成ID" = #{generationId}
+    </select>
+
+    <!-- 働き手: 受付が積んだ行の語（AI に渡す入力の見出し・読み・品詞・レベル） -->
+    <select id="findWordTarget" resultMap="AiCallTargetMap">
+        SELECT
+            w."単語ID"       AS wordId,
+            w."見出し語"     AS heading,
+            w."読み"         AS reading,
+            w."品詞"         AS partOfSpeech,
+            w."JLPTレベル"   AS jlptLevel,
+            w."状態コード"   AS stateCode
+        FROM public."JPN_単語情報" w
+        WHERE w."単語ID" = #{wordId}
+          AND w."状態コード" = 'ACTIVE'
+    </select>
+
+    <!-- 働き手: 実行に入ったことを記録する（AI 区分・モデル名は接続を解決しないと分からない） -->
+    <update id="markGenerationStarted">
+        UPDATE public."JPN_AI生成履歴情報"
+        SET "AI区分"   = #{aiType},
+            "モデル名" = #{modelName},
+            "更新元コード" = 'BATCH',
+            "更新日時" = CURRENT_TIMESTAMP
+        WHERE "生成ID" = #{generationId}
+    </update>
+
+    <!--
+      受付けた取得の進み具合（受付が返した生成 ID 群）。
+      一覧の「取得状態」のビューは「一度でも成功したか」を優先するので、取り直しの進み具合には
+      使えない（成功済みの語が最初から「取得済」に見える）。ここは生の状態を数える。
+    -->
+    <select id="countGenerationsByState" resultType="map">
+        SELECT
+            COUNT(*) FILTER (WHERE a."状態コード" IN ('QUEUED', 'RUNNING')) AS pending,
+            COUNT(*) FILTER (WHERE a."状態コード" = 'SUCCEEDED')           AS succeeded,
+            COUNT(*) FILTER (WHERE a."状態コード" = 'FAILED')              AS failed
+        FROM public."JPN_AI生成履歴情報" a
+        WHERE a."生成ID" IN
+        <foreach collection="generationIds" item="id" open="(" separator="," close=")">
+            #{id}
+        </foreach>
+    </select>
+
+</mapper>

@@ -9,6 +9,20 @@ import java.util.List;
 /** JPN_テスト情報 と JPN_テスト出題情報 の Mapper。 */
 @Mapper
 public interface JpnTestMapper {
+    List<JpnWordEntity> pickWords(@Param("testType") String testType, @Param("level") String level,
+        @Param("book") String book, @Param("categoryFrom") String categoryFrom, @Param("categoryTo") String categoryTo,
+        @Param("random") boolean random, @Param("limit") int limit);
+    List<String> books();
+    List<String> categories(@Param("book") String book);
+    List<JpnTestEntity> searchRange(@Param("accountId") long accountId, @Param("state") String state,
+        @Param("testType") String testType, @Param("book") String book, @Param("categoryFrom") String categoryFrom,
+        @Param("categoryTo") String categoryTo, @Param("limit") int limit, @Param("offset") int offset);
+    long countRange(@Param("accountId") long accountId, @Param("state") String state,
+        @Param("testType") String testType, @Param("book") String book, @Param("categoryFrom") String categoryFrom,
+        @Param("categoryTo") String categoryTo);
+    void lockTest(@Param("testId") long testId);
+    void appendHistory(@Param("entryId") long entryId, @Param("history") String history);
+
 
     long count(@Param("accountId") long accountId,
                @Param("state") String state,

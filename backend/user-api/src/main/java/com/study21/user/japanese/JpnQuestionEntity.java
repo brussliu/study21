@@ -7,6 +7,15 @@ import java.time.LocalDate;
 /** JPN_Question の 1 行（Mapper の戻り値）。 */
 public class JpnQuestionEntity {
 
+    private Long collectionId;
+    private String book;
+    private String category;
+    public Long getCollectionId() { return collectionId; }
+    public void setCollectionId(Long value) { collectionId = value; }
+    public String getBook() { return book; }
+    public void setBook(String value) { book = value; }
+    public String getCategory() { return category; }
+    public void setCategory(String value) { category = value; }
     private Long questionId;
     private Long wordId;
     private String questionType;

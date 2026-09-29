@@ -1,80 +1,75 @@
 -- ============================================================================
 -- Study 2.1  日本語勉強 DDL（最終仕様）
--- テーブル: JPN_単語詳細情報（AI が取得した語の詳細）
+-- テーブル: JPN_単語詳細情報（語の詳細の「版」＝バージョン）
 -- ----------------------------------------------------------------------------
--- 2.0 の `STY_日本語単語詳細情報`（実データ 383 件。移行元DB は study3。2026-09-13 実測）
--- と、その 6 つの子テーブルを 1 テーブルに集約する。
+-- 何: 1 行 = その語の詳細の 1 版。語レベルの内容（意味・説明・品詞・レベルなど）と
+--     小さい構造（発音・活用形・自他対応）を持ち、行として増減する段落
+--     （語義・例文・文型・会話・類義語・注意・コロケーション・関連語・使用場面・練習）は
+--     子テーブル（`JPN_単語詳細_*`）が持つ。
 --
---   2.0 の子テーブル（実データ件数）       → 2.1 の 詳細JSON のキー
---   STY_日本語単語詳細_語義情報        653 → senses
---   STY_日本語単語詳細_例文情報      1,011 → examples
---   STY_日本語単語詳細_発音情報        384 → pronunciations
---   STY_日本語単語詳細_コロケーション情報 926 → collocations
---   STY_日本語単語詳細_関連語情報      676 → relatedWords
---   STY_日本語単語詳細_使用注意情報    485 → cautions
+-- 版の考え方（設計: 日本語勉強_再設計案_中文.md）:
+--   ・**すべての取得・編集が 1 版を作る**。内容は「そのときの有効版を複製し、変わった部分だけ入れ替える」
+--   ・新しい版は自動で ACTIVE になり、前の版は ARCHIVED になる
+--     （部分 UNIQUE 索引で「1 語につき ACTIVE は 1 版」を DB が保証する）
+--   ・有効版の指定＝ ACTIVE を移すだけ。未指定なら最後に作った版（＝最新）が有効
+--   ・`元詳細ID` で版のつながり、`生成ID` でどの AI 生成から生まれた版かを辿れる
+--   ・人の編集も 1 版作る（手修正フラグ = true）ので、誤編集は前に戻せる
 --
--- **詳細を JSONB に集約した理由**
---   2.0 は 6 つの子テーブル（語義・例文・発音・コロケーション・関連語・使用注意）を
---   正規化して持っていたが、2.1 ではこの詳細は **AI が生成した読み取り専用の参考情報**で、
---   検索・集計・絞り込みの対象ではない（画面は 1 語ぶんをまとめて表示するだけ）。
---   子テーブルに分けると 6 テーブルぶんの JOIN と並び替えが毎回必要になる一方、
---   正規化の利点（部分更新・部分検索）は使わない。よって JSONB 1 列に集約した。
---   1 語 1 詳細（uq_jpn_detail_word）なので、行が増えても 1 行 1 語のままである。
---   中身を検索したくなったときは idx_jpn_detail_json（GIN）でキー・値を引ける。
---
--- **詳細JSON の構造（本体の列 ＋ 6 子テーブルを 1 つの JSONB に集約）**
---   トップレベル（2.0 の 詳細情報 本体の列。構造化JSON のルート直下の項目）:
---     jlptLevel                  JLPTレベル
---     partOfSpeech               品詞
---     conjugation                活用種類
---     transitivity               自他区分
---     importance                 重要度
---     chineseMeaning             代表中国語意味
---     descriptionJa              日本語説明
---     descriptionZh              中国語説明
---     structuredSchemaVersion    構造化スキーマ版
---     manuallyCorrected          手動修正済フラグ
---     structured                 構造化JSON（AI の生の構造化結果をそのまま）
---   配列（2.0 の 6 子テーブル）:
---   senses         [{number, japanese, chinese, context, style, noteJapanese, noteChinese, displayOrder}]
---   examples       [{japanese, reading, chinese, contextJapanese, contextChinese, source, senseNumber, displayOrder}]
---   pronunciations [{reading, accentNotation, accentType, moraCount, audioUrl, audioProvider, displayOrder}]
---   collocations   [{expression, reading, chinese, exampleJapanese, exampleChinese, displayOrder}]
---   relatedWords   [{relatedWordId, relationType, heading, reading, chinese, differenceJapanese, differenceChinese, eCandidate, displayOrder}]
---   cautions       [{noteType, japanese, chinese, wrongExample, correctExample, displayOrder}]
---   各要素は 2.0 の列名を camelCase にしたもの。配列は 2.0 の 表示順 の昇順。
---   `relatedWordId` だけは 2.0 の 関連先日本語単語ID を 2.1 の 単語ID に読み替える
---   （2.0 の実データは全件 NULL。将来の詳細再取得で入る想定）。
---
--- 2.0 からの主な変更:
---   1. 主キー 日本語単語詳細ID → 詳細ID（BIGSERIAL）。2.0 の ID は 旧詳細ID に残す。
---   2. **詳細情報 本体の列 ＋ 6 子テーブル → 詳細JSON 1 列**（上記の構造）。
---   3. 2.0 の 状態（全件 'AI_GENERATED'）は列を持たない（常に AI 生成の参考情報のため）。
---      反映結果ID / 確認ユーザーID / 確認日時（全件 NULL。詳細の確認画面を持たない）も引き継がない。
---   4. 取得日時 は 2.0 の 更新日時（詳細の最終更新）を入れる。NULL なら 登録日時 → CURRENT_TIMESTAMP。
+-- 2.0 との違い:
+--   ・2.0 は「本体の列 ＋ 6 子テーブル」で 1 語 1 版だった（履歴は残らない）
+--   ・`旧詳細ID` は引き継がない（2.0 からの詳細データは削除済みで、形も根本的に変わるため）
+--   ・`詳細JSON`（全部入りの JSONB）はやめ、段落ごとの表と列に分けた
 --
 -- 対象DB: study21 (PostgreSQL)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS public."JPN_単語詳細情報" (
-    "詳細ID"             BIGSERIAL    NOT NULL,
-    -- 2.0 の 日本語単語詳細ID。冪等な移行（ON CONFLICT）と突き合わせの根拠として残す
-    "旧詳細ID"           BIGINT       NULL,
-    "単語ID"             BIGINT       NOT NULL,
-    -- 2.0 の 内容版数（実データは 1 が 370 件・2 が 13 件）
-    "内容版数"           INTEGER      NOT NULL DEFAULT 1,
-    -- 2.0 の 詳細情報 本体の列 ＋ 6 子テーブルを集約した読み取り専用の参考情報（上記の構造）
-    "詳細JSON"           JSONB        NOT NULL DEFAULT '{}',
-    "AIプロバイダ"       VARCHAR(40)  NULL,
-    "AIモデル"           VARCHAR(120) NULL,
-    -- この詳細を AI から取得した日時
-    "取得日時"           TIMESTAMP    NULL,
+    "詳細ID"           BIGSERIAL    NOT NULL,
+    "単語ID"           BIGINT       NOT NULL,
+    -- その語の中での版番号（1 起）。履歴の並びと表示に使う
+    "内容版数"         INTEGER      NOT NULL DEFAULT 1,
+    -- ACTIVE=有効版（1 語に 1 行） / ARCHIVED=履歴
+    "状態コード"       VARCHAR(20)  NOT NULL DEFAULT 'ACTIVE',
+    -- この版が基にした版（最初の版は NULL）
+    "元詳細ID"         BIGINT       NULL,
+    -- この版を作った AI 生成（JPN_AI生成履歴情報.生成ID）。人の編集版は NULL
+    "生成ID"           BIGINT       NULL,
+    "AIプロバイダ"     VARCHAR(40)  NULL,
+    "AIモデル"         VARCHAR(120) NULL,
+    "取得日時"         TIMESTAMP    NULL,
+    -- この版に人の編集が含まれるか
+    "手修正フラグ"     BOOLEAN      NOT NULL DEFAULT false,
+    "備考"             TEXT         NULL,
+
+    -- 語レベルの内容（子テーブルにしないもの）
+    "核心意味"         TEXT         NULL,
+    "説明_日本語"      TEXT         NULL,
+    "説明_中国語"      TEXT         NULL,
+    "品詞"             VARCHAR(100) NULL,
+    "JLPTレベル"       VARCHAR(10)  NULL,
+    "活用型"           VARCHAR(100) NULL,
+    -- TRANSITIVE / INTRANSITIVE / BOTH / NONE
+    "自他"             VARCHAR(20)  NULL,
+    "重要度"           SMALLINT     NULL,
+    "記憶ヒント"       TEXT         NULL,
+    "記憶ヒント根拠"   TEXT         NULL,
+    -- 発音（単数。読み・アクセント型・アクセント表記・ヒント・音声サンプルの有無）
+    "発音JSON"         JSONB        NOT NULL DEFAULT '{}',
+    -- 活用形の表（配列）
+    "活用形JSON"       JSONB        NOT NULL DEFAULT '[]',
+    -- 自他動詞の対応（オブジェクト。無い語は NULL）
+    "自他対応JSON"     JSONB        NULL,
+    -- AI の生の応答（人の編集版は元の版の値を引き継ぐ）
+    "元レスポンスJSON" JSONB        NOT NULL DEFAULT '{}',
+    -- 楽観的ロック（画面の編集・有効版の切り替えが使う）
+    "バージョン"       INTEGER      NOT NULL DEFAULT 1,
+
     "登録者アカウントID" BIGINT       NULL,
     "更新者アカウントID" BIGINT       NULL,
-    "登録元コード"       VARCHAR(20)  NOT NULL DEFAULT 'APP',
-    "更新元コード"       VARCHAR(20)  NULL,
-    "登録日時"           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "更新日時"           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "登録元コード"     VARCHAR(20)  NOT NULL DEFAULT 'BATCH',
+    "更新元コード"     VARCHAR(20)  NULL,
+    "登録日時"         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "更新日時"         TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     CONSTRAINT "JPN_単語詳細情報_pkey" PRIMARY KEY ("詳細ID"),
     CONSTRAINT "FK_JPN_単語詳細_単語"
@@ -86,31 +81,54 @@ CREATE TABLE IF NOT EXISTS public."JPN_単語詳細情報" (
     CONSTRAINT "FK_JPN_単語詳細_更新者"
         FOREIGN KEY ("更新者アカウントID")
         REFERENCES public."ACC_アカウント" ("アカウントID") ON DELETE RESTRICT,
-    CONSTRAINT "CK_JPN_単語詳細_内容版数"
-        CHECK ("内容版数" >= 1),
-    CONSTRAINT "CK_JPN_単語詳細_詳細JSON"
-        CHECK (jsonb_typeof("詳細JSON") = 'object')
+    -- 同じ語に同じ版番号は 2 つ無い
+    CONSTRAINT "uq_jpn_detail_version" UNIQUE ("単語ID", "内容版数"),
+    CONSTRAINT "CK_JPN_単語詳細_状態コード"
+        CHECK ("状態コード" IN ('ACTIVE', 'ARCHIVED')),
+    CONSTRAINT "CK_JPN_単語詳細_内容版数" CHECK ("内容版数" >= 1),
+    CONSTRAINT "CK_JPN_単語詳細_バージョン" CHECK ("バージョン" >= 1),
+    CONSTRAINT "CK_JPN_単語詳細_重要度"
+        CHECK ("重要度" IS NULL OR ("重要度" BETWEEN 1 AND 5)),
+    CONSTRAINT "CK_JPN_単語詳細_JLPTレベル"
+        CHECK ("JLPTレベル" IS NULL OR "JLPTレベル" IN ('N5', 'N4', 'N3', 'N2', 'N1')),
+    CONSTRAINT "CK_JPN_単語詳細_自他"
+        CHECK ("自他" IS NULL OR "自他" IN ('TRANSITIVE', 'INTRANSITIVE', 'BOTH', 'NONE')),
+    CONSTRAINT "CK_JPN_単語詳細_発音JSON" CHECK (jsonb_typeof("発音JSON") = 'object'),
+    CONSTRAINT "CK_JPN_単語詳細_活用形JSON" CHECK (jsonb_typeof("活用形JSON") = 'array'),
+    CONSTRAINT "CK_JPN_単語詳細_自他対応JSON"
+        CHECK ("自他対応JSON" IS NULL OR jsonb_typeof("自他対応JSON") = 'object'),
+    CONSTRAINT "CK_JPN_単語詳細_元レスポンスJSON"
+        CHECK (jsonb_typeof("元レスポンスJSON") = 'object')
 );
 
--- 1 語 1 詳細（AI 詳細は語ごとに 1 つ。再取得は上書き）
-CREATE UNIQUE INDEX IF NOT EXISTS uq_jpn_detail_word
-    ON public."JPN_単語詳細情報" ("単語ID");
+-- 1 語につき有効版は 1 つだけ（版の切り替えはこの索引が守る）
+CREATE UNIQUE INDEX IF NOT EXISTS uq_jpn_detail_active
+    ON public."JPN_単語詳細情報" ("単語ID")
+    WHERE "状態コード" = 'ACTIVE';
 
--- 2.0 の 日本語単語詳細ID。移行の再実行を冪等にするための一意索引
-CREATE UNIQUE INDEX IF NOT EXISTS uq_jpn_detail_old_id
-    ON public."JPN_単語詳細情報" ("旧詳細ID");
-
--- 詳細JSON の中をキー・値で引く（語義・例文などを横断で探すとき）
-CREATE INDEX IF NOT EXISTS idx_jpn_detail_json
-    ON public."JPN_単語詳細情報" USING gin ("詳細JSON");
+-- 有効版を引く（一覧・詳細・AI の入力）
+CREATE INDEX IF NOT EXISTS idx_jpn_detail_word_state
+    ON public."JPN_単語詳細情報" ("単語ID", "状態コード");
 
 COMMENT ON TABLE public."JPN_単語詳細情報" IS
-    'AI が取得した日本語単語の詳細（読み取り専用の参考情報）。2.0 の STY_日本語単語詳細情報（383 件）＋ 6 子テーブル';
-COMMENT ON COLUMN public."JPN_単語詳細情報"."旧詳細ID" IS
-    '2.0 の 日本語単語詳細ID。移行の冪等性と突き合わせに使う';
-COMMENT ON COLUMN public."JPN_単語詳細情報"."詳細JSON" IS
-    '2.0 の 詳細情報 本体の列（jlptLevel / partOfSpeech / conjugation / transitivity / importance / chineseMeaning / descriptionJa / descriptionZh / structuredSchemaVersion / manuallyCorrected / structured）＋ 6 子テーブル（senses / examples / pronunciations / collocations / relatedWords / cautions）を JSONB に集約した読み取り専用の参考情報（検索対象ではない）';
-COMMENT ON COLUMN public."JPN_単語詳細情報"."取得日時" IS
-    '2.0 の 更新日時（AI 詳細の最終更新）を引き継ぐ';
+    '語の詳細の 1 版。有効版（状態コード=ACTIVE）が画面と AI に使われる。すべての取得・編集が新しい版を作る';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."内容版数" IS
+    'その語の中での版番号（1 起）。履歴の並びと表示に使う';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."状態コード" IS
+    'ACTIVE=有効版（1 語に 1 行。部分 UNIQUE 索引で保証） / ARCHIVED=履歴';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."元詳細ID" IS
+    'この版が基にした版。最初の版は NULL。FK は付けない（自表参照。履歴を消しても壊さない）';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."生成ID" IS
+    'この版を作った JPN_AI生成履歴情報.生成ID。人の編集版は NULL。FK は付けない（生成履歴は保持期間で消えうる）';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."手修正フラグ" IS
+    'この版に人の編集が含まれる（true）。AI の取り直しでは人の行を複製して残す';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."発音JSON" IS
+    '発音（単数）: reading / accentType / accentNotation / hint / hasAudioSample';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."活用形JSON" IS
+    '活用形の配列: [{form, value, example}]';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."自他対応JSON" IS
+    '自他動詞の対応: {intransitive, transitive, particleNote, intransitiveExample, transitiveExample}。無い語は NULL';
+COMMENT ON COLUMN public."JPN_単語詳細情報"."元レスポンスJSON" IS
+    'AI の生の応答（人が編集した版は元の版の値を引き継ぐ）。組み立て後の内容と突き合わせるために残す';
 COMMENT ON COLUMN public."JPN_単語詳細情報"."登録元コード" IS
-    'APP=画面からの登録 / MIGRATION=2.0 からの移行';
+    'BATCH=AI が作った版 / APP=人の編集で作った版';

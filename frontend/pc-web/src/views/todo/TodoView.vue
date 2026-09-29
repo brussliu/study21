@@ -209,8 +209,13 @@ const gridEditing = ref<{ row: number; col: number } | null>(null)
 /** 編集を始めたときの値（Esc で取り消すため）。 */
 let gridEditOriginal: string | null = null
 
-/** セルの選択・範囲の見た目（Excel 風）。 */
+/** セルの選択・範囲の見た目（Excel 風）。入力中のセルは別の印を付ける。 */
 function gridCellClasses(row: number, col: number): Record<string, boolean> {
+  // 入力中のセルは、選んでいなくても分かるようにする
+  // （選択の印と重ねると、罫線が二重に見える）
+  if (isGridEditing(row, col)) {
+    return { 'is-editing': true }
+  }
   const cursor = gridCursor.value
   if (cursor === null) {
     return {}

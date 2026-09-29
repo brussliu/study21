@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS public."RED_書籍分類情報" (
     "表示順"             INTEGER      NOT NULL DEFAULT 0,
     -- 補足（本棚の見出しに出す説明。未設定は NULL）
     "説明"               TEXT         NULL,
+    -- この分類を持つ家族（2026-09-14 の移行で追加。**新規構築でも要る**のでここにも定義する）
+    "所有家族学生ID"     BIGINT       NULL,
     "登録者アカウントID" BIGINT       NULL,
     "更新者アカウントID" BIGINT       NULL,
     -- APP=画面からの登録 / MIGRATION=2.0 からの移行

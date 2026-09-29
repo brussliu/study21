@@ -25,6 +25,14 @@ public final class AiResponseDtos {
         // `BatC51ResultDto` 自体は、生成した結果（BAT_AI呼出履歴情報 の本文）を読む共通の DTO として
         // 使い続ける（`GeometryAiResponseParser`）。
         BY_TASK_CODE.put("batC52", BatC52ResultDto.class);
+
+        // ---- 日本語単語（batC41〜batC44） ----
+        // 詳細（A・B共通）と、C1/C2・D・E の問題を分けて持つ。
+        // 形は学習画面（日本語勉強の A. 勉強）が要求する項目に合わせてある。
+        BY_TASK_CODE.put("batC41", com.study21.admin.japanesewordai.dto.BatC41ResultDto.class);
+        BY_TASK_CODE.put("batC42", com.study21.admin.japanesewordai.dto.BatC42ResultDto.class);
+        BY_TASK_CODE.put("batC43", com.study21.admin.japanesewordai.dto.BatC43ResultDto.class);
+        BY_TASK_CODE.put("batC44", com.study21.admin.japanesewordai.dto.BatC44ResultDto.class);
     }
 
     private AiResponseDtos() {

@@ -107,6 +107,28 @@ class SettingPageControllerTest {
     }
 
     @Test
+    void 日本語単語AIのスキーマも同じ仕組みで返す() throws Exception {
+        // 設定ページ【日本語単語AI】の 4 区画（batC41〜batC44）も、Data TAB に自分の出力 DTO を出す
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC41"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.taskCode").value("batC41"))
+                .andExpect(jsonPath("$.data.dto").value("BatC41ResultDto"))
+                .andExpect(jsonPath("$.data.schema.type").value("object"))
+                .andExpect(jsonPath("$.data.schema.properties.detail.type").value("object"))
+                .andExpect(jsonPath("$.data.schema.properties.detail.properties.coreMeaning.type").value("string"));
+
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC42"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dto").value("BatC42ResultDto"));
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC43"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dto").value("BatC43ResultDto"));
+        mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC44"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.dto").value("BatC44ResultDto"));
+    }
+
+    @Test
     void 未登録のタスクは400() throws Exception {
         mockMvc.perform(get("/api/admin/setting/ai-response-schema").param("task", "batC99"))
                 .andExpect(status().isBadRequest());

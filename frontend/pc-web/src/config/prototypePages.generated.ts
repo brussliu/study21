@@ -93,13 +93,6 @@ export const prototypePages: PrototypePageDefinition[] = [
     "component": "EnglishClozePage"
   },
   {
-    "slug": "english-essay",
-    "filename": "english_essay.html",
-    "title": "英作文AI添削",
-    "subtitle": "画像アップロード → OCR → AI 添削レポート",
-    "component": "EnglishEssayPage"
-  },
-  {
     "slug": "english-grammar-input",
     "filename": "english_grammar_input.html",
     "title": "文法登録",

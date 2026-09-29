@@ -3,8 +3,11 @@
 // @ts-nocheck
 // Study2 の最新 setting.js（2026-08-26）を移行した暫定ランタイム。
 // 画面構造は Vue が管理し、設定項目の定義・描画・操作はこのランタイムが担当する。
-import { AI_TABS, aiTabOf, aiTabsOf, normalizeAiFields, sortAiFields } from './aiSettingsLayout';
+import { AI_TABS, aiTabOf, aiTabsOf, aiTabsWithData, normalizeAiFields, sortAiFields } from './aiSettingsLayout';
 import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSET_RULES, scheduleOffsetProblem } from '@/features/batch/batchSchedule';
+// Data TAB（AI 出力データ構造）の中身を描く。設定ページは素の HTML なので、
+// Vue を載せずに素の DOM で描く（2 つ目の Vue アプリは設定ページの再描画とぶつかって落ちる）
+import { renderAllAiDataSchemas } from './aiDataSchemaPanel';
 (function() {
   'use strict';
 
@@ -64,19 +67,25 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
       rangeField(tabField(f('intensiveOcrMaxRetries','最大再実行回数','batC91','range',null,'通信またはJSON構造検証エラー時の画像単位の再実行回数です。',0,5),'その他'),1,'回','')
     ]},
     { id: 'essay', label: '英作文AI添削', icon: 'fa-file-signature', description: '英作文の画像分類・OCRと英検基準AI添削を2つのバッチで設定します。API KeyとURLは「AIモデル」の接続設定を共通利用します。', sections: [
-      { id:'bat-c11', title:'batC11（英作文 画像分類・OCR）', description:'画像を分類・OCRし、英作文の主題とタイトルを生成します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-file-image',input:'英作文画像',output:'主題・タイトル・OCRテキスト（JSON）'}, fieldKeys:['essayMaxImages','essayMaxImageMb','essayOcrAiProvider','essayOcrMaxImagePixels','essayOcrRequestTimeoutSeconds','essayOcrPrompt','essayOcrUserPrompt','essayOcrRetryLimit'] },
-      { id:'bat-c12', title:'batC12（英作文 英検基準AI添削）', description:'OCR済み英作文を英検基準で採点・添削します。', icon:'fa-check-double', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-check-double',input:'OCR済み英作文',output:'採点・添削結果（JSON）'}, fieldKeys:['essayGradingAiProvider','essayGradingRequestTimeoutSeconds','essayGradingPrompt','essayGradingUserPrompt','essayGradingRetryLimit'] }
+      { id:'bat-c11', title:'batC11（英作文 画像分類・OCR）', description:'画像を分類・OCRし、英作文の主題とタイトルを生成します。', icon:'fa-file-image', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-file-image',input:'英作文画像',output:'主題・タイトル・OCRテキスト（JSON）'}, fieldKeys:['essayMaxImages','essayMaxImageMb','essayOcrAiProvider','essayOcrMaxImagePixels','essayOcrRequestTimeoutSeconds','essayOcrTemperature','essayOcrMaxCompletionTokens','essayOcrPrompt','essayOcrUserPrompt','essayOcrRetryLimit'] },
+      { id:'bat-c12', title:'batC12（英作文 英検基準AI添削）', description:'OCR済み英作文を英検基準で採点・添削します。', icon:'fa-check-double', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-check-double',input:'OCR済み英作文',output:'採点・添削結果（JSON）'}, fieldKeys:['essayGradingAiProvider','essayGradingRequestTimeoutSeconds','essayGradingTemperature','essayGradingMaxCompletionTokens','essayGradingPrompt','essayGradingUserPrompt','essayGradingRetryLimit'] }
     ], fields: [
       rangeField(tabField(f('essayMaxImages','最大画像枚数','batC11','range',null,'1回のアップロードで受け付ける画像枚数です。',1,20),'基本設定'),1,'枚',''),
       rangeField(tabField(f('essayMaxImageMb','画像1枚の最大サイズ','batC11','range',null,'画像1枚あたりの最大サイズ（MB）です。', 1, 50),'基本設定'),1,'MB',''),
       fullField(tabField(aiModelDropdownField('essayOcrAiProvider','batC11','画像の分類・OCRで使用するモデルです。',true),'基本設定')),
       rangeField(tabField(f('essayOcrMaxImagePixels','AI送信画像の最大辺','batC11','range',null,'OCRでAIへ送信する画像の最大辺ピクセルです。超える場合は縮小します。', 1024, 8192),'基本設定'),64,'px',''),
       rangeField(tabField(f('essayOcrRequestTimeoutSeconds','リクエストタイムアウト','batC11','range',null,'AI APIへの1回の通信を待つ最大秒数です。', 30, 600),'基本設定'),10,'s',''),
+      // 実行パラメータ（2.0 はコード固定だった。設定が唯一の出所）
+      rangeField(tabField(f('essayOcrTemperature','Temperature','batC11','range',null,'低い値ほど画像からの文字起こしが安定します（0.0〜2.0）。',0,2),'基本設定'),0.1,'',''),
+      rangeField(tabField(f('essayOcrMaxCompletionTokens','最大出力Token数','batC11','range',null,'OCRが1回に返す最大出力Token数です。実際の上限は選択したモデルに依存します（1024〜65536）。',1024,65536),'基本設定'),512,'',''),
       tabField(f('essayOcrPrompt','System Prompt','batC11','textarea',null,'設問と手書き作文の分離、原文保持、判読不能文字の扱いを定義します。'),'System Prompt'),
       tabField(f('essayOcrUserPrompt','User Prompt','batC11','textarea',null,'{{level}}、{{image_count}}、{{image_categories}}を置換し、画像を添付します。'),'User Prompt'),
       rangeField(tabField(f('essayOcrRetryLimit','最大再実行回数','batC11','range',null,'通信またはJSON構造検証エラー時の画像単位の再実行回数です。',0,5),'その他'),1,'回',''),
       fullField(tabField(aiModelDropdownField('essayGradingAiProvider','batC12','英検基準の採点・添削に使用するモデルです。',false),'基本設定')),
       rangeField(tabField(f('essayGradingRequestTimeoutSeconds','リクエストタイムアウト','batC12','range',null,'AI APIへの1回の通信を待つ最大秒数です。', 30, 600),'基本設定'),10,'s',''),
+      // 実行パラメータ（2.0 はコード固定だった。設定が唯一の出所）
+      rangeField(tabField(f('essayGradingTemperature','Temperature','batC12','range',null,'低い値ほど採点・添削の出力が安定します（0.0〜2.0）。',0,2),'基本設定'),0.1,'',''),
+      rangeField(tabField(f('essayGradingMaxCompletionTokens','最大出力Token数','batC12','range',null,'添削が1回に返す最大出力Token数です。レポート全体が収まる値にしてください（1024〜65536）。',1024,65536),'基本設定'),512,'',''),
       tabField(f('essayGradingPrompt','System Prompt','batC12','textarea',null,'採点基準、文字数判定原則、出力制約、タイトル生成を設定します。'),'System Prompt'),
       tabField(f('essayGradingUserPrompt','User Prompt','batC12','textarea',null,'{{level}}、{{question_text}}、{{essay_text}}、{{word_count}}を置換します。'),'User Prompt'),
       rangeField(tabField(f('essayGradingRetryLimit','最大再実行回数','batC12','range',null,'AIエラーまたはJSON構造検証エラー時の作文単位の再実行回数です。',0,5),'その他'),1,'回','')
@@ -270,10 +279,21 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
       rangeField(tabField(f('c24RetryLimit','最大再実行回数','batC34 熟語E','range',null,'AIエラーまたは構造検証エラー時の熟語単位の再実行回数です。',0,5),'その他'),1,'回','')
     ]},
     { id: 'japanese_word_ai', label: '日本語単語AI', icon: 'fa-spell-check', description: '日本語単語の詳細情報とC・D・E問題を生成する4つのバッチ設定です。API KeyとURLは「AIモデル」の接続設定を共通利用します。', sections: [
-      { id:'detail', title:'batC41（詳細情報 A・B）', description:'A・Bで共通利用する語義、発音、例文、コロケーション等の詳細情報を生成します。', icon:'fa-robot', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-info-circle',input:'単語母表・掲載情報',output:'A・B詳細情報（JSON）'}, fieldKeys:['c25AiProvider','c25BatchMax','c25Threads','c25RequestTimeoutSeconds','c25MaxCompletionTokens','c25Temperature','c25SystemPrompt','c25UserPrompt','c25RetryLimit'] },
-      { id:'problem_c', title:'batC42（C 読み・漢字）', description:'C1の仮名選択問題とC2の音声から漢字を選ぶ問題を同時に生成します。', icon:'fa-font', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-font',input:'単語表記・読み',output:'C1・C2問題（JSON）'}, fieldKeys:['c26AiProvider','c26BatchMax','c26Threads','c26RequestTimeoutSeconds','c26MaxCompletionTokens','c26Temperature','c26SystemPrompt','c26UserPrompt','c26RetryLimit'] },
-      { id:'problem_d', title:'batC43（D 文脈意味）', description:'日本語例文の文脈に合う中国語意味を選択する問題を生成します。', icon:'fa-align-left', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-language',input:'単語詳細・例文',output:'D問題・中文解説（JSON）'}, fieldKeys:['c27AiProvider','c27BatchMax','c27Threads','c27RequestTimeoutSeconds','c27MaxCompletionTokens','c27Temperature','c27SystemPrompt','c27UserPrompt','c27RetryLimit'] },
-      { id:'problem_e', title:'batC44（E 漢字使分け）', description:'同じ読みを持つ漢字表記の使い分け問題と中国語解説を生成します。', icon:'fa-exchange-alt', tabs:['基本設定','System Prompt','User Prompt','その他'], ioNotice:{icon:'fa-language',input:'表記・同音語情報',output:'E問題・中文解説（JSON）'}, fieldKeys:['c28AiProvider','c28BatchMax','c28Threads','c28RequestTimeoutSeconds','c28MaxCompletionTokens','c28Temperature','c28SystemPrompt','c28UserPrompt','c28RetryLimit'] }
+      /*
+       * Data TAB は「そのバッチの AI 出力の形（DTO から生成した JSON Schema）」を見るタブ。
+       * 項目を持たないので、区画側はマウント点だけを出し、中身は素の DOM で描く
+       * （aiDataSchemaPanel.ts）。dataTask ＝ その区画のバッチコード
+       * （サーバーの AiResponseDtos に登録した DTO を引く）。
+       *
+       * **ここに `tabs` を書いても、あとで normalizeAiSections が組み直す**（項目から作る
+       * ＋ `dataTask` があれば Data を足す）。Data が出ないときは、この行ではなく
+       * `normalizeAiSections` と `aiTabsWithData`（aiSettingsLayout.ts）を見ること
+       * （実際、この literal に Data があるのに画面から消えていた）。
+       */
+      { id:'detail', title:'batC41（詳細情報 A・B）', description:'A・Bで共通利用する語義、発音、例文、コロケーション等の詳細情報を生成します。', icon:'fa-robot', tabs:['基本設定','System Prompt','User Prompt','Data','その他'], dataTask:'batC41', ioNotice:{icon:'fa-info-circle',input:'単語母表・掲載情報',output:'A・B詳細情報（JSON）'}, fieldKeys:['c25AiProvider','c25BatchMax','c25Threads','c25RequestTimeoutSeconds','c25MaxCompletionTokens','c25Temperature','c25SystemPrompt','c25UserPrompt','c25RetryLimit'] },
+      { id:'problem_c', title:'batC42（C 読み・漢字）', description:'C1の仮名選択問題とC2の音声から漢字を選ぶ問題を同時に生成します。', icon:'fa-font', tabs:['基本設定','System Prompt','User Prompt','Data','その他'], dataTask:'batC42', ioNotice:{icon:'fa-font',input:'単語表記・読み',output:'C1・C2問題（JSON）'}, fieldKeys:['c26AiProvider','c26BatchMax','c26Threads','c26RequestTimeoutSeconds','c26MaxCompletionTokens','c26Temperature','c26SystemPrompt','c26UserPrompt','c26RetryLimit'] },
+      { id:'problem_d', title:'batC43（D 文脈意味）', description:'日本語例文の文脈に合う中国語意味を選択する問題を生成します。', icon:'fa-align-left', tabs:['基本設定','System Prompt','User Prompt','Data','その他'], dataTask:'batC43', ioNotice:{icon:'fa-language',input:'単語詳細・例文',output:'D問題・中文解説（JSON）'}, fieldKeys:['c27AiProvider','c27BatchMax','c27Threads','c27RequestTimeoutSeconds','c27MaxCompletionTokens','c27Temperature','c27SystemPrompt','c27UserPrompt','c27RetryLimit'] },
+      { id:'problem_e', title:'batC44（E 漢字使分け）', description:'同じ読みを持つ漢字表記の使い分け問題と中国語解説を生成します。', icon:'fa-exchange-alt', tabs:['基本設定','System Prompt','User Prompt','Data','その他'], dataTask:'batC44', ioNotice:{icon:'fa-language',input:'表記・同音語情報',output:'E問題・中文解説（JSON）'}, fieldKeys:['c28AiProvider','c28BatchMax','c28Threads','c28RequestTimeoutSeconds','c28MaxCompletionTokens','c28Temperature','c28SystemPrompt','c28UserPrompt','c28RetryLimit'] }
     ], fields: [
       fullField(tabField(f('c25AiProvider','使用モデル','batC41','ai-model-dropdown',null,'詳細情報（A・B共通）の生成に使用するモデルです。'),'基本設定')),
       rangeField(tabField(f('c25BatchMax','1回の最大単語数','batC41','range',null,'詳細情報取得で一度に受け付ける単語数です。', 10, 200),'基本設定'),1,'語',''),
@@ -491,7 +511,13 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
           const field = fields.find(function(item) { return item.key === next.key; });
           if (field) Object.assign(field, next);
         });
-        section.tabs = aiTabsOf(fields);
+        /*
+         * TAB の一覧は**項目から作り直す**（名称・並びの規則は aiSettingsLayout.ts が唯一の定義）。
+         * ただし Data TAB だけは項目を持たないので、`dataTask`（＝その区画の出力 DTO）を
+         * 持つ区画にだけ足す。ここで足し忘れると、日本語単語AI の 4 区画から Data が消える
+         * （実際に消えていた。区画定義に tabs を書いても、この行が上書きするため）。
+         */
+        section.tabs = aiTabsWithData(aiTabsOf(fields), Boolean(section.dataTask));
       });
       // 画面は category.fields の順に描くので、定義そのものを TAB → 項目の順にしておく
       category.fields = sortAiFields(category.fields);
@@ -634,7 +660,7 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
       'fa-home':'home', 'fa-search':'search', 'fa-plus':'plus', 'fa-times':'x', 'fa-check':'check',
       'fa-sync-alt':'rotate', 'fa-save':'check', 'fa-brain':'sliders', 'fa-language':'globe',
       'fa-volume-up':'play', 'fa-tasks':'check-square', 'fa-book':'book', 'fa-layer-group':'grid',
-      'fa-link':'bookmark', 'fa-sliders-h':'sliders', 'fa-robot':'sliders', 'fa-image':'image',
+      'fa-link':'bookmark', 'fa-sliders-h':'sliders', 'fa-robot':'robot', 'fa-image':'image',
       'fa-file-signature':'edit', 'fa-file-image':'image', 'fa-check-double':'check-circle',
       'fa-puzzle-piece':'grid', 'fa-book-open':'book-open', 'fa-compass':'globe',
       'fa-book-reader':'book-open', 'fa-question-circle':'info', 'fa-video':'video',
@@ -678,6 +704,9 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
       return '<article class="setting-panel" data-panel="' + category.id + '"' + (index ? ' hidden' : '') + '><header class="setting-panel-head"><h3>' + escapeHtml(category.label) + '</h3><p>' + escapeHtml(category.description) + '</p></header>' + renderCategoryBody(category) + '</article>';
     }).join(''));
     applyValues(currentSettings);
+    // Data TAB（AI 出力データ構造）の中身を描く。設定の読み込み後に組み立てられるので、
+    // 見つかるまで少しの間だけ試す（renderAllAiDataSchemas を参照）
+    renderAllAiDataSchemas();
   }
 
   /**
@@ -735,7 +764,11 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
       '</div>';
     html += category.tabs.map(function(tab, tabIndex) {
       const fields = category.fields.filter(function(field) { return (field.tab || '基本設定') === tab; });
-      const panelHtml = '<div class="setting-field-grid">' + fields.map(renderField).join('') + '</div>';
+      // Data TAB はマウント点だけを出す（中身は素の DOM で描く。上の dataTask を参照）。
+      // 属性名は Vue 側の部品（AiDataSchemaPanel.vue）と分ける（既存の区画を描き直さないため）
+      const panelHtml = tab === 'Data' && category.dataTask
+        ? '<div data-ai-data-schema-slot="' + escapeHtml(category.dataTask) + '"></div>'
+        : '<div class="setting-field-grid">' + fields.map(renderField).join('') + '</div>';
       return '<section class="setting-method-tab-panel" data-method-panel="' + escapeHtml(tab) + '"' + (tabIndex === 0 ? '' : ' hidden') + '>' +
         panelHtml + '</section>';
     }).join('');
@@ -745,7 +778,14 @@ import { intervalChoices, offsetMaxMinutes, parseIntervalMinutes, SCHEDULE_OFFSE
   function renderSectionedCategory(category) {
     return (category.sections || []).map(function(section) {
       const sectionFields = category.fields.filter(function(field) { return section.fieldKeys.includes(field.key); });
-      const sectionCategory = { tabs: section.tabs, ioNotice: section.ioNotice, fields: sectionFields };
+      const sectionCategory = {
+        tabs: section.tabs, ioNotice: section.ioNotice, fields: sectionFields,
+        // Data TAB は DTO から生成した JSON Schema を見るだけ（項目を持たない）。
+        // ここは**マウント点だけ**を出し、中身は素の DOM で描く（aiDataSchemaPanel.ts）。
+        // 2 つ目の Vue アプリを載せると設定ページの再描画とぶつかって落ちるため、
+        // Vue の寿命と切り離している（実行スケジュールの data-schedule-slot と同じ考え方）。
+        dataTask: section.dataTask
+      };
       return '<section class="setting-batch-section" data-setting-subsection="' + escapeHtml(section.id) + '">' +
         '<header class="setting-batch-section-head"><div class="setting-batch-section-icon"><i class="fas ' + escapeHtml(section.icon) + '"></i></div>' +
         '<div><h4>' + escapeHtml(section.title) + '</h4><p>' + escapeHtml(section.description) + '</p></div></header>' +

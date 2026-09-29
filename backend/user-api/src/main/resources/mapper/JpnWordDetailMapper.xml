@@ -1,0 +1,693 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.study21.user.japanese.JpnWordDetailMapper">
+
+    <!--
+      単語の詳細（版のヘッダ）と 11 の子テーブルの読み取り。
+
+      ・読むのは**有効版**（状態コード='ACTIVE'）だけ。1 語に 1 行（部分 UNIQUE 索引）
+      ・子テーブルは 表示順, <段落>ID で並べる（並びはここ 1 か所で決める。組み立ては並べ替えない）
+        会話の発言（JPN_単語詳細_会話行情報）だけ 会話ID で親にぶら下がる
+      ・JSONB の列は ::text で読む（列ごとの TypeHandler を足さず、組み立てで Jackson が読む）
+    -->
+
+    <!-- 版のヘッダ。列名は日本語なので、写す先を 1 つずつ書く -->
+    <resultMap id="DetailHeaderMap" type="com.study21.common.core.japanese.JpnWordDetailEntity">
+        <id     property="detailId"           column="詳細ID"/>
+        <result property="wordId"             column="単語ID"/>
+        <result property="contentVersion"     column="内容版数"/>
+        <result property="version"            column="バージョン"/>
+        <result property="stateCode"          column="状態コード"/>
+        <result property="originDetailId"     column="元詳細ID"/>
+        <result property="generationId"       column="生成ID"/>
+        <result property="aiProvider"         column="AIプロバイダ"/>
+        <result property="aiModel"            column="AIモデル"/>
+        <result property="fetchedAt"          column="取得日時"/>
+        <result property="manualCorrected"    column="手修正フラグ"/>
+        <result property="note"               column="備考"/>
+        <result property="coreMeaning"        column="核心意味"/>
+        <result property="descriptionJa"      column="説明_日本語"/>
+        <result property="descriptionZh"      column="説明_中国語"/>
+        <result property="partOfSpeech"       column="品詞"/>
+        <result property="jlptLevel"          column="JLPTレベル"/>
+        <result property="conjugation"        column="活用型"/>
+        <result property="transitivity"       column="自他"/>
+        <result property="importance"         column="重要度"/>
+        <result property="memoryHint"         column="記憶ヒント"/>
+        <result property="memoryHintBasis"    column="記憶ヒント根拠"/>
+        <!-- 小構造は JSONB。文字列で受けて組み立てで読む -->
+        <result property="pronunciationJson"  column="発音JSON"/>
+        <result property="conjugationsJson"   column="活用形JSON"/>
+        <result property="transitivityPairJson" column="自他対応JSON"/>
+        <result property="structuredJson"     column="元レスポンスJSON"/>
+    </resultMap>
+
+    <sql id="DetailHeaderColumns">
+        d."詳細ID", d."単語ID", d."内容版数", d."バージョン", d."状態コード", d."元詳細ID", d."生成ID",
+        d."AIプロバイダ", d."AIモデル", d."取得日時", d."手修正フラグ", d."備考",
+        d."核心意味", d."説明_日本語", d."説明_中国語", d."品詞", d."JLPTレベル",
+        d."活用型", d."自他", d."重要度", d."記憶ヒント", d."記憶ヒント根拠",
+        d."発音JSON"::text AS "発音JSON",
+        d."活用形JSON"::text AS "活用形JSON",
+        d."自他対応JSON"::text AS "自他対応JSON",
+        d."元レスポンスJSON"::text AS "元レスポンスJSON"
+    </sql>
+
+    <resultMap id="SenseMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Sense">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="japanese"         column="日本語"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="context"          column="場面"/>
+        <result property="style"            column="文体"/>
+        <result property="noteJapanese"     column="補足_日本語"/>
+        <result property="noteChinese"      column="補足_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="ExampleMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Example">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="japanese"         column="例文_日本語"/>
+        <result property="reading"          column="例文読み"/>
+        <result property="chinese"          column="例文_中国語"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="source"           column="出典"/>
+        <result property="level"            column="レベル"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="PatternMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Pattern">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="pattern"          column="文型"/>
+        <result property="reading"          column="文型読み"/>
+        <result property="chinese"          column="説明_中国語"/>
+        <result property="example"          column="例文_日本語"/>
+        <result property="exampleChinese"   column="例文_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DialogMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Dialog">
+        <id     property="dialogId"         column="会話ID"/>
+        <result property="orderNo"          column="表示順"/>
+        <result property="scene"            column="場面"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="DialogLineMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$DialogLine">
+        <id     property="dialogId"         column="会話ID"/>
+        <result property="orderNo"          column="表示順"/>
+        <result property="speaker"          column="話者"/>
+        <result property="japanese"         column="日本語"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="SynonymMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Synonym">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="heading"          column="見出し語"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="shared"           column="共通点"/>
+        <result property="difference"       column="違い"/>
+        <result property="scene"            column="場面"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="CautionMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Caution">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="kind"             column="区分"/>
+        <result property="title"            column="見出し"/>
+        <result property="wrong"            column="誤り"/>
+        <result property="correct"          column="正しい"/>
+        <result property="reason"           column="理由"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="CollocationMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Collocation">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="expression"       column="表現"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="usage"            column="使い方"/>
+        <result property="exampleJapanese"  column="例文_日本語"/>
+        <result property="exampleChinese"   column="例文_中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="RelatedWordMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$RelatedWord">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="relation"         column="関係"/>
+        <result property="heading"          column="見出し語"/>
+        <result property="reading"          column="読み"/>
+        <result property="chinese"          column="中国語"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="UsageNoteMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$UsageNote">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="senseNumber"      column="語義番号"/>
+        <result property="register"         column="文体区分"/>
+        <result property="politeness"       column="丁寧さ"/>
+        <result property="audience"         column="対象"/>
+        <result property="note"             column="備考"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <resultMap id="PracticeMap" type="com.study21.common.core.japanese.JpnWordDetailChildren$Practice">
+        <id     property="orderNo"          column="表示順"/>
+        <result property="kind"             column="種別"/>
+        <result property="question"         column="問題_日本語"/>
+        <result property="questionChinese"  column="問題_中国語"/>
+        <result property="choicesJson"      column="選択肢JSON"/>
+        <result property="freeWriting"      column="自由記述フラグ"/>
+        <result property="answer"           column="正解"/>
+        <result property="explanation"      column="解説"/>
+        <result property="manualCorrected"  column="手修正フラグ"/>
+        <result property="sourceCode"       column="登録元コード"/>
+    </resultMap>
+
+    <!-- 語の**有効版**。1 語に 1 行（uq_jpn_detail_active）。まだ詳細が無ければ 0 行 -->
+    <select id="findActiveDetail" resultMap="DetailHeaderMap">
+        SELECT <include refid="DetailHeaderColumns"/>
+          FROM public."JPN_単語詳細情報" d
+         WHERE d."単語ID" = #{wordId}
+           AND d."状態コード" = 'ACTIVE'
+         ORDER BY d."内容版数" DESC
+         LIMIT 1
+    </select>
+
+    <!-- 語義。例文と使用場面が 語義番号 で参照する -->
+    <select id="listSenses" resultMap="SenseMap">
+        SELECT s."表示順", s."語義番号", s."日本語", s."中国語", s."場面", s."文体",
+               s."補足_日本語", s."補足_中国語", s."手修正フラグ", s."登録元コード"
+          FROM public."JPN_単語詳細_語義情報" s
+         WHERE s."詳細ID" = #{detailId}
+         ORDER BY s."表示順", s."語義ID"
+    </select>
+
+    <select id="listExamples" resultMap="ExampleMap">
+        SELECT e."表示順", e."例文_日本語", e."例文読み", e."例文_中国語", e."語義番号",
+               e."出典", e."レベル", e."手修正フラグ", e."登録元コード"
+          FROM public."JPN_単語詳細_例文情報" e
+         WHERE e."詳細ID" = #{detailId}
+         ORDER BY e."表示順", e."例文ID"
+    </select>
+
+    <select id="listPatterns" resultMap="PatternMap">
+        SELECT p."表示順", p."文型", p."文型読み", p."説明_中国語", p."例文_日本語", p."例文_中国語",
+               p."手修正フラグ", p."登録元コード"
+          FROM public."JPN_単語詳細_文型情報" p
+         WHERE p."詳細ID" = #{detailId}
+         ORDER BY p."表示順", p."文型ID"
+    </select>
+
+    <select id="listDialogs" resultMap="DialogMap">
+        SELECT g."会話ID", g."表示順", g."場面", g."手修正フラグ", g."登録元コード"
+          FROM public."JPN_単語詳細_会話情報" g
+         WHERE g."詳細ID" = #{detailId}
+         ORDER BY g."表示順", g."会話ID"
+    </select>
+
+    <!-- 発言は 会話ID で親にぶら下がる（詳細ID の列を持たない）ので、会話を経由して引く -->
+    <select id="listDialogLines" resultMap="DialogLineMap">
+        SELECT l."会話ID", l."表示順", l."話者", l."日本語", l."中国語", l."手修正フラグ", l."登録元コード"
+          FROM public."JPN_単語詳細_会話行情報" l
+          JOIN public."JPN_単語詳細_会話情報" g ON g."会話ID" = l."会話ID"
+         WHERE g."詳細ID" = #{detailId}
+         ORDER BY g."表示順", g."会話ID", l."表示順", l."会話行ID"
+    </select>
+
+    <select id="listSynonyms" resultMap="SynonymMap">
+        SELECT y."表示順", y."見出し語", y."読み", y."中国語", y."共通点", y."違い", y."場面",
+               y."手修正フラグ", y."登録元コード"
+          FROM public."JPN_単語詳細_類義語情報" y
+         WHERE y."詳細ID" = #{detailId}
+         ORDER BY y."表示順", y."類義語ID"
+    </select>
+
+    <select id="listCautions" resultMap="CautionMap">
+        SELECT c."表示順", c."区分", c."見出し", c."誤り", c."正しい", c."理由",
+               c."手修正フラグ", c."登録元コード"
+          FROM public."JPN_単語詳細_注意情報" c
+         WHERE c."詳細ID" = #{detailId}
+         ORDER BY c."表示順", c."注意ID"
+    </select>
+
+    <select id="listCollocations" resultMap="CollocationMap">
+        SELECT k."表示順", k."表現", k."読み", k."中国語", k."使い方", k."例文_日本語", k."例文_中国語",
+               k."手修正フラグ", k."登録元コード"
+          FROM public."JPN_単語詳細_コロケーション情報" k
+         WHERE k."詳細ID" = #{detailId}
+         ORDER BY k."表示順", k."コロケーションID"
+    </select>
+
+    <select id="listRelatedWords" resultMap="RelatedWordMap">
+        SELECT r."表示順", r."関係", r."見出し語", r."読み", r."中国語",
+               r."手修正フラグ", r."登録元コード"
+          FROM public."JPN_単語詳細_関連語情報" r
+         WHERE r."詳細ID" = #{detailId}
+         ORDER BY r."表示順", r."関連語ID"
+    </select>
+
+    <select id="listUsageNotes" resultMap="UsageNoteMap">
+        SELECT u."表示順", u."語義番号", u."文体区分", u."丁寧さ", u."対象", u."備考",
+               u."手修正フラグ", u."登録元コード"
+          FROM public."JPN_単語詳細_使用場面情報" u
+         WHERE u."詳細ID" = #{detailId}
+         ORDER BY u."表示順", u."使用場面ID"
+    </select>
+
+    <!-- 選択肢は JSONB。文字列の配列として組み立てで読む -->
+    <select id="listPractices" resultMap="PracticeMap">
+        SELECT w."表示順", w."種別", w."問題_日本語", w."問題_中国語", w."選択肢JSON"::text AS "選択肢JSON",
+               w."自由記述フラグ", w."正解", w."解説", w."手修正フラグ", w."登録元コード"
+          FROM public."JPN_単語詳細_練習情報" w
+         WHERE w."詳細ID" = #{detailId}
+         ORDER BY w."表示順", w."練習ID"
+    </select>
+
+    <!-- ==================================================================
+         版の書き込み（切片4: 画面の編集保存）。
+
+         画面の編集も **1 つの版**を作る（設計 V2）。順番が意味を持つ:
+           1. 今の有効版と 11 の子テーブルを読む（呼ぶ側）
+           2. 内容を突き合わせて行ごとの出所を決める（JpnWordDetailEditorComposer）
+           3. 今の有効版を ARCHIVED にする（下の archiveActiveDetail）
+           4. 新しい版のヘッダを ACTIVE で入れる（下の insertDetailVersion）
+           5. 段落の行を新しい 詳細ID へ入れる（下の insert*）
+
+         3 を 4 より先に行う理由: 部分 UNIQUE 索引 uq_jpn_detail_active が
+         「1 語につき ACTIVE は 1 行」を守っているため。
+         ================================================================== -->
+
+    <!--
+      古い有効版を ARCHIVED にする（消さない＝履歴）。新しい版を ACTIVE で入れる前に呼ぶ。
+      更新元コードは 'APP'（人が画面から行った操作）。
+    -->
+    <update id="archiveActiveDetail">
+        UPDATE public."JPN_単語詳細情報"
+           SET "状態コード" = 'ARCHIVED',
+               "更新者アカウントID" = #{accountId},
+               "更新元コード" = 'APP',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "単語ID" = #{wordId}
+           AND "状態コード" = 'ACTIVE'
+    </update>
+
+    <!--
+      新しい版のヘッダ（内容版数は「その語の最大 + 1」を INSERT の中で数える）。
+      発音・活用形・自他対応・元レスポンス は画面が持っている値をそのまま入れる
+      （無いキーは呼ぶ側が元の版の値で埋めてから渡す）。
+    -->
+    <insert id="insertDetailVersion" useGeneratedKeys="true" keyProperty="detailId"
+            keyColumn="詳細ID">
+        INSERT INTO public."JPN_単語詳細情報" (
+            "単語ID", "内容版数", "状態コード", "元詳細ID", "生成ID",
+            "AIプロバイダ", "AIモデル", "取得日時", "手修正フラグ", "備考",
+            "核心意味", "説明_日本語", "説明_中国語", "品詞", "JLPTレベル", "活用型", "自他",
+            "重要度", "記憶ヒント", "記憶ヒント根拠",
+            "発音JSON", "活用形JSON", "自他対応JSON", "元レスポンスJSON",
+            "登録者アカウントID", "登録元コード"
+        ) VALUES (
+            #{wordId},
+            (SELECT COALESCE(MAX(d."内容版数"), 0) + 1
+               FROM public."JPN_単語詳細情報" d WHERE d."単語ID" = #{wordId}),
+            'ACTIVE',
+            #{originDetailId},
+            #{generationId},
+            #{aiProvider}, #{aiModel}, #{fetchedAt}, #{manualCorrected}, #{note},
+            #{coreMeaning}, #{descriptionJa}, #{descriptionZh},
+            #{partOfSpeech}, #{jlptLevel}, #{conjugation}, #{transitivity},
+            #{importance}, #{memoryHint}, #{memoryHintBasis},
+            CAST(COALESCE(#{pronunciationJson}, '{}') AS jsonb),
+            CAST(COALESCE(#{conjugationsJson}, '[]') AS jsonb),
+            <choose>
+                <when test="transitivityPairJson != null">
+                    CAST(#{transitivityPairJson} AS jsonb),
+                </when>
+                <otherwise>NULL,</otherwise>
+            </choose>
+            CAST(COALESCE(#{structuredJson}, '{}') AS jsonb),
+            #{createdBy}, 'APP'
+        )
+    </insert>
+
+    <!--
+      段落の行を新しい版へ入れる（1 段落 1 文。行ごとに呼ばない）。
+
+      ・「表示順」は呼ぶ側（JpnWordDetailEditorComposer）が 1 から振り直す
+        （画面が並べ替えた順をそのまま保存する）
+      ・「登録元コード」と「手修正フラグ」は行ごとに決まる:
+          画面の内容が今の版と**まったく同じ行** → 元の行の出所をそのまま引き継ぐ
+            （元が AI の行（BATCH）なら BATCH のまま＝次に AI が取ったとき置き換わる）
+          **変わった行・新しく足した行** → 'APP'・手修正フラグ true
+            （人が触った行は以後 AI に上書きされない）
+      ・「手修正フラグ」は行の 登録元コード から決める（'APP' の行だけ true）
+    -->
+    <insert id="insertSenses">
+        INSERT INTO public."JPN_単語詳細_語義情報" (
+            "詳細ID", "表示順", "語義番号", "日本語", "中国語", "場面", "文体",
+            "補足_日本語", "補足_中国語", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.senseNumber}, #{row.japanese}, #{row.chinese},
+             #{row.context}, #{row.style}, #{row.noteJapanese}, #{row.noteChinese},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertExamples">
+        INSERT INTO public."JPN_単語詳細_例文情報" (
+            "詳細ID", "表示順", "例文_日本語", "例文読み", "例文_中国語", "語義番号", "出典", "レベル",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.japanese}, #{row.reading}, #{row.chinese},
+             #{row.senseNumber}, #{row.source}, #{row.level},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertPatterns">
+        INSERT INTO public."JPN_単語詳細_文型情報" (
+            "詳細ID", "表示順", "文型", "文型読み", "説明_中国語", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.pattern}, #{row.reading}, #{row.chinese},
+             #{row.example}, #{row.exampleChinese},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <!--
+      会話の枠（まとめて入れる）。採番された 会話ID は使わない（発言は 表示順 で
+      引き直してから入れる。会話の 表示順 は版の中で一意）。
+    -->
+    <insert id="insertDialogs">
+        INSERT INTO public."JPN_単語詳細_会話情報" (
+            "詳細ID", "表示順", "場面", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.scene},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <!-- 会話の発言（親の 会話ID は insertDialogs が採番した値） -->
+    <insert id="insertDialogLines">
+        INSERT INTO public."JPN_単語詳細_会話行情報" (
+            "会話ID", "表示順", "話者", "日本語", "中国語", "手修正フラグ",
+            "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{row.dialogId}, #{row.orderNo}, #{row.speaker}, #{row.japanese}, #{row.chinese},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertSynonyms">
+        INSERT INTO public."JPN_単語詳細_類義語情報" (
+            "詳細ID", "表示順", "見出し語", "読み", "中国語", "共通点", "違い", "場面",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.heading}, #{row.reading}, #{row.chinese},
+             #{row.shared}, #{row.difference}, #{row.scene},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertCautions">
+        INSERT INTO public."JPN_単語詳細_注意情報" (
+            "詳細ID", "表示順", "区分", "見出し", "誤り", "正しい", "理由",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.kind}, #{row.title}, #{row.wrong},
+             #{row.correct}, #{row.reason},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertCollocations">
+        INSERT INTO public."JPN_単語詳細_コロケーション情報" (
+            "詳細ID", "表示順", "表現", "読み", "中国語", "使い方", "例文_日本語", "例文_中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.expression}, #{row.reading}, #{row.chinese},
+             #{row.usage}, #{row.exampleJapanese}, #{row.exampleChinese},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertRelatedWords">
+        INSERT INTO public."JPN_単語詳細_関連語情報" (
+            "詳細ID", "表示順", "関係", "見出し語", "読み", "中国語",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.relation}, #{row.heading}, #{row.reading},
+             #{row.chinese},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <insert id="insertUsageNotes">
+        INSERT INTO public."JPN_単語詳細_使用場面情報" (
+            "詳細ID", "表示順", "語義番号", "文体区分", "丁寧さ", "対象", "備考",
+            "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.senseNumber}, #{row.register}, #{row.politeness},
+             #{row.audience}, #{row.note},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <!-- 選択肢は文字列の配列（列は JSONB）。NULL は空配列にする -->
+    <insert id="insertPractices">
+        INSERT INTO public."JPN_単語詳細_練習情報" (
+            "詳細ID", "表示順", "種別", "問題_日本語", "問題_中国語", "選択肢JSON", "自由記述フラグ",
+            "正解", "解説", "手修正フラグ", "登録者アカウントID", "登録元コード"
+        )
+        VALUES
+        <foreach collection="rows" item="row" separator=",">
+            (#{detailId}, #{row.orderNo}, #{row.kind}, #{row.question}, #{row.questionChinese},
+             CAST(COALESCE(#{row.choicesJson}, '[]') AS jsonb), COALESCE(#{row.freeWriting}, false),
+             #{row.answer}, #{row.explanation},
+             <choose><when test="row.sourceCode == 'APP'">true</when><otherwise>false</otherwise></choose>,
+             NULL, #{row.sourceCode})
+        </foreach>
+    </insert>
+
+    <!-- ==================================================================
+         版の一覧と切り替え（切片4）。
+         ================================================================== -->
+
+    <resultMap id="DetailVersionMap" type="com.study21.user.japanese.JpnWordDetailVersionEntity">
+        <id     property="detailId"        column="詳細ID"/>
+        <result property="contentVersion"  column="内容版数"/>
+        <!-- 楽観的ロック（画面が読んだ値を切り替えのときに渡す） -->
+        <result property="version"         column="バージョン"/>
+        <result property="stateCode"       column="状態コード"/>
+        <result property="manualCorrected" column="手修正フラグ"/>
+        <result property="manualRows"      column="manualRows"/>
+        <result property="aiProvider"      column="AIプロバイダ"/>
+        <result property="aiModel"         column="AIモデル"/>
+        <result property="generationId"    column="生成ID"/>
+        <result property="fetchedAt"       column="取得日時"/>
+        <result property="note"            column="備考"/>
+        <result property="createdAt"       column="登録日時"/>
+        <result property="updatedAt"       column="更新日時"/>
+        <result property="senseCount"      column="senses"/>
+        <result property="exampleCount"    column="examples"/>
+        <result property="patternCount"    column="patterns"/>
+        <result property="dialogCount"     column="dialogs"/>
+        <result property="synonymCount"    column="synonyms"/>
+        <result property="cautionCount"    column="cautions"/>
+        <result property="collocationCount" column="collocations"/>
+        <result property="relatedWordCount" column="relatedWords"/>
+        <result property="usageNoteCount"  column="usageNotes"/>
+        <result property="practiceCount"   column="practices"/>
+    </resultMap>
+
+    <!--
+      版のヘッダの列（新しい順の一覧にも 1 件の取得にも使う）。
+      段落の行数は「詳細ID ごとに数える副問い合わせ」で足す（10 段落を 1 回の SQL で数える）。
+      会話の発言（JPN_単語詳細_会話行情報）は会話（dialogs）に含まれるので数えない。
+      人の行があるか（manualRows）は、版のヘッダの 手修正フラグだけでは「段落だけ直した版」が
+      分からないので、段落の 手修正フラグ / 登録元コード も見る。
+    -->
+    <sql id="DetailVersionColumns">
+        d."詳細ID"                                 AS "詳細ID",
+        d."内容版数"                               AS "内容版数",
+        d."バージョン"                             AS "バージョン",
+        d."状態コード"                             AS "状態コード",
+        d."手修正フラグ"                           AS "手修正フラグ",
+        d."AIプロバイダ"                           AS "AIプロバイダ",
+        d."AIモデル"                               AS "AIモデル",
+        d."生成ID"                                 AS "生成ID",
+        d."取得日時"                               AS "取得日時",
+        d."備考"                                   AS "備考",
+        d."登録日時"                               AS "登録日時",
+        d."更新日時"                               AS "更新日時",
+        (SELECT count(*) FROM public."JPN_単語詳細_語義情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "senses",
+        (SELECT count(*) FROM public."JPN_単語詳細_例文情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "examples",
+        (SELECT count(*) FROM public."JPN_単語詳細_文型情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "patterns",
+        (SELECT count(*) FROM public."JPN_単語詳細_会話情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "dialogs",
+        (SELECT count(*) FROM public."JPN_単語詳細_類義語情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "synonyms",
+        (SELECT count(*) FROM public."JPN_単語詳細_注意情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "cautions",
+        (SELECT count(*) FROM public."JPN_単語詳細_コロケーション情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "collocations",
+        (SELECT count(*) FROM public."JPN_単語詳細_関連語情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "relatedWords",
+        (SELECT count(*) FROM public."JPN_単語詳細_使用場面情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "usageNotes",
+        (SELECT count(*) FROM public."JPN_単語詳細_練習情報" x
+          WHERE x."詳細ID" = d."詳細ID")           AS "practices",
+        (d."手修正フラグ"
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_語義情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_例文情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_文型情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_会話情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_類義語情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_注意情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_コロケーション情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_関連語情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_使用場面情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+         OR EXISTS (SELECT 1 FROM public."JPN_単語詳細_練習情報" x
+                     WHERE x."詳細ID" = d."詳細ID" AND (x."手修正フラグ" OR x."登録元コード" = 'APP'))
+        )                                          AS "manualRows"
+    </sql>
+
+    <!-- 版の一覧。新しい版が先（画面は上から見る） -->
+    <select id="listDetailVersions" resultMap="DetailVersionMap">
+        SELECT <include refid="DetailVersionColumns"/>
+          FROM public."JPN_単語詳細情報" d
+         WHERE d."単語ID" = #{wordId}
+         ORDER BY d."内容版数" DESC, d."詳細ID" DESC
+    </select>
+
+    <!-- 版 1 つ。その語の版でなければ 0 行（呼ぶ側が 404 にする） -->
+    <select id="findDetailVersion" resultMap="DetailVersionMap">
+        SELECT <include refid="DetailVersionColumns"/>
+          FROM public."JPN_単語詳細情報" d
+         WHERE d."単語ID" = #{wordId}
+           AND d."詳細ID" = #{detailId}
+    </select>
+
+    <!--
+      一覧の「詳細情報件数」列: 指定した語の**有効版**の段落の件数。
+      1 ページぶんの語 ID をまとめて渡す（1 語ずつ引くと N+1 になる）。
+      段落の行数は版の履歴（DetailVersionColumns）と同じ数え方にそろえる:
+      親テーブル 10 個を数え、会話の発言（会話行情報）は会話に含まれるので数えない。
+      有効版が無い語は行が返らない（画面は「—」）。
+    -->
+    <resultMap id="DetailCountMap" type="com.study21.user.japanese.JpnDetailCountEntity">
+        <id     property="wordId"          column="単語ID"/>
+        <result property="senseCount"      column="senses"/>
+        <result property="exampleCount"    column="examples"/>
+        <result property="patternCount"    column="patterns"/>
+        <result property="dialogCount"     column="dialogs"/>
+        <result property="synonymCount"    column="synonyms"/>
+        <result property="cautionCount"    column="cautions"/>
+        <result property="collocationCount" column="collocations"/>
+        <result property="relatedWordCount" column="relatedWords"/>
+        <result property="usageNoteCount"  column="usageNotes"/>
+        <result property="practiceCount"   column="practices"/>
+    </resultMap>
+
+    <select id="listActiveSectionCounts" resultMap="DetailCountMap">
+        SELECT d."単語ID"                                 AS "単語ID",
+               (SELECT count(*) FROM public."JPN_単語詳細_語義情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "senses",
+               (SELECT count(*) FROM public."JPN_単語詳細_例文情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "examples",
+               (SELECT count(*) FROM public."JPN_単語詳細_文型情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "patterns",
+               (SELECT count(*) FROM public."JPN_単語詳細_会話情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "dialogs",
+               (SELECT count(*) FROM public."JPN_単語詳細_類義語情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "synonyms",
+               (SELECT count(*) FROM public."JPN_単語詳細_注意情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "cautions",
+               (SELECT count(*) FROM public."JPN_単語詳細_コロケーション情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "collocations",
+               (SELECT count(*) FROM public."JPN_単語詳細_関連語情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "relatedWords",
+               (SELECT count(*) FROM public."JPN_単語詳細_使用場面情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "usageNotes",
+               (SELECT count(*) FROM public."JPN_単語詳細_練習情報" x
+                 WHERE x."詳細ID" = d."詳細ID")           AS "practices"
+          FROM public."JPN_単語詳細情報" d
+         WHERE d."状態コード" = 'ACTIVE'
+           AND d."単語ID" IN
+        <foreach item="wordId" collection="wordIds" open="(" separator="," close=")">
+            #{wordId}
+        </foreach>
+    </select>
+
+    <!--
+      指定した版を ACTIVE にする（楽観的ロック: バージョンが一致するときだけ）。
+      0 行なら「ほかの操作が先に更新した」＝ 409。単語ID も条件に入れ、
+      別の語の版を誤って有効にしない。
+    -->
+    <update id="activateDetailVersion">
+        UPDATE public."JPN_単語詳細情報"
+           SET "状態コード" = 'ACTIVE',
+               "バージョン" = "バージョン" + 1,
+               "更新者アカウントID" = #{accountId},
+               "更新元コード" = 'APP',
+               "更新日時" = CURRENT_TIMESTAMP
+         WHERE "単語ID" = #{wordId}
+           AND "詳細ID" = #{detailId}
+           AND "バージョン" = #{version}
+    </update>
+</mapper>

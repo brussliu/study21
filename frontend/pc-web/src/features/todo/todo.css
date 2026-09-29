@@ -356,12 +356,6 @@
   outline-offset: 2px;
 }
 
-/* 入力中のセルは白地のまま（選択の緑は残しつつ、枠で「入力中」を示す） */
-.todo-grid td.is-editing {
-  background: var(--color-surface);
-  box-shadow: inset 0 0 0 2px var(--color-primary);
-}
-
 /* セルの中の入力は枠を持たない（セル全体が入力欄に見えるように） */
 .todo-grid td[data-col] input,
 .todo-grid td[data-col] select {
@@ -462,10 +456,21 @@
   outline: none;
 }
 
-/* 選択中のセル（1 つだけ選んでいるとき） */
+/*
+ * 入力中のセルは白地のまま、**罫線そのものを緑に替える**。
+ * 内側にも枠を足すと、セルの罫線と重なって二重に見える。
+ */
+.todo-grid td.is-editing {
+  background: var(--color-surface);
+  border-color: var(--color-primary);
+  box-shadow: none;
+}
+
+/* 選択中のセル（1 つだけ選んでいるとき）。同じく罫線の色で示す */
 .todo-grid td.is-selected {
   background: var(--color-success-soft);
-  box-shadow: inset 0 0 0 2px var(--color-success);
+  border-color: var(--color-success);
+  box-shadow: none;
 }
 
 /* ドラッグで選んだ範囲 */

@@ -25,7 +25,7 @@ frontend/pc-web/
 │   ├── stores/                      # auth(假认证) / theme
 │   ├── config/
 │   │   ├── menuRegistry.ts          # 集中式菜单（三角色共用）
-│   │   └── prototypePages.generated.ts  # 94 页面注册表（脚本生成）
+│   │   └── prototypePages.generated.ts  # 93 页面注册表（脚本生成）
 │   ├── layouts/                     # AdminLayout / UserLayout
 │   ├── components/layout/           # AppSidebar / AppTopbar / AppBreadcrumb / PageTitle
 │   ├── components/account/          # UserProfileDialog / PasswordChangeDialog（右上メニューから開く）
@@ -33,7 +33,7 @@ frontend/pc-web/
 │   ├── views/
 │   │   ├── net/                     # SiteManagementView（サイト管理）/ TerminalControlView（端末コントロール）
 │   │   ├── login/                   # UserLoginView / AdminLoginView
-│   │   ├── prototype/               # PrototypePageView + generated/（94 页）
+│   │   ├── prototype/               # PrototypePageView + generated/（93 页）
 │   │   └── error/                   # 403 / 404 / 500
 │   └── views/{admin,student,parent}/# 旧占位首页（已不被路由引用，保留）
 └── tests/                           # Vitest 单元测试
@@ -81,7 +81,7 @@ DOM 结构与类名，样式全部来自 `src/assets/prototype/layout.css`（与
 
 ## 6. prototype/generated 规则（临时页面区域）
 
-- 临时区域：`src/views/prototype/generated/`，共 94 个 `.vue` 页面。
+- 临时区域：`src/views/prototype/generated/`，共 93 个 `.vue` 页面（英作文AI添削は 2026-09-27 に実画面へ移したので、ここからは外した）。
 - 注册表：`src/config/prototypePages.generated.ts`（由脚本生成，勿手改）。
 - 动态加载：`src/views/prototype/PrototypePageView.vue` 用 `import.meta.glob` 按 slug 懒加载组件。
 - 生成脚本：以前は `scripts/`（`generate-ui-pages.mjs` / `render-ui-pages-from-browser.mjs`）に置いていたが、そのディレクトリは削除済み。再生成が必要なときは git 履歴から復元するか、`tmp/` 配下に置いて使う。

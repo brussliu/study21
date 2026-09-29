@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.study21.admin.ai.AiErrorMessages;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,8 +91,9 @@ public class GeometryAiHttpClient implements GeometryAiClient {
                 return AiResponse.success(status, response.body());
             }
             if (status >= 400 && status < 500) {
+                // プロバイダーが返した理由も付ける（残高不足など、設定では直らない原因のため）
                 return AiResponse.failure(status, "HTTP_4XX",
-                        "AI がリクエストを受け付けませんでした（HTTP " + status + "）。API Key とモデル名を確認してください。");
+                        AiErrorMessages.clientError(status, response.body()));
             }
             return AiResponse.failure(status, status == 429 ? "HTTP_429" : "HTTP_5XX",
                     "AI の呼び出しに失敗しました（HTTP " + status + "）。");
@@ -113,7 +115,9 @@ public class GeometryAiHttpClient implements GeometryAiClient {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("model", request.model());
         root.put("temperature", request.temperature());
-        root.put("max_tokens", request.maxCompletionTokens());
+        // 出力の上限の名前はモデルで違う（GPT-5 系は max_tokens を受け付けない）
+        root.put(GeometryAiClient.requiresCompletionTokens(request.model())
+                ? "max_completion_tokens" : "max_tokens", request.maxCompletionTokens());
         if (request.jsonResponse()) {
             // JSON を返せるモデルにだけ付ける（非対応でも 400 にならないものが多い）
             ObjectNode format = root.putObject("response_format");

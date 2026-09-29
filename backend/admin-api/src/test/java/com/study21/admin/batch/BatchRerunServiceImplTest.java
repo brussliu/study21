@@ -4,6 +4,7 @@ import com.study21.admin.setting.SettingsService;
 import com.study21.common.core.exception.ConflictException;
 import com.study21.common.core.exception.ValidationException;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -180,19 +181,58 @@ class BatchRerunServiceImplTest {
     }
 
     @Test
+    @DisplayName("有効な種別 C は他の処理から今までどおり呼べる")
     void callBatchesCanStillBeStartedByOtherProcessing() {
         // 止めるのは「画面からの入口」だけ。他の処理（AI 生図の流水線・授業ノートなど）からの
-        // 呼出（rerunStep）は今までどおり動く
+        // 呼出（rerunStep）は、**有効なバッチなら**今までどおり動く
         RecordingHandler callHandler = new RecordingHandler("batC52");
         BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
                 executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler), List.of());
-        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
+        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, true));
         when(executionMapper.findRunningByBatchCode("batC52")).thenReturn(null);
 
         Map<String, Object> result = callService.rerunStep("batC52", "APP", "{\"assistId\":12}");
 
         assertThat(callHandler.calls).isEqualTo(1);
         assertThat(result).containsEntry("success", true);
+    }
+
+    @Test
+    @DisplayName("コントロール表で有効なら、定義の既定値が無効でも呼べる")
+    void callBatchRunsWhenTheControlRowIsActive() {
+        RecordingHandler callHandler = new RecordingHandler("batC52");
+        BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler), List.of());
+        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, false));
+        when(controlMapper.findByBatchCode("batC52")).thenReturn(control("batC52", "1"));
+        when(executionMapper.findRunningByBatchCode("batC52")).thenReturn(null);
+
+        Map<String, Object> result = callService.rerunStep("batC52", "APP", "{\"assistId\":12}");
+
+        assertThat(callHandler.calls).isEqualTo(1);
+        assertThat(result).containsEntry("success", true);
+    }
+
+    @Test
+    @DisplayName("無効にした種別 C は他の処理からも呼べない（一覧のスイッチがそのまま効く）")
+    void otherProcessingCannotStartADisabledCallBatch() {
+        // 種別 C の有効／無効は「いま使っているか」の目印であると同時に、**呼出を止める**スイッチ。
+        // 2026-09-22 の利用者指示（一覧のスイッチを実際に効かせたい）
+        RecordingHandler callHandler = new RecordingHandler("batC52");
+        BatchServiceImpl callService = new BatchServiceImpl(registry, mock(SettingsService.class),
+                executionMapper, controlMapper, mock(AiCallLogMapper.class), List.of(callHandler), List.of());
+        when(registry.findByCode("batC52")).thenReturn(definition("batC52", BatchTaskType.C, true));
+        when(controlMapper.findByBatchCode("batC52")).thenReturn(control("batC52", "0"));
+
+        assertThatThrownBy(() -> callService.rerunStep("batC52", "APP", "{\"assistId\":12}"))
+                .isInstanceOf(ValidationException.class)
+                .hasMessageContaining("batC52")
+                .hasMessageContaining("無効")
+                .hasMessageContaining("バッチ一覧");
+
+        // 実行記録も残さない（実行そのものを始めない）
+        assertThat(callHandler.calls).isZero();
+        verify(executionMapper, never()).insert(any(BatchExecutionEntity.class));
     }
 
     @Test
@@ -225,7 +265,7 @@ class BatchRerunServiceImplTest {
 
     @Test
     void listTasksUsesTheDefinitionDefaultWhenThereIsNoControlRow() {
-        // 種別 C（呼出）はコントロール情報に行を作らない（切り替えられないため）。
+        // ハンドラの無い C（未実装）は切り替えられないので、コントロール情報に行を作らない。
         // 行が無いときは**定義の既定値**を使うので、使っている C は一覧で有効に見える
         BatchServiceImpl realRegistryService = new BatchServiceImpl(new BatchTaskRegistry(),
                 mock(SettingsService.class), executionMapper, controlMapper, mock(AiCallLogMapper.class),
@@ -238,8 +278,10 @@ class BatchRerunServiceImplTest {
                 .containsEntry("canToggleActive", false);
         assertThat(rowOf(realRegistryService, "batC61")).containsEntry("active", true);
         assertThat(rowOf(realRegistryService, "batC62")).containsEntry("active", true);
-        // まだ使っていない C（未実装）は無効のまま
-        assertThat(rowOf(realRegistryService, "batC01")).containsEntry("active", false);
+        // まだ使っていない C（未実装）は無効のままで、切り替えもできない
+        assertThat(rowOf(realRegistryService, "batC01"))
+                .containsEntry("active", false)
+                .containsEntry("canToggleActive", false);
     }
 
     @Test

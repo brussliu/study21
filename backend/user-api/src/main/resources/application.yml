@@ -105,6 +105,33 @@ study21:
     storage-root: "${STUDY21_GEOMETRY_AI_STORAGE_ROOT:${user.dir}/data/geometry-ai}"
     # true にすると AI を実際に呼ばず、固定の応答を返すスタブを使う（E2E・検証用）
     stub: "${STUDY21_GEOMETRY_AI_STUB:false}"
+  english-essay:
+    # 英作文AI添削の画像（設問画像・答案画像）の置き場。
+    # DB（ENG_英作文画像情報）には相対パスだけを入れる。実体はファイルなので、
+    # **環境（ホスト）ごとに置く必要がある**（見本データは画像を持たない）。
+    # **根は「english-essay/ の親」**（相対パスは 'english-essay/{accountId}/{yyyyMM}/…'、
+    # 2.0 からの移行分は 'english-essay/legacy/…' で入っている）。
+    storage-root: "${STUDY21_ENGLISH_ESSAY_STORAGE_ROOT:${user.dir}/data}"
+    # 添削の受付の内部入口（admin-api）の置き場。配備では compose のサービス名を使う。
+    # 画面はこの入口を直接叩かない（所有者の確認は user-api の
+    # POST /api/user/english-essays/{essayId}/gradings が行う）
+    admin-api-url: "${STUDY21_ENGLISH_ESSAY_ADMIN_API_URL:http://admin-api:8081}"
+    # 1 回の呼び出しの上限（秒）。**AI の完了は待たない**受付 API なので短くてよい
+    admin-api-timeout-seconds: "${STUDY21_ENGLISH_ESSAY_ADMIN_API_TIMEOUT_SECONDS:15}"
+    # 同期 OCR の上限（秒）。**AI の完了を待つ**入口なので長くする（画像 8 枚で分単位かかる）
+    admin-api-ocr-timeout-seconds: "${STUDY21_ENGLISH_ESSAY_ADMIN_API_OCR_TIMEOUT_SECONDS:180}"
+  speech:
+    # 日本語勉強の学習画面の読み上げ音声のキャッシュ置き場。
+    # 最初の 1 回だけ外部 TTS を呼び、できた音声をここに置いて以後はここから返す
+    # （DB には相対パスだけを入れる＝JPN_音声キャッシュ情報）。
+    storage-root: "${STUDY21_SPEECH_STORAGE_ROOT:${user.dir}/data/speech}"
+    # 外部 TTS を実際に呼ばず、無音を返すスタブ（E2E・検証用）
+    stub: "${STUDY21_SPEECH_STUB:false}"
+    # 声（話者）と速さ。キャッシュの鍵に含めるので、変えると別の音声として作られる
+    voice: "${STUDY21_SPEECH_VOICE:ja-JP-Standard-A}"
+    rate: "${STUDY21_SPEECH_RATE:0.88}"
+    # 失敗した音声を再試行するまでの待ち（分）。この間は外部を呼ばない
+    retry-after-minutes: "${STUDY21_SPEECH_RETRY_AFTER_MINUTES:60}"
   classroom:
     # 授業録音の音声（分塊を追記した 1 本の webm）の置き場。
     # admin-api のバッチ（batR02 の掃除）も同じ場所を読むので、配備では両サービスに

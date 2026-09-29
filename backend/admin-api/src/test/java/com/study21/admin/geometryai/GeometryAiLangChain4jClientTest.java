@@ -2,6 +2,7 @@ package com.study21.admin.geometryai;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.study21.admin.ai.AiErrorMessages;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -129,6 +130,46 @@ class GeometryAiLangChain4jClientTest {
         assertThat(response.errorCode()).isEqualTo("HTTP_4XX");
         assertThat(response.httpStatus()).isEqualTo(401);
         assertThat(response.errorMessage()).contains("HTTP 401").contains("API Key");
+        // **プロバイダーが返した理由**も残す（画面のトースト・実行履歴・AI呼出履歴で読める）
+        assertThat(response.errorMessage()).contains("Invalid API key provided");
+    }
+
+    @Test
+    void keepsTheProvidersReasonOn4xxSoOperatorsCanSeeArrearage() {
+        // 実際に起きた失敗（2026-09-25 の batC41）: DashScope の残高不足。
+        // 「API Key とモデル名を確認してください」だけでは、設定では直らない原因が分からない
+        status = 400;
+        body = "{\"error\":{\"message\":\"Access denied, please make sure your account is in good standing."
+                + " For details, see: https://help.aliyun.com/zh/model-studio/error-code#overdue-payment\","
+                + "\"type\":\"Arrearage\",\"param\":null,\"code\":\"Arrearage\"}}";
+
+        GeometryAiClient.AiResponse response = client.call(textRequest(60));
+
+        assertThat(response.isSuccess()).isFalse();
+        assertThat(response.errorCode()).isEqualTo("HTTP_4XX");
+        assertThat(response.httpStatus()).isEqualTo(400);
+        assertThat(response.errorMessage())
+                .as("残高不足（Arrearage）だと分かること")
+                .contains("HTTP 400")
+                .contains("Arrearage")
+                .contains("overdue-payment");
+    }
+
+    @Test
+    void providerReasonIsKeptInOneLineAndTrimmed() {
+        // 履歴（DB）とトーストが読めるように、改行は空白へつぶし、長すぎるときは切る
+        String longReason = "x".repeat(900);
+
+        String message = AiErrorMessages.clientError(400, "line1\nline2   " + longReason);
+
+        assertThat(message).contains("HTTP 400").contains("line1 line2");
+        assertThat(message).doesNotContain("\n");
+        assertThat(message.length())
+                .isLessThan(AiErrorMessages.PROVIDER_DETAIL_LIMIT + 200);
+        assertThat(message).endsWith("…");
+        // 理由が無いときは今までと同じ文言（余計な「詳細:」を付けない）
+        assertThat(AiErrorMessages.clientError(400, "   "))
+                .isEqualTo("AI がリクエストを受け付けませんでした（HTTP 400）。API Key とモデル名を確認してください。");
     }
 
     @Test

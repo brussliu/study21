@@ -178,8 +178,10 @@ class FigureBatchExecutionPathTest {
                 new FigureTaskConfigPreflight(taskRegistry, processors, requestMapper, taskConfigResolver);
 
         for (FigureMode mode : FigureMode.values()) {
+            // 有効（本物の定義と同じ既定値）。**無効のバッチは呼出を拒否される**ので、
+            // ここで見たい「設定の解決」の経路に進むには有効である必要がある（2026-09-22）
             when(taskRegistry.findByCode(mode.taskCode())).thenReturn(new BatchTaskDefinition(mode.taskCode(),
-                    BatchTaskType.C, "AI生図 " + mode.label(), false, null, null, "GEOMETRY_AI",
+                    BatchTaskType.C, "AI生図 " + mode.label(), true, null, null, "GEOMETRY_AI",
                     FigureProcessorSettings.requiredSettings()));
         }
         when(executionMapper.findRunningByBatchCode(anyString())).thenReturn(null);
@@ -471,8 +473,9 @@ class FigureBatchExecutionPathTest {
     @DisplayName("AI 生図以外のバッチは、今までどおり「いまの設定」を検証する")
     void otherBatchesKeepTheCurrentSettingsCheck() {
         // AI 生図ではないバッチ（授業ノート等）は、いまの設定が欠けていれば実行しない
+        // （有効なバッチで見る。無効なら呼出そのものが拒否されるため）
         when(taskRegistry.findByCode("batC61")).thenReturn(new BatchTaskDefinition("batC61",
-                BatchTaskType.C, "授業ノート", false, null, null, "CLASSROOM_AI",
+                BatchTaskType.C, "授業ノート", true, null, null, "CLASSROOM_AI",
                 List.of(new SettingRequirement("CLASSROOM_AI", "CLASSROOM_AI_NOTE_SYSTEM_PROMPT"))));
         current.put("CLASSROOM_AI_NOTE_SYSTEM_PROMPT", "");
 
